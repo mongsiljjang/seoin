@@ -148,6 +148,8 @@
   .divider{height:1px; background:var(--line); margin:12px 0}
   .hint{font-size:12px; color:var(--sub); background:var(--brand-soft); border-radius:10px; padding:9px 11px; margin-bottom:10px}
 </style>
+<!-- 엑셀(.xlsx) 읽기용 라이브러리(SheetJS). 없으면 CSV만 지원 -->
+<script src="xlsx.mini.min.js" onerror="window.__noXLSX=1"></script>
 </head>
 <body>
 
@@ -195,7 +197,10 @@
   <section class="page" id="page-inv">
     <div class="spread" style="margin:4px 2px 12px">
       <h2 class="sec" style="margin:0">📦 재고 현황</h2>
-      <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
+      <div class="row" style="gap:6px">
+        <button class="btn sm soft" onclick="openImport()">⬆ 엑셀</button>
+        <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
+      </div>
     </div>
     <div class="search"><span class="ic">🔎</span><input id="invSearch" placeholder="품목·분류 검색" oninput="renderInv()"></div>
     <div class="seg" id="invFilter">
@@ -501,6 +506,136 @@ function openItemDetail(id){
       <button class="btn warn grow" onclick="quickAdjust('${it.id}','out')">－ 출고</button>
     </div>
     <h2 class="sec" style="margin-top:4px">입출고 내역</h2>${logHtml}`);
+}
+
+/* ========================================================================
+   재고 엑셀/CSV 불러오기
+   ======================================================================== */
+const COLMAP = {
+  name:['품목명','품명','이름','품목','자재명','재료명','물품명','제품명','name','item'],
+  category:['분류','카테고리','구분','종류','category'],
+  unit:['단위','unit'],
+  qty:['현재수량','수량','재고','재고수량','보유수량','현재고','현재','qty','stock'],
+  minQty:['최소보유량','최소수량','최소','안전재고','적정재고','min','최소재고'],
+  note:['메모','비고','위치','보관위치','거래처','note','memo'],
+};
+function openImport(){
+  const noXlsx = window.__noXLSX || typeof XLSX==='undefined';
+  modal(`
+    <h3>⬆ 재고 엑셀/CSV 불러오기</h3>
+    <div class="hint">엑셀(.xlsx) 또는 CSV 파일을 올리면 품목이 한 번에 등록돼요.
+      같은 품목명이 있으면 <b>수량이 갱신</b>됩니다.</div>
+    <button class="btn soft block" onclick="downloadTemplate()">📄 양식 파일 내려받기 (CSV)</button>
+    <div class="tiny muted" style="margin:8px 2px 14px">양식 열: <b>품목명 · 분류 · 단위 · 현재수량 · 최소보유량 · 메모</b><br>
+      열 제목이 있으면 순서가 달라도 자동 인식해요.</div>
+    <label class="btn block" style="cursor:pointer">📂 파일 선택해서 불러오기
+      <input type="file" id="impFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImport(event)"></label>
+    ${noXlsx?`<div class="tiny" style="color:var(--warn);margin-top:10px">⚠️ 지금은 CSV만 읽을 수 있어요(엑셀 라이브러리 미로딩). .xlsx를 쓰려면 <b>xlsx.mini.min.js</b> 파일이 index.html과 같은 폴더에 있어야 해요.</div>`:''}
+    <div class="divider"></div>
+    <div class="tiny muted">📷 손으로 적은 목록/사진이 있으면, 그 사진을 <b>Claude 대화창에 보내주세요.</b>
+      바로 불러올 수 있는 파일로 만들어 드려요.</div>`);
+}
+function downloadTemplate(){
+  const csv='﻿품목명,분류,단위,현재수량,최소보유량,메모\n주사기 10cc,소모품,개,40,100,\n멸균거즈,소모품,팩,22,20,\n니트릴장갑(L),위생,박스,5,10,창고2\n';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='재고_양식.csv'; a.click(); URL.revokeObjectURL(a.href);
+  toast('양식 파일을 저장했어요');
+}
+function handleImport(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  const isCsv=/\.csv$/i.test(f.name);
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      let rows;
+      if(!isCsv && typeof XLSX!=='undefined'){
+        const wb=XLSX.read(new Uint8Array(r.result),{type:'array'});
+        rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+      }else{
+        rows=parseCSV(typeof r.result==='string'?r.result:new TextDecoder('utf-8').decode(r.result));
+      }
+      const items=rowsToItems(rows);
+      if(!items.length){ toast('읽을 수 있는 품목이 없어요'); return; }
+      previewImport(items);
+    }catch(e){ toast('파일을 읽지 못했어요. 양식을 확인해 주세요'); }
+  };
+  if(!isCsv && typeof XLSX!=='undefined') r.readAsArrayBuffer(f);
+  else r.readAsText(f,'utf-8');
+}
+function parseCSV(text){
+  const out=[]; let row=[], cur='', q=false;
+  text=text.replace(/^﻿/,'');
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+    else { if(c==='"') q=true;
+      else if(c===','){ row.push(cur); cur=''; }
+      else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n')i++; row.push(cur); if(row.some(x=>x!=='')) out.push(row); row=[]; cur=''; }
+      else cur+=c; } }
+  if(cur!==''||row.length){ row.push(cur); if(row.some(x=>x!=='')) out.push(row); }
+  return out;
+}
+function rowsToItems(rows){
+  rows=rows.filter(r=>r&&r.some(c=>String(c).trim()!==''));
+  if(!rows.length) return [];
+  const norm=s=>String(s||'').replace(/\s|\(.*?\)/g,'').toLowerCase();
+  const header=rows[0].map(norm);
+  const idx={};
+  for(const key in COLMAP){ idx[key]=header.findIndex(h=>COLMAP[key].some(k=>norm(k)===h||h.includes(norm(k)))); }
+  let hasHeader = idx.name>=0;
+  // 헤더가 없으면 순서 가정: 품목명,분류,단위,현재수량,최소보유량,메모
+  let dataRows, col;
+  if(hasHeader){ dataRows=rows.slice(1); col=idx; }
+  else { dataRows=rows; col={name:0,category:1,unit:2,qty:3,minQty:4,note:5}; }
+  const num=v=>{ const n=parseInt(String(v).replace(/[^\d-]/g,''),10); return isNaN(n)?null:n; };
+  const items=[];
+  for(const r of dataRows){
+    const name=String(r[col.name]??'').trim(); if(!name) continue;
+    items.push({
+      name,
+      category:String(r[col.category]??'').trim(),
+      unit:String(r[col.unit]??'').trim()||'개',
+      qty:Math.max(0,num(r[col.qty])??0),
+      minQty:Math.max(0,num(r[col.minQty])??10),
+      note:String(r[col.note]??'').trim(),
+    });
+  }
+  return items;
+}
+let _pendingImport=[];
+function previewImport(items){
+  _pendingImport=items;
+  const exist=new Set(DB.inventory.map(i=>i.name.trim()));
+  const isNew=items.filter(i=>!exist.has(i.name.trim())).length;
+  const upd=items.length-isNew;
+  const rowsHtml=items.slice(0,8).map(i=>`
+    <div class="item" style="padding:8px 2px">
+      <div class="grow"><div class="t" style="font-size:14px">${esc(i.name)}
+        ${exist.has(i.name.trim())?'<span class="pill grey">수정</span>':'<span class="pill info">신규</span>'}</div>
+        <div class="d tiny muted">${esc(i.category||'분류없음')} · ${i.qty}${esc(i.unit)} · 최소 ${i.minQty}</div></div></div>`).join('');
+  modal(`
+    <h3>불러오기 미리보기</h3>
+    <div class="row" style="gap:8px;margin-bottom:12px">
+      <div class="stat grow"><div class="n">${items.length}</div><div class="l">전체 품목</div></div>
+      <div class="stat grow"><div class="n" style="color:var(--brand)">${isNew}</div><div class="l">신규</div></div>
+      <div class="stat grow"><div class="n" style="color:var(--warn)">${upd}</div><div class="l">수정</div></div>
+    </div>
+    ${rowsHtml}${items.length>8?`<div class="tiny muted" style="text-align:center;padding:6px">외 ${items.length-8}건</div>`:''}
+    <div class="row" style="margin-top:14px">
+      <button class="btn soft grow" onclick="openImport()">취소</button>
+      <button class="btn grow" onclick="applyImport()">${items.length}건 반영하기</button>
+    </div>`);
+}
+function applyImport(){
+  let added=0, updated=0;
+  for(const it of _pendingImport){
+    const ex=DB.inventory.find(x=>x.name.trim()===it.name.trim());
+    if(ex){ Object.assign(ex,{category:it.category||ex.category, unit:it.unit||ex.unit,
+      qty:it.qty, minQty:it.minQty, note:it.note||ex.note, updatedAt:now()}); updated++; }
+    else { DB.inventory.push({id:uid(), ...it, updatedAt:now()}); added++; }
+  }
+  _pendingImport=[]; saveDB(); closeModal(); renderInv(); renderHome();
+  toast(`반영 완료 · 신규 ${added} · 수정 ${updated}`);
 }
 
 /* ========================================================================
