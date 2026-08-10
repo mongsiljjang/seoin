@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <meta name="theme-color" content="#0e7490" />
 <title>병원 관리 · 재고 / 출퇴근 / 연월차</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<link rel="icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="병원관리" />
 <style>
   :root{
     --bg:#f2f6f8; --card:#ffffff; --ink:#12303a; --sub:#5c7683;
@@ -82,7 +89,7 @@
 
   /* Pills / badges */
   .pill{display:inline-flex; align-items:center; gap:4px; font-size:11.5px; font-weight:800;
-    padding:4px 9px; border-radius:999px}
+    padding:4px 9px; border-radius:999px; white-space:nowrap}
   .pill.ok{background:var(--ok-soft); color:var(--ok)}
   .pill.warn{background:var(--warn-soft); color:var(--warn)}
   .pill.danger{background:var(--danger-soft); color:var(--danger)}
@@ -225,7 +232,10 @@
     </div>
     <div class="hint">이름 옆 <b>출근</b>/<b>퇴근</b> 버튼만 누르면 시간이 자동 기록돼요.</div>
     <div id="attList"></div>
-    <h2 class="sec">이번 달 근무 시간</h2>
+    <div class="spread" style="margin:18px 2px 8px">
+      <h2 class="sec" style="margin:0">이번 달 근무 시간</h2>
+      <button class="btn xs soft" onclick="exportAttendance()">⬇ 내보내기</button>
+    </div>
     <div class="card" id="attMonthly"></div>
   </section>
 
@@ -881,11 +891,16 @@ function openMenu(){
     <label class="field"><span>병원(앱) 이름</span><input id="setName" value="${esc(DB.hospName||'')}"></label>
     <button class="btn block" onclick="saveHospName()">이름 저장</button>
     <div class="divider"></div>
-    <div class="hint">데이터는 이 기기의 브라우저에 저장돼요. 기기를 바꾸거나 백업하려면 아래 <b>내보내기</b>를 이용하세요.</div>
-    <div class="row">
-      <button class="btn soft grow" onclick="exportData()">📤 백업 내보내기</button>
-      <button class="btn soft grow" onclick="importData()">📥 불러오기</button>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
+    <div class="two" style="gap:8px">
+      <button class="btn soft" onclick="exportInventory()">📦 재고 현황</button>
+      <button class="btn soft" onclick="exportAttendance()">🕒 이번 달 근무</button>
+      <button class="btn soft" onclick="exportLeaves()">🌴 연월차 내역</button>
+      <button class="btn soft" onclick="exportData()">💾 전체 백업(JSON)</button>
     </div>
+    <div class="divider"></div>
+    <div class="hint">기기를 바꾸거나 옮길 땐 <b>전체 백업(JSON)</b>으로 내보낸 뒤 아래에서 불러오세요.</div>
+    <button class="btn soft block" onclick="importData()">📥 백업 파일 불러오기</button>
     <input type="file" id="importFile" accept="application/json" style="display:none" onchange="doImport(event)">
     <div class="divider"></div>
     <button class="btn danger block" onclick="wipeData()">전체 데이터 초기화</button>
@@ -898,6 +913,39 @@ function exportData(){
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`병원관리_백업_${todayKey()}.json`; a.click(); URL.revokeObjectURL(a.href);
   toast('백업 파일을 저장했어요');
+}
+
+/* ---------- 리포트 내보내기 (엑셀에서 열리는 CSV) ---------- */
+function csvBlob(rows){
+  const q=v=>{ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  return new Blob(['﻿'+rows.map(r=>r.map(q).join(',')).join('\n')],{type:'text/csv;charset=utf-8'});
+}
+function download(blob,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
+function exportInventory(){
+  const rows=[['품목명','분류','단위','현재수량','최소보유량','상태','메모']];
+  DB.inventory.forEach(i=>rows.push([i.name,i.category,i.unit,i.qty,i.minQty,
+    i.qty===0?'품절':(i.qty<=i.minQty?'부족':'충분'), i.note]));
+  download(csvBlob(rows), `재고현황_${todayKey()}.csv`); toast('재고 현황을 내보냈어요');
+}
+function exportAttendance(mk){
+  mk = mk || (($('#attDate') && $('#attDate').value) || todayKey()).slice(0,7);
+  const rows=[['날짜','직원','부서','출근','퇴근','근무시간']];
+  DB.attendance.filter(a=>a.date.startsWith(mk))
+    .sort((a,b)=>a.date.localeCompare(b.date))
+    .forEach(a=>{ const s=staffById(a.staffId);
+      rows.push([a.date, s?s.name:'', s?s.dept:'', a.inAt?fmtTime(a.inAt):'', a.outAt?fmtTime(a.outAt):'',
+        (hoursBetween(a.inAt,a.outAt)||0).toFixed(1)]); });
+  download(csvBlob(rows), `근무기록_${mk}.csv`); toast(`${mk} 근무기록을 내보냈어요`);
+}
+function exportLeaves(){
+  const tl={annual:'연차',monthly:'월차',half:'반차',sick:'병가',etc:'기타'};
+  const st={pending:'대기',approved:'승인',rejected:'반려'};
+  const rows=[['직원','종류','시작일','종료일','일수','상태','사유','신청일']];
+  DB.leaves.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''))
+    .forEach(l=>{ const s=staffById(l.staffId);
+      rows.push([s?s.name:'', tl[l.type]||l.type, l.startDate, l.endDate, l.days,
+        st[l.status]||l.status, l.reason, l.createdAt?new Date(l.createdAt).toLocaleDateString('ko-KR'):'']); });
+  download(csvBlob(rows), `연월차내역_${todayKey()}.csv`); toast('연월차 내역을 내보냈어요');
 }
 function importData(){ $('#importFile').click(); }
 function doImport(ev){
@@ -995,6 +1043,10 @@ function boot(){
   $('#attDate').value = todayKey();
   renderHome();
   cloudInit();
+  // PWA: 오프라인/홈화면 설치 지원 (http/https로 열었을 때만)
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
 }
 boot();
 </script>

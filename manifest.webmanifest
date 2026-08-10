@@ -1,0 +1,17 @@
+{
+  "name": "병원 관리 · 재고 / 출퇴근 / 연월차",
+  "short_name": "병원관리",
+  "description": "병원 재고 현황, 직원 출퇴근, 연월차를 관리하는 앱",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2f6f8",
+  "theme_color": "#0e7490",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
