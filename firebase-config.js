@@ -9,12 +9,12 @@
       실제 보안은 Firebase 보안규칙 + 링크 비공개로 관리합니다. (가이드 참고)
    ============================================================================= */
 window.FIREBASE_CONFIG = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyASPTmQMiKpUTD4qTATW6UjLf163cq7m7A",
+  authDomain: "hospital-d0819.firebaseapp.com",
+  projectId: "hospital-d0819",
+  storageBucket: "hospital-d0819.firebasestorage.app",
+  messagingSenderId: "615146272725",
+  appId: "1:615146272725:web:911b238de5cc1bd2a22f5c"
 };
 
 // 공유 방(작업공간) 이름 — 병원이 하나면 그대로 두세요.
