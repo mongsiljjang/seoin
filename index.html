@@ -150,6 +150,11 @@
 </style>
 <!-- 엑셀(.xlsx) 읽기용 라이브러리(SheetJS). 없으면 CSV만 지원 -->
 <script src="xlsx.mini.min.js" onerror="window.__noXLSX=1"></script>
+<!-- 공유 버전(실시간 동기화)용 Firebase. 인터넷/설정 없으면 자동으로 '이 기기 저장' 모드 -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" onerror="window.__noFB=1"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" onerror="window.__noFB=1"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" onerror="window.__noFB=1"></script>
+<script src="firebase-config.js" onerror="window.__noCfg=1"></script>
 </head>
 <body>
 
@@ -160,7 +165,8 @@
       <h1 id="hospName">우리병원 관리</h1>
       <div class="sub" id="todayStr">오늘</div>
     </div>
-    <button class="hbtn" onclick="openMenu()">⚙️ 설정</button>
+    <span id="syncBadge" class="pill grey" style="margin-left:auto; background:rgba(255,255,255,.2); color:#fff" onclick="openMenu()">이 기기</span>
+    <button class="hbtn" style="margin-left:8px" onclick="openMenu()">⚙️ 설정</button>
   </div>
 </header>
 
@@ -281,7 +287,7 @@ function loadDB(){
     saveDB();
   }
 }
-function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
+function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPush(); }
 
 function seedDemo(){
   const s1=uid(), s2=uid(), s3=uid();
@@ -336,13 +342,16 @@ function annualRemain(st){
    네비게이션
    ======================================================================== */
 const RENDER = { home:renderHome, inv:renderInv, att:renderAtt, leave:renderLeave, staff:renderStaff };
+let currentTab='home';
 function go(tab){
+  currentTab=tab;
   $$('.page').forEach(p=>p.classList.remove('active'));
   $('#page-'+tab).classList.add('active');
   $$('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===tab));
   (RENDER[tab]||(()=>{}))();
   window.scrollTo(0,0);
 }
+function rerenderCurrent(){ (RENDER[currentTab]||renderHome)(); }
 
 /* ========================================================================
    홈
@@ -857,8 +866,18 @@ function delStaff(id){
    설정 / 백업
    ======================================================================== */
 function openMenu(){
+  const on = cloudReady;
+  const cfg = !!(window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey);
+  const syncCard = on
+    ? `<div class="card" style="box-shadow:none;background:var(--ok-soft);border:0;padding:12px 14px">
+         <div class="row" style="gap:8px"><span class="pill ok">☁︎ 공유중</span>
+         <span class="tiny">전 직원이 같은 데이터를 실시간으로 봅니다.</span></div></div>`
+    : `<div class="card" style="box-shadow:none;background:#eef2f4;border:0;padding:12px 14px">
+         <div class="row" style="gap:8px"><span class="pill grey">이 기기</span>
+         <span class="tiny">${cfg?'공유 서버에 연결 중이거나 오프라인이에요.':'지금은 이 기기에만 저장돼요. 공유하려면 <b>SETUP-공유버전.md</b> 참고.'}</span></div></div>`;
   modal(`
     <h3>⚙️ 설정 · 데이터 관리</h3>
+    ${syncCard}
     <label class="field"><span>병원(앱) 이름</span><input id="setName" value="${esc(DB.hospName||'')}"></label>
     <button class="btn block" onclick="saveHospName()">이름 저장</button>
     <div class="divider"></div>
@@ -907,6 +926,67 @@ function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('sh
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 
+/* ========================================================================
+   공유 동기화 (Firebase Firestore) — 설정 없으면 자동으로 '이 기기' 모드
+   ======================================================================== */
+let cloudDoc=null, cloudReady=false, applyingRemote=false, pushTimer=null;
+function cloudConfigured(){
+  const c=window.FIREBASE_CONFIG;
+  return !!(c && c.apiKey && c.projectId && !window.__noFB && typeof firebase!=='undefined');
+}
+function updateSyncBadge(state){
+  const b=$('#syncBadge'); if(!b) return;
+  const map={
+    local:['이 기기','rgba(255,255,255,.2)','#fff'],
+    connecting:['연결 중…','rgba(255,255,255,.2)','#fff'],
+    online:['☁︎ 공유중','#e3f6ee','#0f9d6b'],
+    offline:['⚠ 오프라인','#fdeede','#7a2e0c'],
+  };
+  const [t,bg,fg]=map[state]||map.local; b.textContent=t; b.style.background=bg; b.style.color=fg;
+  b.dataset.state=state;
+}
+function cloudInit(){
+  if(!cloudConfigured()){ updateSyncBadge('local'); return; }
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
+    const fdb=firebase.firestore();
+    cloudDoc=fdb.collection('hospapp').doc(window.WORKSPACE_ID||'clinic');
+    updateSyncBadge('connecting');
+    firebase.auth().signInAnonymously().catch(()=>{});
+    firebase.auth().onAuthStateChanged(u=>{ if(u) cloudSubscribe(); });
+  }catch(e){ updateSyncBadge('offline'); }
+}
+function cloudSubscribe(){
+  if(!cloudDoc) return;
+  cloudDoc.onSnapshot(snap=>{
+    cloudReady=true; updateSyncBadge('online');
+    const data=snap.data();
+    if(data && data.db){
+      let remote; try{ remote=JSON.parse(data.db); }catch(e){ return; }
+      if(!remote || !remote.version) return;
+      applyingRemote=true;
+      DB=remote;
+      localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+      applyingRemote=false;
+      $('#hospName').textContent = DB.hospName || '우리병원 관리';
+      if(!$('#modalBg').classList.contains('open')) rerenderCurrent();
+    }else{
+      cloudPush(true);  // 원격이 비어있으면 이 기기 데이터로 시작
+    }
+  }, err=>{ updateSyncBadge('offline'); });
+}
+function cloudPush(force){
+  if(applyingRemote || !cloudDoc) return;
+  if(!cloudReady && !force) return;
+  clearTimeout(pushTimer);
+  pushTimer=setTimeout(()=>{
+    try{
+      if(DB.invLogs.length>800) DB.invLogs=DB.invLogs.slice(0,800);
+      cloudDoc.set({ db: JSON.stringify(DB), updatedAt: Date.now() });
+    }catch(e){ updateSyncBadge('offline'); }
+  }, 450);
+}
+
 /* ---------- 시작 ---------- */
 function boot(){
   loadDB();
@@ -914,6 +994,7 @@ function boot(){
   $('#todayStr').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
   $('#attDate').value = todayKey();
   renderHome();
+  cloudInit();
 }
 boot();
 </script>
