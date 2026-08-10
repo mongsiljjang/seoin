@@ -154,6 +154,23 @@
 
   .divider{height:1px; background:var(--line); margin:12px 0}
   .hint{font-size:12px; color:var(--sub); background:var(--brand-soft); border-radius:10px; padding:9px 11px; margin-bottom:10px}
+
+  /* 역할(권한) — 직원 모드에서는 관리자 전용 요소 숨김 */
+  body[data-role="staff"] .admin-only{ display:none !important; }
+  .roletag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.22);color:#fff}
+  /* 잠금 화면(참여/승인대기/거절) */
+  #gate{position:fixed; inset:0; z-index:70; background:var(--bg); overflow:auto; display:none}
+  #gate.show{display:block}
+  .gatewrap{max-width:460px; margin:0 auto; min-height:100dvh; display:flex; flex-direction:column;
+    justify-content:center; padding:32px 22px; text-align:center}
+  .gate-ic{font-size:52px; margin-bottom:14px}
+  .gate-h{font-size:21px; font-weight:900; margin-bottom:8px; color:var(--ink)}
+  .gate-p{font-size:14px; color:var(--sub); margin-bottom:22px; line-height:1.6}
+  .gate-card{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:var(--shadow); text-align:left}
+  .pinbox{letter-spacing:8px; text-align:center; font-size:24px; font-weight:800}
+  #adminBanner{background:var(--warn-soft); color:var(--warn); font-size:12.5px; font-weight:700;
+    padding:9px 14px; text-align:center; cursor:pointer; display:none}
+  #adminBanner.show{display:block}
 </style>
 <!-- 엑셀(.xlsx) 읽기용 라이브러리(SheetJS). 없으면 CSV만 지원 -->
 <script src="xlsx.mini.min.js" onerror="window.__noXLSX=1"></script>
@@ -172,10 +189,12 @@
       <h1 id="hospName">우리병원 관리</h1>
       <div class="sub" id="todayStr">오늘</div>
     </div>
-    <span id="syncBadge" class="pill grey" style="margin-left:auto; background:rgba(255,255,255,.2); color:#fff" onclick="openMenu()">이 기기</span>
-    <button class="hbtn" style="margin-left:8px" onclick="openMenu()">⚙️ 설정</button>
+    <span id="roleTag" class="roletag" style="margin-left:auto" onclick="openMenu()">👤 직원</span>
+    <span id="syncBadge" class="pill grey" style="margin-left:8px; background:rgba(255,255,255,.2); color:#fff" onclick="openMenu()">이 기기</span>
+    <button class="hbtn" style="margin-left:8px" onclick="openMenu()">⚙️</button>
   </div>
 </header>
+<div id="adminBanner" onclick="openSetPin()">🔑 관리자 PIN을 설정하세요 — 눌러서 설정</div>
 
 <main class="wrap">
 
@@ -185,8 +204,8 @@
     <div class="stats">
       <div class="stat tap" onclick="go('att')"><div class="n" id="hStatIn">0</div><div class="l">현재 근무중</div></div>
       <div class="stat tap" onclick="go('inv')"><div class="n" id="hStatLow" style="color:var(--warn)">0</div><div class="l">재고 부족 품목</div></div>
-      <div class="stat tap" onclick="go('leave')"><div class="n" id="hStatPend" style="color:var(--pend)">0</div><div class="l">연월차 승인대기</div></div>
-      <div class="stat tap" onclick="go('staff')"><div class="n" id="hStatStaff">0</div><div class="l">전체 직원</div></div>
+      <div class="stat tap admin-only" onclick="go('leave')"><div class="n" id="hStatPend" style="color:var(--pend)">0</div><div class="l">연월차 승인대기</div></div>
+      <div class="stat tap admin-only" onclick="go('staff')"><div class="n" id="hStatStaff">0</div><div class="l">전체 직원</div></div>
     </div>
 
     <h2 class="sec">빠른 입력</h2>
@@ -195,7 +214,7 @@
         <button class="btn ghost" onclick="go('att')">🕒 출퇴근 체크</button>
         <button class="btn ghost" onclick="quickInvDialog()">📦 재고 입출고</button>
         <button class="btn ghost" onclick="go('leave'); leaveTab('new')">🌴 연월차 신청</button>
-        <button class="btn ghost" onclick="openStaffForm()">👤 직원 추가</button>
+        <button class="btn ghost admin-only" onclick="openStaffForm()">👤 직원 추가</button>
       </div>
     </div>
 
@@ -242,8 +261,8 @@
   <!-- ============ 연월차 ============ -->
   <section class="page" id="page-leave">
     <div class="seg">
-      <button class="on" id="lt-status" onclick="leaveTab('status')">잔여 현황</button>
-      <button id="lt-list" onclick="leaveTab('list')">신청 내역</button>
+      <button class="on admin-only" id="lt-status" onclick="leaveTab('status')">잔여 현황</button>
+      <button class="admin-only" id="lt-list" onclick="leaveTab('list')">신청 내역</button>
       <button id="lt-new" onclick="leaveTab('new')">＋ 신청</button>
     </div>
     <div id="leaveStatus"></div>
@@ -253,7 +272,8 @@
 
   <!-- ============ 직원 ============ -->
   <section class="page" id="page-staff">
-    <div class="spread" style="margin:4px 2px 12px">
+    <div id="memberApproval"></div>
+    <div class="spread" style="margin:16px 2px 12px">
       <h2 class="sec" style="margin:0">👥 직원 명단</h2>
       <button class="btn sm" onclick="openStaffForm()">＋ 직원</button>
     </div>
@@ -267,8 +287,10 @@
   <button data-t="inv" onclick="go('inv')"><span class="i">📦</span><span class="x">재고</span></button>
   <button data-t="att" onclick="go('att')"><span class="i">🕒</span><span class="x">출퇴근</span></button>
   <button data-t="leave" onclick="go('leave')"><span class="i">🌴</span><span class="x">연월차</span></button>
-  <button data-t="staff" onclick="go('staff')"><span class="i">👥</span><span class="x">직원</span></button>
+  <button class="admin-only" data-t="staff" onclick="go('staff')"><span class="i">👥</span><span class="x">직원</span></button>
 </nav>
+
+<div id="gate"><div class="gatewrap" id="gateBody"></div></div>
 
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modal"><div class="grabber"></div><div id="modalBody"></div></div>
@@ -296,7 +318,9 @@ function loadDB(){
     seedDemo();
     saveDB();
   }
+  ensureSchema();
 }
+function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.members=[]; if(typeof DB.adminPin!=='string') DB.adminPin=''; }
 function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPush(); }
 
 function seedDemo(){
@@ -354,6 +378,7 @@ function annualRemain(st){
 const RENDER = { home:renderHome, inv:renderInv, att:renderAtt, leave:renderLeave, staff:renderStaff };
 let currentTab='home';
 function go(tab){
+  if(tab==='staff' && !isAdmin()) tab='home';   // 직원은 직원탭 접근 불가
   currentTab=tab;
   $$('.page').forEach(p=>p.classList.remove('active'));
   $('#page-'+tab).classList.add('active');
@@ -727,6 +752,7 @@ function stampFor(date){
    ======================================================================== */
 let leaveCur='status';
 function leaveTab(t){          // 하위 탭 전환 (연월차 페이지 내부)
+  if(!isAdmin()) t='new';     // 직원은 '신청'만
   leaveCur=t;
   ['status','list','new'].forEach(x=>{
     $('#leave'+cap(x)).style.display = x===t?'block':'none';
@@ -800,7 +826,7 @@ function renderLeaveNew(){
     <label class="field"><span>사유 (선택)</span><input id="lvReason" placeholder="예: 개인 사정"></label>
     <button class="btn block" onclick="submitLeave()">신청하기</button>
   </div>
-  <div class="hint" style="margin-top:12px">💡 신청 후 <b>신청 내역</b> 탭에서 승인/반려할 수 있어요. 승인된 연차만 잔여일수에서 차감됩니다.</div>`;
+  <div class="hint" style="margin-top:12px">💡 신청하면 <b>관리자</b>가 승인/반려해요. 승인된 연차만 잔여일수에서 차감됩니다.</div>`;
 }
 function lvTypeChange(){ const t=$('#lvType').value; if(t==='half'){ $('#lvEnd').value=$('#lvStart').value; $('#lvDays').value=0.5; } else lvCalc(); }
 function lvCalc(){
@@ -824,6 +850,7 @@ function submitLeave(){
    직원
    ======================================================================== */
 function renderStaff(){
+  const ap=$('#memberApproval'); if(ap) ap.innerHTML = memberApprovalHtml();
   const box=$('#staffList');
   if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👥','＋직원 버튼으로 직원을 추가하세요')}</div>`; return; }
   box.innerHTML = DB.staff.map(s=>{
@@ -875,7 +902,18 @@ function delStaff(id){
 /* ========================================================================
    설정 / 백업
    ======================================================================== */
+function openStaffMenu(){
+  const m=myMember();
+  modal(`<h3>⚙️ 설정</h3>
+    <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:12px 14px">
+      <div class="row" style="gap:8px"><span class="pill info">👤 직원 모드</span>
+      <span class="tiny">${m?esc(m.name)+' 님':'직원'} · 재고·출퇴근·연월차 신청 사용</span></div></div>
+    <button class="btn block" onclick="adminLogin()">👑 관리자 로그인</button>
+    <div class="tiny muted" style="margin:10px 2px 0">연월차 관리·설정·직원 관리는 관리자만 볼 수 있어요.</div>
+    <div class="tiny muted" style="text-align:center;margin-top:16px">병원 관리 앱 · v1</div>`);
+}
 function openMenu(){
+  if(!isAdmin()) return openStaffMenu();
   const on = cloudReady;
   const cfg = !!(window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey);
   const syncCard = on
@@ -890,6 +928,14 @@ function openMenu(){
     ${syncCard}
     <label class="field"><span>병원(앱) 이름</span><input id="setName" value="${esc(DB.hospName||'')}"></label>
     <button class="btn block" onclick="saveHospName()">이름 저장</button>
+    <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👑 관리자 · 직원 권한</div>
+    <div class="two" style="gap:8px">
+      <button class="btn soft" onclick="openSetPin()">🔑 관리자 PIN ${DB.adminPin?'변경':'설정'}</button>
+      <button class="btn soft" onclick="go('staff'); closeModal()">🙋 직원 사용 승인</button>
+    </div>
+    ${DB.adminPin?'':'<div class="tiny" style="color:var(--warn);margin:8px 2px 0">⚠️ 아직 PIN이 없어요. 설정해야 직원과 관리자가 구분돼요.</div>'}
+    <button class="btn soft block" style="margin-top:8px" onclick="adminLogout()">이 기기 관리자 모드 해제</button>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
     <div class="two" style="gap:8px">
@@ -1013,10 +1059,11 @@ function cloudSubscribe(){
       let remote; try{ remote=JSON.parse(data.db); }catch(e){ return; }
       if(!remote || !remote.version) return;
       applyingRemote=true;
-      DB=remote;
+      DB=remote; ensureSchema();
       localStorage.setItem(STORE_KEY, JSON.stringify(DB));
       applyingRemote=false;
       $('#hospName').textContent = DB.hospName || '우리병원 관리';
+      applyRole();
       if(!$('#modalBg').classList.contains('open')) rerenderCurrent();
     }else{
       cloudPush(true);  // 원격이 비어있으면 이 기기 데이터로 시작
@@ -1035,6 +1082,124 @@ function cloudPush(force){
   }, 450);
 }
 
+/* ========================================================================
+   권한(역할) / 직원 승인
+   - 관리자: 전부. 직원(담당자): 재고·출퇴근·연월차 신청까지만.
+   - 관리자 PIN으로 전환. 직원은 최초 '사용 요청' → 관리자 승인 후 사용.
+   - (참고) 화면 단에서 숨기는 방식 — 신뢰하는 병원 직원 사이용.
+   ======================================================================== */
+function myDeviceId(){ let id=localStorage.getItem('hosp_device'); if(!id){ id='d'+uid(); localStorage.setItem('hosp_device',id); } return id; }
+function isAdminLocal(){ return localStorage.getItem('hosp_admin')==='1'; }
+function setAdminLocal(v){ v? localStorage.setItem('hosp_admin','1') : localStorage.removeItem('hosp_admin'); }
+function myMember(){ ensureSchema(); return DB.members.find(m=>m.id===myDeviceId()); }
+function isAdmin(){
+  if(isAdminLocal()) return true;
+  if(!DB || !DB.adminPin) return true;   // 최초: PIN 설정 전엔 이 기기가 관리자(설정하러)
+  return false;
+}
+let gateState=null;
+function applyRole(){
+  ensureSchema();
+  const admin = isAdmin();
+  document.body.setAttribute('data-role', admin?'admin':'staff');
+  const rt=$('#roleTag'); if(rt) rt.textContent = admin?'👑 관리자':'👤 직원';
+  $('#adminBanner').classList.toggle('show', admin && !DB.adminPin);
+  if(admin){ setGate(null); return; }
+  const m=myMember();
+  if(!m) setGate('join');
+  else if(m.status==='pending') setGate('wait');
+  else if(m.status==='rejected') setGate('reject');
+  else setGate(null);   // approved
+  if(currentTab==='staff') go('home');
+  if(currentTab==='leave') leaveTab('new');
+}
+function setGate(state){
+  if(state===gateState) return;
+  gateState=state;
+  const g=$('#gate'), b=$('#gateBody');
+  if(!state){ g.classList.remove('show'); document.body.style.overflow=''; return; }
+  b.innerHTML = state==='join'? gateJoinHtml() : state==='wait'? gateWaitHtml() : gateRejectHtml();
+  g.classList.add('show'); document.body.style.overflow='hidden';
+}
+const adminLink = `<a onclick="adminLogin()" style="color:var(--brand);font-weight:800;cursor:pointer">관리자 로그인</a>`;
+function gateJoinHtml(){
+  return `<div class="gate-ic">🏥</div>
+    <div class="gate-h">${esc(DB.hospName||'병원 관리')}</div>
+    <div class="gate-p">앱을 사용하려면 이름을 남기고<br>관리자 승인을 받아주세요.</div>
+    <div class="gate-card">
+      <label class="field"><span>이름 *</span><input id="joinName" placeholder="홍길동"></label>
+      <label class="field" style="margin-bottom:6px"><span>부서 (선택)</span><input id="joinDept" placeholder="간호부"></label>
+      <button class="btn block" onclick="submitJoin()">사용 요청 보내기</button>
+    </div>
+    <div class="tiny muted" style="margin-top:18px">관리자세요? ${adminLink}</div>`;
+}
+function gateWaitHtml(){ const m=myMember();
+  return `<div class="gate-ic">⏳</div><div class="gate-h">승인 대기중</div>
+    <div class="gate-p"><b>${esc(m?m.name:'')}</b> 님, 관리자 승인을 기다리고 있어요.<br>승인되면 자동으로 열립니다.</div>
+    <div class="tiny muted">관리자세요? ${adminLink}</div>`;
+}
+function gateRejectHtml(){
+  return `<div class="gate-ic">🚫</div><div class="gate-h">사용이 거절되었어요</div>
+    <div class="gate-p">관리자에게 문의해 주세요.</div><div class="tiny muted">${adminLink}</div>`;
+}
+function submitJoin(){
+  const name=($('#joinName').value||'').trim(); if(!name){ toast('이름을 입력하세요'); return; }
+  DB.members.push({ id:myDeviceId(), name, dept:($('#joinDept').value||'').trim(), role:'staff', status:'pending', createdAt:now() });
+  saveDB(); toast('사용 요청을 보냈어요'); gateState=null; applyRole();
+}
+function adminLogin(){
+  modal(`<h3>👑 관리자 로그인</h3>
+    <div class="tiny muted" style="margin-bottom:12px">관리자 PIN을 입력하세요.</div>
+    <label class="field"><input id="pinIn" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    <button class="btn block" onclick="doAdminLogin()">로그인</button>`);
+  setTimeout(()=>{ const el=$('#pinIn'); if(el) el.focus(); },150);
+}
+function doAdminLogin(){
+  const p=($('#pinIn').value||'').trim();
+  if(!DB.adminPin){ toast('아직 관리자 PIN이 없어요'); return; }
+  if(p!==DB.adminPin){ toast('PIN이 올바르지 않아요'); return; }
+  setAdminLocal(true); closeModal(); gateState=null; applyRole(); go('home'); toast('관리자로 로그인했어요');
+}
+function openSetPin(){
+  modal(`<h3>🔑 관리자 PIN ${DB.adminPin?'변경':'설정'}</h3>
+    <div class="tiny muted" style="margin-bottom:12px">${DB.adminPin?'PIN을 새로 정합니다.':'관리자만 아는 숫자 4자리 이상을 정하세요. 직원은 이 PIN이 없으면 관리자 화면을 못 봐요.'}</div>
+    <label class="field"><span>새 PIN (숫자 4자리 이상)</span><input id="pin1" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    <label class="field"><span>한 번 더</span><input id="pin2" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    <button class="btn block" onclick="saveAdminPin()">저장</button>`);
+}
+function saveAdminPin(){
+  const a=($('#pin1').value||'').trim(), b=($('#pin2').value||'').trim();
+  if(!/^\d{4,8}$/.test(a)){ toast('숫자 4~8자리로 정해주세요'); return; }
+  if(a!==b){ toast('두 번 입력이 달라요'); return; }
+  DB.adminPin=a; setAdminLocal(true); saveDB(); closeModal(); applyRole(); toast('관리자 PIN을 설정했어요');
+}
+function adminLogout(){
+  if(!confirm('관리자 모드를 해제할까요? 이 기기는 직원 모드가 됩니다.')) return;
+  setAdminLocal(false); closeModal(); gateState=null; applyRole(); go('home'); toast('관리자 모드를 해제했어요');
+}
+/* 직원 사용 승인 (관리자 화면) */
+function setMember(id,status){ const m=DB.members.find(x=>x.id===id); if(!m) return; m.status=status; saveDB(); renderStaff(); renderHome();
+  toast(status==='approved'?'승인했어요':status==='rejected'?'거절했어요':'변경'); }
+function delMember(id){ if(!confirm('이 참여자를 목록에서 지울까요?')) return; DB.members=DB.members.filter(m=>m.id!==id); saveDB(); renderStaff(); toast('삭제했어요'); }
+function memberApprovalHtml(){
+  const pend=DB.members.filter(m=>m.status==='pending');
+  const others=DB.members.filter(m=>m.status!=='pending');
+  let h=`<div class="spread" style="margin:4px 2px 8px"><h2 class="sec" style="margin:0">🙋 직원 사용 승인 ${pend.length?`<span class="pill pend">${pend.length}</span>`:''}</h2></div>`;
+  if(!DB.members.length){ return h+`<div class="card">${emptyBox('🔗','아직 참여 요청이 없어요.<br>직원에게 링크를 보내면 요청이 여기 떠요.')}</div>`; }
+  const row=(m)=>`<div class="item">
+     <div class="avatar">${esc(initials(m.name))}</div>
+     <div class="grow"><div class="t" style="font-size:14.5px">${esc(m.name)} ${m.status==='approved'?'<span class="pill ok">승인됨</span>':m.status==='rejected'?'<span class="pill danger">거절</span>':'<span class="pill pend">대기</span>'}</div>
+       <div class="d tiny muted">${esc(m.dept||'부서 미지정')}</div></div>
+     <div class="row" style="gap:5px">
+       ${m.status!=='approved'?`<button class="btn ok xs" onclick="setMember('${m.id}','approved')">승인</button>`:''}
+       ${m.status!=='rejected'?`<button class="btn danger xs" onclick="setMember('${m.id}','rejected')">거절</button>`:''}
+       <button class="btn soft xs" onclick="delMember('${m.id}')">✕</button>
+     </div></div>`;
+  if(pend.length) h+=`<div class="card" style="padding:6px 12px">${pend.map(row).join('')}</div>`;
+  if(others.length) h+=`<div class="tiny muted" style="margin:12px 2px 6px">전체 참여자</div><div class="card" style="padding:6px 12px">${others.map(row).join('')}</div>`;
+  return h;
+}
+
 /* ---------- 시작 ---------- */
 function boot(){
   loadDB();
@@ -1042,6 +1207,7 @@ function boot(){
   $('#todayStr').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
   $('#attDate').value = todayKey();
   renderHome();
+  applyRole();
   cloudInit();
   // PWA: 오프라인/홈화면 설치 지원 (http/https로 열었을 때만)
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
