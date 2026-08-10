@@ -274,8 +274,7 @@
 
   <!-- ============ 직원 ============ -->
   <section class="page" id="page-staff">
-    <div id="memberApproval"></div>
-    <div class="spread" style="margin:16px 2px 12px">
+    <div class="spread" style="margin:4px 2px 12px">
       <h2 class="sec" style="margin:0">👥 직원 명단</h2>
       <button class="btn sm" onclick="openStaffForm()">＋ 직원</button>
     </div>
@@ -852,7 +851,6 @@ function submitLeave(){
    직원
    ======================================================================== */
 function renderStaff(){
-  const ap=$('#memberApproval'); if(ap) ap.innerHTML = memberApprovalHtml();
   const box=$('#staffList');
   if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👥','＋직원 버튼으로 직원을 추가하세요')}</div>`; return; }
   box.innerHTML = DB.staff.map(s=>{
@@ -932,12 +930,10 @@ function openMenu(){
     <button class="btn block" onclick="saveHospName()">이름 저장</button>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👑 관리자 · 직원 권한</div>
-    <div class="two" style="gap:8px">
-      <button class="btn soft" onclick="openSetPin()">🔑 관리자 PIN ${DB.adminPin?'변경':'설정'}</button>
-      <button class="btn soft" onclick="go('staff'); closeModal()">🙋 직원 사용 승인</button>
-    </div>
+    <button class="btn soft block" onclick="openSetPin()">🔑 관리자 PIN ${DB.adminPin?'변경':'설정'}</button>
     ${DB.adminPin?'':'<div class="tiny" style="color:var(--warn);margin:8px 2px 0">⚠️ 아직 PIN이 없어요. 설정해야 직원과 관리자가 구분돼요.</div>'}
-    <button class="btn soft block" style="margin-top:8px" onclick="adminLogout()">이 기기 관리자 모드 해제</button>
+    <div class="tiny muted" style="margin:8px 2px 0">직원은 링크를 열면 바로 <b>재고·출퇴근·연월차 신청</b>만 쓸 수 있어요. 직원 명단은 <b>직원 탭</b>에서 관리자가 추가하세요.</div>
+    <button class="btn soft block" style="margin-top:10px" onclick="adminLogout()">이 기기 관리자 모드 해제</button>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
     <div class="two" style="gap:8px">
@@ -1106,14 +1102,11 @@ function applyRole(){
   document.body.setAttribute('data-role', admin?'admin':'staff');
   const rt=$('#roleTag'); if(rt) rt.textContent = admin?'👑 관리자':'👤 직원';
   $('#adminBanner').classList.toggle('show', admin && !DB.adminPin);
-  if(admin){ setGate(null); return; }
-  const m=myMember();
-  if(!m) setGate('join');
-  else if(m.status==='pending') setGate('wait');
-  else if(m.status==='rejected') setGate('reject');
-  else setGate(null);   // approved
-  if(currentTab==='staff') go('home');
-  if(currentTab==='leave') leaveTab('new');
+  setGate(null);   // 요청/승인 절차 없음 — 직원은 바로 사용
+  if(!admin){       // 직원이 관리자 전용 화면에 있으면 이동
+    if(currentTab==='staff') go('home');
+    if(currentTab==='leave') leaveTab('new');
+  }
 }
 function setGate(state){
   if(state===gateState) return;
