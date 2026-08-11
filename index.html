@@ -176,6 +176,28 @@
   #adminBanner{background:var(--warn-soft); color:var(--warn); font-size:12.5px; font-weight:700;
     padding:9px 14px; text-align:center; cursor:pointer; display:none}
   #adminBanner.show{display:block}
+
+  /* 임플란트 모듈 */
+  .summary3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px}
+  .summary3 .stat{padding:11px 12px}
+  .chips{display:flex; gap:7px; overflow-x:auto; margin-bottom:12px; padding-bottom:2px}
+  .chip{white-space:nowrap; border:1.5px solid var(--line); background:#fff; color:var(--sub);
+    font-weight:800; font-size:13px; padding:8px 13px; border-radius:11px; cursor:pointer; flex:none}
+  .chip.on{background:var(--brand); color:#fff; border-color:var(--brand)}
+  table.mtx{border-collapse:separate; border-spacing:5px; width:100%}
+  table.mtx th{font-size:11px; color:var(--sub); font-weight:800; padding:1px}
+  table.mtx td.rowh{font-size:12px; font-weight:900; text-align:right; padding-right:2px; white-space:nowrap}
+  .mtx .cell{border-radius:10px; text-align:center; padding:8px 2px; font-weight:900; font-size:15px;
+    border:1.5px solid transparent; cursor:pointer; min-width:40px}
+  .mtx .cell .u{display:block; font-size:9px; font-weight:700; opacity:.7}
+  .mtx .cell.ok{background:var(--ok-soft); color:#0f7a4f; border-color:#cfeadd}
+  .mtx .cell.low{background:var(--warn-soft); color:#9a6410; border-color:#f0d9a8}
+  .mtx .cell.zero{background:var(--danger-soft); color:#a23a2a; border-color:#f0c9c0}
+  .mtx .cell.empty{background:#f6f8fb; color:#aab3bf; font-weight:700}
+  .legend2{display:flex; gap:14px; font-size:11.5px; color:var(--sub); font-weight:700; margin-top:8px}
+  .legend2 i{width:11px; height:11px; border-radius:4px; display:inline-block; margin-right:4px; vertical-align:-1px}
+  .legend2 i.ok{background:#cfeadd}.legend2 i.low{background:#f0d9a8}.legend2 i.zero{background:#f0c9c0}
+  .btnrow{display:flex; gap:8px}
 </style>
 <!-- 엑셀(.xlsx) 읽기용 라이브러리(SheetJS). 없으면 CSV만 지원 -->
 <script src="xlsx.mini.min.js" onerror="window.__noXLSX=1"></script>
@@ -233,20 +255,27 @@
 
   <!-- ============ 재고 ============ -->
   <section class="page" id="page-inv">
-    <div class="spread" style="margin:4px 2px 12px">
-      <h2 class="sec" style="margin:0">📦 재고 현황</h2>
-      <div class="row" style="gap:6px">
-        <button class="btn sm soft" onclick="openImport()">⬆ 엑셀</button>
-        <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
+    <div class="seg" id="invMode">
+      <button class="on" data-m="general" onclick="setInvMode('general')">📦 일반 재고</button>
+      <button data-m="implant" onclick="setInvMode('implant')">🦷 임플란트</button>
+    </div>
+    <div id="invGeneral">
+      <div class="spread" style="margin:4px 2px 12px">
+        <h2 class="sec" style="margin:0">📦 재고 현황</h2>
+        <div class="row" style="gap:6px">
+          <button class="btn sm soft" onclick="openImport()">⬆ 엑셀</button>
+          <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
+        </div>
       </div>
+      <div class="search"><span class="ic">🔎</span><input id="invSearch" placeholder="품목·분류 검색" oninput="renderInv()"></div>
+      <div class="seg" id="invFilter">
+        <button class="on" data-f="all" onclick="setInvFilter('all')">전체</button>
+        <button data-f="low" onclick="setInvFilter('low')">부족</button>
+        <button data-f="ok" onclick="setInvFilter('ok')">충분</button>
+      </div>
+      <div id="invList"></div>
     </div>
-    <div class="search"><span class="ic">🔎</span><input id="invSearch" placeholder="품목·분류 검색" oninput="renderInv()"></div>
-    <div class="seg" id="invFilter">
-      <button class="on" data-f="all" onclick="setInvFilter('all')">전체</button>
-      <button data-f="low" onclick="setInvFilter('low')">부족</button>
-      <button data-f="ok" onclick="setInvFilter('ok')">충분</button>
-    </div>
-    <div id="invList"></div>
+    <div id="invImplant" style="display:none"></div>
   </section>
 
   <!-- ============ 출퇴근 ============ -->
@@ -325,7 +354,7 @@ function loadDB(){
   }
   ensureSchema();
 }
-function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.members=[]; if(typeof DB.adminPin!=='string') DB.adminPin=''; }
+function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.members=[]; if(typeof DB.adminPin!=='string') DB.adminPin=''; if(!Array.isArray(DB.implants)) DB.implants=[]; }
 function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPush(); }
 
 function seedDemo(){
@@ -341,6 +370,17 @@ function seedDemo(){
     {id:uid(), name:'알콜솜', category:'소모품', unit:'통', qty:8, minQty:15, note:'', updatedAt:now()},
     {id:uid(), name:'라텍스 장갑(M)', category:'위생', unit:'박스', qty:12, minQty:10, note:'', updatedAt:now()},
     {id:uid(), name:'수액세트', category:'의약외품', unit:'개', qty:60, minQty:50, note:'', updatedAt:now()},
+  ];
+  DB.implants = [
+    { id:uid(), brand:'오스템', line:'TS III', part:'픽스처', vendor:'A덴탈', price:180000, note:'',
+      variants:[
+        {id:uid(),label:'3.5×8.5',qty:8,minQty:3,lot:''},{id:uid(),label:'3.5×10',qty:2,minQty:3,lot:''},
+        {id:uid(),label:'4.0×8.5',qty:12,minQty:3,lot:''},{id:uid(),label:'4.0×10',qty:3,minQty:3,lot:''},
+        {id:uid(),label:'4.0×11.5',qty:7,minQty:3,lot:''},{id:uid(),label:'4.5×10',qty:0,minQty:3,lot:''},
+        {id:uid(),label:'5.0×10',qty:5,minQty:3,lot:''},
+      ]},
+    { id:uid(), brand:'오스템', line:'힐링 어버트먼트', part:'힐링캡', vendor:'A덴탈', price:9000, note:'',
+      variants:[ {id:uid(),label:'Ø4.5 GH3',qty:10,minQty:5,lot:''},{id:uid(),label:'Ø4.5 GH5',qty:4,minQty:5,lot:''},{id:uid(),label:'Ø5.5 GH3',qty:6,minQty:5,lot:''} ]},
   ];
 }
 
@@ -380,7 +420,15 @@ function annualRemain(st){
 /* ========================================================================
    네비게이션
    ======================================================================== */
-const RENDER = { home:renderHome, inv:renderInv, att:renderAtt, leave:renderLeave, staff:renderStaff };
+const RENDER = { home:renderHome, inv:renderInvPage, att:renderAtt, leave:renderLeave, staff:renderStaff };
+let invMode='general';
+function setInvMode(m){ invMode=m;
+  $$('#invMode button').forEach(b=>b.classList.toggle('on', b.dataset.m===m));
+  $('#invGeneral').style.display = m==='general'?'':'none';
+  $('#invImplant').style.display = m==='implant'?'':'none';
+  renderInvPage();
+}
+function renderInvPage(){ if(invMode==='implant') renderImplant(); else renderInv(); }
 let currentTab='home';
 function go(tab){
   if(tab==='staff' && !isAdmin()) tab='home';   // 직원은 직원탭 접근 불가
@@ -449,6 +497,10 @@ function computeAlerts(){
       else if(dd<=30) a.push({level:'warn',icon:'📅',title:`${i.name} 유통기한 임박`,sub:`D-${dd} · ${i.expiry}`,tab:'inv'});
     }
   });
+  (DB.implants||[]).forEach(p=>p.variants.forEach(v=>{
+    if(v.qty===0) a.push({level:'danger',icon:'🦷',title:`${p.brand} ${v.label} 품절`,sub:`${p.part||''} · ${p.line||''}`,tab:'inv',mode:'implant'});
+    else if(v.qty<=(+v.minQty||0)) a.push({level:'warn',icon:'🦷',title:`${p.brand} ${v.label} 부족`,sub:`${v.qty}개 · 최소 ${v.minQty}`,tab:'inv',mode:'implant'});
+  }));
   if(isAdmin()){
     DB.leaves.filter(l=>l.status==='pending').forEach(l=>{ const s=staffById(l.staffId);
       a.push({level:'info',icon:'🌴',title:`연월차 승인 대기 · ${s?s.name:'(직원)'}`,sub:`${fmtDate(l.startDate)}${l.startDate!==l.endDate?'~'+fmtDate(l.endDate):''} · ${l.days}일`,tab:'leave'}); });
@@ -462,7 +514,7 @@ function refreshBell(){ const el=$('#alertBadge'); if(!el) return; const n=compu
 function openAlerts(){
   const a=computeAlerts();
   const body = a.length ? a.map(x=>`
-    <div class="item" style="cursor:pointer" onclick="closeModal(); go('${x.tab}')">
+    <div class="item" style="cursor:pointer" onclick="closeModal(); go('${x.tab}');${x.mode?` setInvMode('${x.mode}');`:''}">
       <div class="avatar" style="background:${x.level==='danger'?'var(--danger-soft)':x.level==='warn'?'var(--warn-soft)':'var(--brand-soft)'};color:${x.level==='danger'?'var(--danger)':x.level==='warn'?'var(--warn)':'var(--brand)'}">${x.icon}</div>
       <div class="grow"><div class="t" style="font-size:14.5px">${esc(x.title)}</div><div class="d tiny muted">${esc(x.sub)}</div></div>
       <span class="tiny muted">›</span>
@@ -744,6 +796,172 @@ function applyImport(){
   }
   _pendingImport=[]; saveDB(); closeModal(); renderInv(); renderHome();
   toast(`반영 완료 · 신규 ${added} · 수정 ${updated}`);
+}
+
+/* ========================================================================
+   임플란트 모듈 (브랜드·부품종류·규격 매트릭스)
+   ======================================================================== */
+let currentImplantId=null;
+const implantById=id=>DB.implants.find(p=>p.id===id);
+function parseDL(label){ const m=String(label||'').match(/^\s*(?:Ø|ø|D)?\s*(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)\s*$/); return m?{d:parseFloat(m[1]),l:parseFloat(m[2])}:null; }
+function vState(v){ return v.qty===0?'zero':(v.qty<=(+v.minQty||0)?'low':'ok'); }
+
+function renderImplant(){
+  const box=$('#invImplant'); const list=DB.implants||[];
+  let total=0, low=0, zero=0;
+  list.forEach(p=>p.variants.forEach(v=>{ total+=(+v.qty||0); if(v.qty===0)zero++; else if(v.qty<=(+v.minQty||0))low++; }));
+  const head=`<div class="spread" style="margin:2px 2px 10px"><h2 class="sec" style="margin:0">🦷 임플란트</h2>
+    <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div>`;
+  if(!list.length){ box.innerHTML = head+`<div class="card">${emptyBox('🦷','등록된 임플란트가 없어요.<br>＋제품으로 브랜드·부품·규격을 직접 추가하세요.')}</div>`; refreshBell(); return; }
+  if(!currentImplantId || !implantById(currentImplantId)) currentImplantId=list[0].id;
+  const summary=`<div class="summary3">
+    <div class="stat"><div class="n">${total}</div><div class="l">전체 수량</div></div>
+    <div class="stat"><div class="n" style="color:var(--warn)">${low}</div><div class="l">부족 규격</div></div>
+    <div class="stat"><div class="n" style="color:var(--danger)">${zero}</div><div class="l">품절 규격</div></div></div>`;
+  const chips=`<div class="chips">${list.map(p=>`<button class="chip ${p.id===currentImplantId?'on':''}" onclick="selectImplant('${p.id}')">${esc(p.brand)} ${esc(p.line||'')}</button>`).join('')}
+    <button class="chip" onclick="openImplantForm()">＋ 제품</button></div>`;
+  box.innerHTML = head+summary+chips+implantCard(implantById(currentImplantId));
+  refreshBell();
+}
+function selectImplant(id){ currentImplantId=id; renderImplant(); }
+function implantCard(p){
+  const meta=[p.part||'', p.vendor?esc(p.vendor):'', p.price?won(p.price):''].filter(Boolean).join(' · ');
+  const head=`<div class="spread"><div><div class="t" style="font-weight:900;font-size:16px">${esc(p.brand)} ${esc(p.line||'')}</div>
+    <div class="d tiny muted">${meta}</div></div>
+    <button class="btn soft xs" onclick="openImplantForm('${p.id}')">✏️ 제품</button></div>`;
+  const parsed=p.variants.map(v=>({v,dl:parseDL(v.label)}));
+  const useMatrix=(p.part==='픽스처') && parsed.some(x=>x.dl);
+  const body = p.variants.length ? (useMatrix?matrixHtml(p,parsed):variantRows(p,p.variants)) : emptyBox('📐','규격을 추가하세요');
+  const bulk = p.part==='픽스처' ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
+  return `<div class="card">${head}<div class="divider"></div>${body}
+    <div class="btnrow" style="margin-top:12px"><button class="btn sm grow" onclick="openVariantForm('${p.id}')">＋ 규격 추가</button>${bulk}</div></div>`;
+}
+function matrixHtml(p,parsed){
+  const fx=parsed.filter(x=>x.dl), others=parsed.filter(x=>!x.dl);
+  const dias=[...new Set(fx.map(x=>x.dl.d))].sort((a,b)=>a-b);
+  const lens=[...new Set(fx.map(x=>x.dl.l))].sort((a,b)=>a-b);
+  const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
+  let t=`<div class="tiny muted" style="margin-bottom:6px">가로 = 길이 · 세로 = 지름 · 셀을 누르면 입/출고·LOT</div>`;
+  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th>${l}</th>`).join('')}</tr>`;
+  dias.forEach(d=>{ t+=`<tr><td class="rowh">Ø${d}</td>`+lens.map(l=>{ const c=at(d,l);
+    if(!c) return `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
+    return `<td><div class="cell ${vState(c.v)}" onclick="openVariant('${p.id}','${c.v.id}')">${c.v.qty}<span class="u">개</span></div></td>`;
+  }).join('')+`</tr>`; });
+  t+=`</table></div><div class="legend2"><span><i class="ok"></i>충분</span><span><i class="low"></i>부족</span><span><i class="zero"></i>품절</span></div>`;
+  if(others.length) t+=`<div class="tiny muted" style="margin:12px 2px 4px">기타 규격</div>`+variantRows(p,others.map(x=>x.v));
+  return t;
+}
+function variantRows(p,vars){
+  return vars.map(v=>{ const st=vState(v);
+    const pill=st==='zero'?'<span class="pill danger">품절</span>':st==='low'?'<span class="pill warn">부족</span>':'';
+    return `<div class="item">
+      <div class="grow"><div class="t" style="font-size:14.5px">${esc(v.label)} ${pill}</div>
+        <div class="d tiny muted">${v.qty}개 · 최소 ${v.minQty||0}${v.lot?' · LOT '+esc(v.lot):''}</div></div>
+      <div class="row" style="gap:5px">
+        <button class="btn ok xs" onclick="adjustVariant('${p.id}','${v.id}','in')">＋</button>
+        <button class="btn warn xs" onclick="adjustVariant('${p.id}','${v.id}','out')">－</button>
+        <button class="btn soft xs" onclick="openVariant('${p.id}','${v.id}')">⋯</button>
+      </div></div>`;
+  }).join('');
+}
+const PARTS=['픽스처','어버트먼트','힐링캡','커버스크류','기타'];
+function openImplantForm(edit){
+  const p=edit?implantById(edit):null;
+  modal(`<h3>${p?'임플란트 제품 수정':'임플란트 제품 추가'}</h3>
+    <div class="two">
+      <label class="field"><span>브랜드 *</span><input id="ipBrand" value="${p?esc(p.brand):''}" placeholder="예: 오스템"></label>
+      <label class="field"><span>제품라인</span><input id="ipLine" value="${p?esc(p.line||''):''}" placeholder="예: TS III"></label>
+    </div>
+    <label class="field"><span>부품 종류 *</span>
+      <input id="ipPart" list="partList" value="${p?esc(p.part||'픽스처'):'픽스처'}" placeholder="픽스처">
+      <datalist id="partList">${PARTS.map(x=>`<option value="${x}">`).join('')}</datalist></label>
+    <div class="tiny muted" style="margin:-4px 2px 10px">픽스처는 규격이 "지름×길이"면 자동 매트릭스로 보여요.</div>
+    <div class="two">
+      <label class="field"><span>거래처 (선택)</span><input id="ipVendor" value="${p?esc(p.vendor||''):''}" placeholder="A덴탈"></label>
+      <label class="field"><span>단가 (원, 선택)</span><input id="ipPrice" type="number" inputmode="numeric" value="${p&&p.price?p.price:''}" placeholder="0"></label>
+    </div>
+    <div class="row"><button class="btn block" onclick="saveImplant('${p?p.id:''}')">${p?'저장':'추가'}</button>
+      ${p?`<button class="btn danger" onclick="delImplant('${p.id}')">삭제</button>`:''}</div>`);
+}
+function saveImplant(id){
+  const brand=$('#ipBrand').value.trim(); if(!brand){ toast('브랜드를 입력하세요'); return; }
+  const data={ brand, line:$('#ipLine').value.trim(), part:$('#ipPart').value.trim()||'픽스처',
+    vendor:$('#ipVendor').value.trim(), price:Math.max(0,parseInt($('#ipPrice').value,10)||0) };
+  if(id){ Object.assign(implantById(id), data); }
+  else { const np={id:uid(), ...data, note:'', variants:[]}; DB.implants.push(np); currentImplantId=np.id; }
+  saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
+  if(!id) setTimeout(()=>openVariantForm(currentImplantId),150);
+}
+function delImplant(id){
+  if(!confirm('이 임플란트 제품과 모든 규격을 삭제할까요?')) return;
+  DB.implants=DB.implants.filter(p=>p.id!==id); currentImplantId=null;
+  saveDB(); closeModal(); renderImplant(); toast('삭제되었습니다');
+}
+function openVariantForm(pid, editVid, preset){
+  const p=implantById(pid); const v=editVid?p.variants.find(x=>x.id===editVid):null;
+  modal(`<h3>${v?'규격 수정':'규격 추가'} · ${esc(p.brand)} ${esc(p.line||'')}</h3>
+    <label class="field"><span>규격 *</span><input id="vLabel" value="${v?esc(v.label):(preset||'')}" placeholder="${p.part==='픽스처'?'예: 4.0×10':'예: Ø4.5 GH3'}"></label>
+    <div class="two">
+      <label class="field"><span>현재 수량</span><input id="vQty" type="number" inputmode="numeric" value="${v?v.qty:0}"></label>
+      <label class="field"><span>최소 수량</span><input id="vMin" type="number" inputmode="numeric" value="${v?(v.minQty||0):2}"></label>
+    </div>
+    <label class="field"><span>LOT / 제조번호 (선택)</span><input id="vLot" value="${v?esc(v.lot||''):''}"></label>
+    <div class="row"><button class="btn block" onclick="saveVariant('${pid}','${v?v.id:''}')">${v?'저장':'추가'}</button>
+      ${v?`<button class="btn danger" onclick="delVariant('${pid}','${v.id}')">삭제</button>`:''}</div>`);
+}
+function saveVariant(pid,vid){
+  const p=implantById(pid); const label=$('#vLabel').value.trim(); if(!label){ toast('규격을 입력하세요'); return; }
+  const data={ label, qty:Math.max(0,parseInt($('#vQty').value,10)||0), minQty:Math.max(0,parseInt($('#vMin').value,10)||0), lot:$('#vLot').value.trim() };
+  if(vid){ Object.assign(p.variants.find(x=>x.id===vid), data); }
+  else { if(p.variants.find(x=>x.label===label)){ toast('이미 있는 규격이에요'); return; } p.variants.push({id:uid(), ...data}); }
+  saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
+}
+function delVariant(pid,vid){ const p=implantById(pid); p.variants=p.variants.filter(x=>x.id!==vid); saveDB(); closeModal(); renderImplant(); toast('삭제되었습니다'); }
+function openVariant(pid,vid){
+  const p=implantById(pid); const v=p.variants.find(x=>x.id===vid); if(!v) return;
+  modal(`<h3>${esc(p.brand)} ${esc(v.label)}</h3>
+    <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:12px 14px">
+      <div class="big" style="color:var(--brand)">${v.qty}개</div>
+      <div class="tiny muted">${esc(p.part||'')} · 최소 ${v.minQty||0}${v.lot?' · LOT '+esc(v.lot):''}</div></div>
+    <div class="row" style="margin:6px 0 12px"><button class="btn ok grow" onclick="adjustVariant('${pid}','${vid}','in')">＋ 입고</button>
+      <button class="btn warn grow" onclick="adjustVariant('${pid}','${vid}','out')">－ 사용</button></div>
+    <button class="btn soft block" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>`);
+}
+function adjustVariant(pid,vid,type){
+  const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
+  modal(`<h3>${type==='in'?'📥 입고':'📤 사용'} · ${esc(p.brand)} ${esc(v.label)}</h3>
+    <div class="tiny muted" style="margin-bottom:12px">현재 <b>${v.qty}개</b></div>
+    <label class="field"><span>수량</span><input id="ivAmt" type="number" inputmode="numeric" value="1" style="font-size:22px;text-align:center;font-weight:800"></label>
+    <div class="row wrap" style="margin-bottom:12px">${[1,2,5,10].map(n=>`<button class="btn xs soft" onclick="ivAmt.value=${n}">${n}</button>`).join('')}</div>
+    <label class="field"><span>LOT / 제조번호 (선택)</span><input id="ivLot" value="${esc(v.lot||'')}"></label>
+    <button class="btn ${type==='in'?'ok':'warn'} block" onclick="doVariantAdjust('${pid}','${vid}','${type}')">${type==='in'?'입고 처리':'사용 처리'}</button>`);
+}
+function doVariantAdjust(pid,vid,type){
+  const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
+  const amt=Math.abs(parseInt($('#ivAmt').value,10)||0); if(!amt){ toast('수량을 입력하세요'); return; }
+  v.qty = type==='in'? v.qty+amt : Math.max(0, v.qty-amt);
+  const lot=($('#ivLot').value||'').trim(); if(lot) v.lot=lot;
+  saveDB(); closeModal(); renderImplant();
+  toast(`${p.brand} ${v.label} ${type==='in'?'입고':'사용'} ${amt}개`);
+  if(v.qty<=(+v.minQty||0)) setTimeout(()=>toast(`⚠️ ${v.label} ${v.qty===0?'품절':'재고 부족'} (${v.qty}개)`),1300);
+}
+function openBulkVariants(pid){
+  modal(`<h3>규격 일괄 추가</h3>
+    <div class="tiny muted" style="margin-bottom:12px">지름과 길이를 쉼표로 나눠 입력하면 조합이 한 번에 만들어져요. (이미 있는 규격은 건너뜀)</div>
+    <label class="field"><span>지름(mm)</span><input id="blD" placeholder="3.5, 4.0, 4.5, 5.0"></label>
+    <label class="field"><span>길이(mm)</span><input id="blL" placeholder="7, 8.5, 10, 11.5, 13"></label>
+    <label class="field"><span>규격별 최소수량</span><input id="blMin" type="number" inputmode="numeric" value="2"></label>
+    <button class="btn block" onclick="doBulkVariants('${pid}')">추가</button>`);
+}
+function doBulkVariants(pid){
+  const p=implantById(pid);
+  const ds=($('#blD').value||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
+  const ls=($('#blL').value||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
+  const min=Math.max(0,parseInt($('#blMin').value,10)||0);
+  if(!ds.length||!ls.length){ toast('지름과 길이를 입력하세요'); return; }
+  let added=0;
+  ds.forEach(d=>ls.forEach(l=>{ const label=`${d}×${l}`; if(!p.variants.find(v=>v.label===label)){ p.variants.push({id:uid(),label,qty:0,minQty:min,lot:''}); added++; } }));
+  saveDB(); closeModal(); renderImplant(); toast(`${added}개 규격을 추가했어요`);
 }
 
 /* ========================================================================
