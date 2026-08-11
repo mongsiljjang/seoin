@@ -19,8 +19,8 @@
     --ok:#138a5b; --ok-soft:#e5f5ee; --warn:#c77800; --warn-soft:#fdf1db;
     --danger:#c03434; --danger-soft:#fbe9e9; --pend:#6b46c1; --pend-soft:#efeafc;
     --hdr1:#10213b; --hdr2:#1d4f99;
-    --shadow:0 6px 20px rgba(16,60,74,.08);
-    --radius:16px;
+    --shadow:0 8px 30px rgba(20,31,45,.07);
+    --radius:20px;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0}
@@ -55,7 +55,7 @@
   h2.sec{font-size:14px; color:var(--sub); font-weight:800; margin:18px 2px 8px;
     letter-spacing:.2px; text-transform:none}
   .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
-    box-shadow:var(--shadow); padding:14px; margin-bottom:12px}
+    box-shadow:var(--shadow); padding:16px; margin-bottom:13px}
 
   /* Buttons */
   .btn{display:inline-flex; align-items:center; justify-content:center; gap:6px;
@@ -112,7 +112,7 @@
 
   /* stat grid */
   .stats{display:grid; grid-template-columns:1fr 1fr; gap:10px}
-  .stat{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:13px 14px; box-shadow:var(--shadow)}
+  .stat{background:var(--card); border:1px solid var(--line); border-radius:18px; padding:14px 15px; box-shadow:var(--shadow)}
   .stat .n{font-size:24px; font-weight:900; letter-spacing:-1px}
   .stat .l{font-size:12px; color:var(--sub); font-weight:700; margin-top:2px}
   .stat.tap{cursor:pointer}
@@ -182,14 +182,15 @@
   .summary3 .stat{padding:11px 12px}
   .chips{display:flex; gap:7px; overflow-x:auto; margin-bottom:12px; padding-bottom:2px}
   .chip{white-space:nowrap; border:1.5px solid var(--line); background:#fff; color:var(--sub);
-    font-weight:800; font-size:13px; padding:8px 13px; border-radius:11px; cursor:pointer; flex:none}
+    font-weight:800; font-size:13px; padding:8px 15px; border-radius:999px; cursor:pointer; flex:none}
   .chip.on{background:var(--brand); color:#fff; border-color:var(--brand)}
-  table.mtx{border-collapse:separate; border-spacing:5px; width:100%}
-  table.mtx th{font-size:11px; color:var(--sub); font-weight:800; padding:1px}
-  table.mtx td.rowh{font-size:12px; font-weight:900; text-align:right; padding-right:2px; white-space:nowrap}
-  .mtx .cell{border-radius:10px; text-align:center; padding:8px 2px; font-weight:900; font-size:15px;
-    border:1.5px solid transparent; cursor:pointer; min-width:40px}
-  .mtx .cell .u{display:block; font-size:9px; font-weight:700; opacity:.7}
+  table.mtx{border-collapse:separate; border-spacing:7px; width:100%}
+  table.mtx th{font-size:11.5px; color:var(--sub); font-weight:800; padding:2px}
+  table.mtx td.rowh{font-size:12.5px; font-weight:900; text-align:right; padding-right:4px; white-space:nowrap; color:var(--ink)}
+  .mtx .cell{border-radius:13px; text-align:center; padding:12px 4px; font-weight:900; font-size:17px;
+    border:1.5px solid transparent; cursor:pointer; min-width:48px; transition:transform .05s}
+  .mtx .cell:active{transform:scale(.95)}
+  .mtx .cell .u{display:block; font-size:9.5px; font-weight:700; opacity:.65; margin-top:1px}
   .mtx .cell.ok{background:var(--ok-soft); color:#0f7a4f; border-color:#cfeadd}
   .mtx .cell.low{background:var(--warn-soft); color:#9a6410; border-color:#f0d9a8}
   .mtx .cell.zero{background:var(--danger-soft); color:#a23a2a; border-color:#f0c9c0}
@@ -266,6 +267,11 @@
           <button class="btn sm soft" onclick="openImport()">⬆ 엑셀</button>
           <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
         </div>
+      </div>
+      <div class="summary3">
+        <div class="stat"><div class="n" id="invStatAll">0</div><div class="l">전체 품목</div></div>
+        <div class="stat"><div class="n" id="invStatLow" style="color:var(--warn)">0</div><div class="l">부족·품절</div></div>
+        <div class="stat"><div class="n" id="invStatExp" style="color:var(--danger)">0</div><div class="l">유통기한 임박</div></div>
       </div>
       <div class="search"><span class="ic">🔎</span><input id="invSearch" placeholder="품목·분류 검색" oninput="renderInv()"></div>
       <div class="seg" id="invFilter">
@@ -536,7 +542,13 @@ function renderInv(){
   if(invFilter==='low') list=list.filter(i=>i.qty<=i.minQty);
   if(invFilter==='ok') list=list.filter(i=>i.qty>i.minQty);
   const box = $('#invList');
-  if(!list.length){ box.innerHTML = `<div class="card">${emptyBox('📦', DB.inventory.length?'조건에 맞는 품목이 없어요':'＋품목 버튼으로 재고를 추가하세요')}</div>`; return; }
+  if($('#invStatAll')){
+    const all=DB.inventory;
+    $('#invStatAll').textContent=all.length;
+    $('#invStatLow').textContent=all.filter(i=>i.qty<=i.minQty).length;
+    $('#invStatExp').textContent=all.filter(i=>{const d=dDays(i.expiry);return d!==null&&d<=30;}).length;
+  }
+  if(!list.length){ box.innerHTML = `<div class="card">${emptyBox('📦', DB.inventory.length?'조건에 맞는 품목이 없어요':'＋품목 버튼으로 재고를 추가하세요')}</div>`; refreshBell(); return; }
   box.innerHTML = list.map(i=>{
     const lowFlag = i.qty<=i.minQty;
     const pill = i.qty===0?`<span class="pill danger">품절</span>`
@@ -841,7 +853,7 @@ function matrixHtml(p,parsed){
   const dias=[...new Set(fx.map(x=>x.dl.d))].sort((a,b)=>a-b);
   const lens=[...new Set(fx.map(x=>x.dl.l))].sort((a,b)=>a-b);
   const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
-  let t=`<div class="tiny muted" style="margin-bottom:6px">가로 = 길이 · 세로 = 지름 · 셀을 누르면 입/출고·LOT</div>`;
+  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>칸을 누르면</b> 그 규격의 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용(차감)</b> · LOT을 기록해요. <span class="muted">(가로 = 길이 mm, 세로 = 지름 Ø)</span></div>`;
   t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th>${l}</th>`).join('')}</tr>`;
   dias.forEach(d=>{ t+=`<tr><td class="rowh">Ø${d}</td>`+lens.map(l=>{ const c=at(d,l);
     if(!c) return `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
