@@ -1181,7 +1181,7 @@ function openStaffForm(edit){
 }
 function saveStaff(id){
   const name=$('#sName').value.trim(); if(!name){ toast('이름을 입력하세요'); return; }
-  const phone=normPhone($('#sPhone').value); if(!phone){ toast('전화번호를 입력하세요'); return; }
+  const phone=normPhone($('#sPhone').value); if(!phone){ toast('전화번호(로그인 ID)를 입력해야 저장돼요'); return; }
   if(DB.staff.some(x=>x.id!==id && normPhone(x.phone)===phone)){ toast('이미 등록된 전화번호예요'); return; }
   const role=$('#sRole').value==='관리자'?'관리자':'직원';
   const pinIn=($('#sPin').value||'').trim();
@@ -1243,6 +1243,8 @@ function openMenu(){
          <span class="tiny">${cfg?'공유 서버에 연결 중이거나 오프라인이에요.':'지금은 이 기기에만 저장돼요. 공유하려면 <b>SETUP-공유버전.md</b> 참고.'}</span></div></div>`;
   modal(`
     <h3>⚙️ 설정 · 데이터 관리</h3>
+    <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:10px 12px;margin-bottom:10px">
+      <span class="tiny"><b>👑 관리자</b>로 로그인 · ${esc(currentUser()?currentUser().name:'')} 님</span></div>
     ${syncCard}
     <label class="field"><span>병원(앱) 이름</span><input id="setName" value="${esc(DB.hospName||'')}"></label>
     <button class="btn block" onclick="saveHospName()">이름 저장</button>
@@ -1419,7 +1421,8 @@ function applyRole(){
   if(!u){ document.body.setAttribute('data-role','staff'); setGate(hasAdmin()?'login':'setup'); return; }
   const admin = u.role==='관리자';
   document.body.setAttribute('data-role', admin?'admin':'staff');
-  const rt=$('#roleTag'); if(rt) rt.textContent = (admin?'👑 ':'👤 ')+esc(u.name);
+  const rt=$('#roleTag'); if(rt){ rt.textContent = admin?'👑 관리자':'👤 직원';
+    rt.style.background = admin?'rgba(245,197,66,.32)':'rgba(255,255,255,.20)'; rt.title = u.name; }
   $('#adminBanner').classList.remove('show');
   setGate(null);
   if(!admin){ if(currentTab==='staff') go('home'); if(currentTab==='leave') leaveTab('new'); }
