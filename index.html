@@ -222,7 +222,7 @@
     <button class="hbtn" style="margin-left:6px" onclick="openMenu()">⚙️</button>
   </div>
 </header>
-<div id="adminBanner" onclick="openSetPin()">🔑 관리자 PIN을 설정하세요 — 눌러서 설정</div>
+<div id="adminBanner" onclick="openMenu()"></div>
 
 <main class="wrap">
 
@@ -360,9 +360,9 @@ function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPus
 function seedDemo(){
   const s1=uid(), s2=uid(), s3=uid();
   DB.staff = [
-    {id:s1, name:'김간호', dept:'간호부', position:'수간호사', joinDate:'2021-03-02', annualTotal:16, phone:''},
-    {id:s2, name:'이원무', dept:'원무과', position:'주임', joinDate:'2022-07-11', annualTotal:15, phone:''},
-    {id:s3, name:'박물리', dept:'물리치료실', position:'치료사', joinDate:'2023-01-04', annualTotal:15, phone:''},
+    {id:s1, name:'김간호', dept:'간호부', position:'수간호사', joinDate:'2021-03-02', annualTotal:16, phone:'01011112222', pin:'1234', role:'관리자', active:true},
+    {id:s2, name:'이원무', dept:'원무과', position:'주임', joinDate:'2022-07-11', annualTotal:15, phone:'01033334444', pin:'1234', role:'직원', active:true},
+    {id:s3, name:'박물리', dept:'물리치료실', position:'치료사', joinDate:'2023-01-04', annualTotal:15, phone:'01055556666', pin:'1234', role:'직원', active:true},
   ];
   DB.inventory = [
     {id:uid(), name:'주사기 10cc', category:'소모품', unit:'개', qty:40, minQty:100, note:'', updatedAt:now()},
@@ -972,7 +972,8 @@ function renderAtt(){
   const dk = $('#attDate').value;
   const box=$('#attList');
   if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👤','직원 탭에서 직원을 먼저 등록하세요')}</div>`; $('#attMonthly').innerHTML=''; return; }
-  box.innerHTML = DB.staff.map(s=>{
+  const roster = isAdmin()? DB.staff.filter(s=>s.active!==false) : DB.staff.filter(s=>currentUser()&&s.id===currentUser().id);
+  box.innerHTML = roster.map(s=>{
     const a = DB.attendance.find(x=>x.staffId===s.id && x.date===dk);
     const inT=a&&a.inAt?fmtTime(a.inAt):null, outT=a&&a.outAt?fmtTime(a.outAt):null;
     let statusLine = '미출근';
@@ -991,7 +992,7 @@ function renderAtt(){
 
   // 이번 달 근무시간 (선택 날짜 기준 월)
   const mk = dk.slice(0,7);
-  const rows = DB.staff.map(s=>{
+  const rows = roster.map(s=>{
     const recs = DB.attendance.filter(a=>a.staffId===s.id && a.date.startsWith(mk));
     const days = recs.filter(a=>a.inAt).length;
     const hrs = recs.reduce((t,a)=>t+hoursBetween(a.inAt,a.outAt),0);
@@ -1091,11 +1092,13 @@ function setLeave(id,status){ const l=DB.leaves.find(x=>x.id===id); if(!l)return
 function delLeave(id){ if(!confirm('이 신청을 삭제할까요?'))return; DB.leaves=DB.leaves.filter(x=>x.id!==id); saveDB(); renderLeaveList(); renderHome(); toast('삭제되었습니다'); }
 
 function renderLeaveNew(){
-  const box=$('#leaveNew');
+  const box=$('#leaveNew'); const u=currentUser();
   if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👤','직원을 먼저 등록하세요')}</div>`; return; }
+  const staffField = isAdmin()
+    ? `<label class="field"><span>직원 *</span><select id="lvStaff">${DB.staff.filter(s=>s.active!==false).map(s=>`<option value="${s.id}" ${u&&s.id===u.id?'selected':''}>${esc(s.name)} (${esc(s.dept||'')})</option>`).join('')}</select></label>`
+    : `<div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:10px 12px;margin-bottom:12px"><span class="tiny">신청자 · <b>${esc(u?u.name:'')}</b></span></div>`;
   box.innerHTML = `<div class="card">
-    <label class="field"><span>직원 *</span><select id="lvStaff">
-      ${DB.staff.map(s=>`<option value="${s.id}">${esc(s.name)} (${esc(s.dept||'')})</option>`).join('')}</select></label>
+    ${staffField}
     <label class="field"><span>종류</span><select id="lvType" onchange="lvTypeChange()">
       <option value="annual">연차 (1일)</option><option value="half">반차 (0.5일)</option>
       <option value="monthly">월차 (1일)</option><option value="sick">병가</option><option value="etc">기타</option>
@@ -1119,7 +1122,9 @@ function lvCalc(){
   $('#lvDays').value=Math.max(1,days);
 }
 function submitLeave(){
-  const staffId=$('#lvStaff').value, type=$('#lvType').value;
+  const type=$('#lvType').value;
+  const staffId = isAdmin() ? ($('#lvStaff') && $('#lvStaff').value) : (currentUser() && currentUser().id);
+  if(!staffId){ toast('신청자를 확인하세요'); return; }
   const startDate=$('#lvStart').value, endDate=$('#lvEnd').value, days=+$('#lvDays').value||0;
   if(!startDate||!endDate){ toast('날짜를 선택하세요'); return; }
   if(!days){ toast('사용 일수를 확인하세요'); return; }
@@ -1154,42 +1159,74 @@ function openStaffForm(edit){
       <label class="field"><span>직급</span><input id="sPos" value="${s?esc(s.position||''):''}" placeholder="간호사"></label>
     </div>
     <div class="two">
+      <label class="field"><span>전화번호 * (로그인 ID)</span><input id="sPhone" inputmode="numeric" value="${s?esc(s.phone||''):''}" placeholder="01012345678"></label>
+      <label class="field"><span>권한</span><select id="sRole">
+        <option value="직원" ${!s||s.role!=='관리자'?'selected':''}>직원</option>
+        <option value="관리자" ${s&&s.role==='관리자'?'selected':''}>관리자</option>
+      </select></label>
+    </div>
+    <label class="field"><span>${s?'PIN 재설정 (비우면 기존 유지)':'개인 PIN * (숫자 4자리 이상)'}</span><input id="sPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    <div class="two">
       <label class="field"><span>입사일</span><input id="sJoin" type="date" value="${s?esc(s.joinDate||''):''}"></label>
       <label class="field"><span>연간 연차(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?s.annualTotal:15}"></label>
     </div>
-    <label class="field"><span>연락처 (선택)</span><input id="sPhone" value="${s?esc(s.phone||''):''}" placeholder="010-0000-0000"></label>
+    ${s?`<label class="field"><span>재직 상태</span><select id="sActive">
+      <option value="1" ${s.active!==false?'selected':''}>재직</option>
+      <option value="0" ${s.active===false?'selected':''}>퇴사 (로그인 차단)</option></select></label>`:''}
     <div class="row">
       <button class="btn block" onclick="saveStaff('${s?s.id:''}')">${s?'저장':'추가'}</button>
       ${s?`<button class="btn danger" onclick="delStaff('${s.id}')">삭제</button>`:''}
-    </div>`);
+    </div>
+    <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 권장(기록 보존).</div>`);
 }
 function saveStaff(id){
   const name=$('#sName').value.trim(); if(!name){ toast('이름을 입력하세요'); return; }
-  const data={ name, dept:$('#sDept').value.trim(), position:$('#sPos').value.trim(),
-    joinDate:$('#sJoin').value, annualTotal:Math.max(0,parseInt($('#sAnnual').value,10)||0),
-    phone:$('#sPhone').value.trim() };
-  if(id) Object.assign(staffById(id), data);
-  else DB.staff.push({id:uid(), ...data});
-  saveDB(); closeModal(); renderStaff(); renderHome(); toast('저장되었습니다');
+  const phone=normPhone($('#sPhone').value); if(!phone){ toast('전화번호를 입력하세요'); return; }
+  if(DB.staff.some(x=>x.id!==id && normPhone(x.phone)===phone)){ toast('이미 등록된 전화번호예요'); return; }
+  const role=$('#sRole').value==='관리자'?'관리자':'직원';
+  const pinIn=($('#sPin').value||'').trim();
+  const base={ name, dept:$('#sDept').value.trim(), position:$('#sPos').value.trim(),
+    joinDate:$('#sJoin').value, annualTotal:Math.max(0,parseInt($('#sAnnual').value,10)||0), phone, role };
+  if(id){
+    const s=staffById(id);
+    if(pinIn){ if(!/^\d{4,8}$/.test(pinIn)){ toast('PIN은 숫자 4~8자리'); return; } base.pin=pinIn; }
+    const act=$('#sActive'); if(act) base.active = act.value==='1';
+    if(s.role==='관리자' && (role!=='관리자' || base.active===false)){
+      const others=DB.staff.filter(x=>x.id!==id && x.role==='관리자' && x.active!==false);
+      if(!others.length){ toast('최소 1명의 관리자가 필요해요'); return; }
+    }
+    Object.assign(s, base);
+  } else {
+    if(!/^\d{4,8}$/.test(pinIn)){ toast('개인 PIN을 숫자 4~8자리로 정하세요'); return; }
+    DB.staff.push({id:uid(), ...base, pin:pinIn, active:true, createdAt:now()});
+  }
+  saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('저장되었습니다');
 }
 function delStaff(id){
-  if(!confirm('이 직원을 삭제할까요? 출퇴근·연월차 기록도 함께 삭제됩니다.')) return;
+  const s=staffById(id);
+  if(s && s.role==='관리자'){
+    const others=DB.staff.filter(x=>x.id!==id && x.role==='관리자' && x.active!==false);
+    if(!others.length){ toast('마지막 관리자는 삭제할 수 없어요'); return; }
+  }
+  if(!confirm('이 직원을 삭제할까요? 출퇴근·연월차 기록도 함께 삭제됩니다. (퇴사 처리를 권장)')) return;
   DB.staff=DB.staff.filter(s=>s.id!==id);
   DB.attendance=DB.attendance.filter(a=>a.staffId!==id);
   DB.leaves=DB.leaves.filter(l=>l.staffId!==id);
-  saveDB(); closeModal(); renderStaff(); renderHome(); toast('삭제되었습니다');
+  if(sessionId()===id) setSession('');
+  saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('삭제되었습니다');
 }
 
 /* ========================================================================
    설정 / 백업
    ======================================================================== */
 function openStaffMenu(){
-  const m=myMember();
+  const u=currentUser();
   modal(`<h3>⚙️ 설정</h3>
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:12px 14px">
-      <div class="row" style="gap:8px"><span class="pill info">👤 직원 모드</span>
-      <span class="tiny">${m?esc(m.name)+' 님':'직원'} · 재고·출퇴근·연월차 신청 사용</span></div></div>
-    <button class="btn block" onclick="adminLogin()">👑 관리자 로그인</button>
+      <div class="row" style="gap:8px"><span class="pill info">👤 직원</span>
+      <span class="tiny">${u?esc(u.name)+' 님':'직원'} · 재고·출퇴근·연월차 신청 사용</span></div></div>
+    <button class="btn soft block" onclick="changeMyPin()">🔒 내 PIN 변경</button>
+    <button class="btn soft block" style="margin-top:8px" onclick="logout()">로그아웃</button>
     <div class="tiny muted" style="margin:10px 2px 0">연월차 관리·설정·직원 관리는 관리자만 볼 수 있어요.</div>
     <div class="tiny muted" style="text-align:center;margin-top:16px">병원 관리 앱 · v1</div>`);
 }
@@ -1210,11 +1247,12 @@ function openMenu(){
     <label class="field"><span>병원(앱) 이름</span><input id="setName" value="${esc(DB.hospName||'')}"></label>
     <button class="btn block" onclick="saveHospName()">이름 저장</button>
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👑 관리자 · 직원 권한</div>
-    <button class="btn soft block" onclick="openSetPin()">🔑 관리자 PIN ${DB.adminPin?'변경':'설정'}</button>
-    ${DB.adminPin?'':'<div class="tiny" style="color:var(--warn);margin:8px 2px 0">⚠️ 아직 PIN이 없어요. 설정해야 직원과 관리자가 구분돼요.</div>'}
-    <div class="tiny muted" style="margin:8px 2px 0">직원은 링크를 열면 바로 <b>재고·출퇴근·연월차 신청</b>만 쓸 수 있어요. 직원 명단은 <b>직원 탭</b>에서 관리자가 추가하세요.</div>
-    <button class="btn soft block" style="margin-top:10px" onclick="adminLogout()">이 기기 관리자 모드 해제</button>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👑 관리자 · 계정</div>
+    <div class="two" style="gap:8px">
+      <button class="btn soft" onclick="changeMyPin()">🔒 내 PIN 변경</button>
+      <button class="btn soft" onclick="logout()">로그아웃</button>
+    </div>
+    <div class="tiny muted" style="margin:8px 2px 0">직원 계정(전화번호·PIN·권한)은 <b>직원 탭</b>에서 추가/수정하세요. 직원은 <b>본인 전화번호+PIN</b>으로 로그인해 재고·출퇴근·연월차 신청을 씁니다.</div>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
     <div class="two" style="gap:8px">
@@ -1368,27 +1406,23 @@ function cloudPush(force){
    - 관리자 PIN으로 전환. 직원은 최초 '사용 요청' → 관리자 승인 후 사용.
    - (참고) 화면 단에서 숨기는 방식 — 신뢰하는 병원 직원 사이용.
    ======================================================================== */
-function myDeviceId(){ let id=localStorage.getItem('hosp_device'); if(!id){ id='d'+uid(); localStorage.setItem('hosp_device',id); } return id; }
-function isAdminLocal(){ return localStorage.getItem('hosp_admin')==='1'; }
-function setAdminLocal(v){ v? localStorage.setItem('hosp_admin','1') : localStorage.removeItem('hosp_admin'); }
-function myMember(){ ensureSchema(); return DB.members.find(m=>m.id===myDeviceId()); }
-function isAdmin(){
-  if(isAdminLocal()) return true;
-  if(!DB || !DB.adminPin) return true;   // 최초: PIN 설정 전엔 이 기기가 관리자(설정하러)
-  return false;
-}
+function normPhone(s){ return String(s||'').replace(/\D/g,''); }
+function sessionId(){ return localStorage.getItem('hosp_uid')||''; }
+function setSession(id){ id? localStorage.setItem('hosp_uid',id) : localStorage.removeItem('hosp_uid'); }
+function currentUser(){ const id=sessionId(); return id? DB.staff.find(s=>s.id===id && s.active!==false) : null; }
+function hasAdmin(){ return DB.staff.some(s=>s.role==='관리자' && s.active!==false); }
+function isAdmin(){ const u=currentUser(); return !!u && u.role==='관리자'; }
 let gateState=null;
 function applyRole(){
   ensureSchema();
-  const admin = isAdmin();
+  const u=currentUser();
+  if(!u){ document.body.setAttribute('data-role','staff'); setGate(hasAdmin()?'login':'setup'); return; }
+  const admin = u.role==='관리자';
   document.body.setAttribute('data-role', admin?'admin':'staff');
-  const rt=$('#roleTag'); if(rt) rt.textContent = admin?'👑 관리자':'👤 직원';
-  $('#adminBanner').classList.toggle('show', admin && !DB.adminPin);
-  setGate(null);   // 요청/승인 절차 없음 — 직원은 바로 사용
-  if(!admin){       // 직원이 관리자 전용 화면에 있으면 이동
-    if(currentTab==='staff') go('home');
-    if(currentTab==='leave') leaveTab('new');
-  }
+  const rt=$('#roleTag'); if(rt) rt.textContent = (admin?'👑 ':'👤 ')+esc(u.name);
+  $('#adminBanner').classList.remove('show');
+  setGate(null);
+  if(!admin){ if(currentTab==='staff') go('home'); if(currentTab==='leave') leaveTab('new'); }
   refreshBell();
 }
 function setGate(state){
@@ -1396,86 +1430,59 @@ function setGate(state){
   gateState=state;
   const g=$('#gate'), b=$('#gateBody');
   if(!state){ g.classList.remove('show'); document.body.style.overflow=''; return; }
-  b.innerHTML = state==='join'? gateJoinHtml() : state==='wait'? gateWaitHtml() : gateRejectHtml();
+  b.innerHTML = state==='setup'? gateSetupHtml() : gateLoginHtml();
   g.classList.add('show'); document.body.style.overflow='hidden';
 }
-const adminLink = `<a onclick="adminLogin()" style="color:var(--brand);font-weight:800;cursor:pointer">관리자 로그인</a>`;
-function gateJoinHtml(){
+function gateLoginHtml(){
   return `<div class="gate-ic">🏥</div>
     <div class="gate-h">${esc(DB.hospName||'병원 관리')}</div>
-    <div class="gate-p">앱을 사용하려면 이름을 남기고<br>관리자 승인을 받아주세요.</div>
+    <div class="gate-p">전화번호와 개인 PIN으로 로그인하세요.</div>
     <div class="gate-card">
-      <label class="field"><span>이름 *</span><input id="joinName" placeholder="홍길동"></label>
-      <label class="field" style="margin-bottom:6px"><span>부서 (선택)</span><input id="joinDept" placeholder="간호부"></label>
-      <button class="btn block" onclick="submitJoin()">사용 요청 보내기</button>
+      <label class="field"><span>전화번호</span><input id="lgPhone" inputmode="numeric" placeholder="01012345678"></label>
+      <label class="field" style="margin-bottom:6px"><span>개인 PIN</span><input id="lgPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+      <button class="btn block" onclick="doLogin()">로그인</button>
     </div>
-    <div class="tiny muted" style="margin-top:18px">관리자세요? ${adminLink}</div>`;
+    <div class="tiny muted" style="margin-top:16px">번호·PIN을 모르면 관리자에게 문의하세요.</div>`;
 }
-function gateWaitHtml(){ const m=myMember();
-  return `<div class="gate-ic">⏳</div><div class="gate-h">승인 대기중</div>
-    <div class="gate-p"><b>${esc(m?m.name:'')}</b> 님, 관리자 승인을 기다리고 있어요.<br>승인되면 자동으로 열립니다.</div>
-    <div class="tiny muted">관리자세요? ${adminLink}</div>`;
+function gateSetupHtml(){
+  return `<div class="gate-ic">👑</div>
+    <div class="gate-h">최초 관리자 등록</div>
+    <div class="gate-p">첫 사용이에요. 관리자(사장님) 계정을 만들어 주세요.</div>
+    <div class="gate-card">
+      <label class="field"><span>이름 *</span><input id="suName" placeholder="홍길동"></label>
+      <label class="field"><span>전화번호 *</span><input id="suPhone" inputmode="numeric" placeholder="01012345678"></label>
+      <label class="field" style="margin-bottom:6px"><span>개인 PIN * (숫자 4자리 이상)</span><input id="suPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+      <button class="btn block" onclick="doSetupAdmin()">관리자 만들기</button>
+    </div>`;
 }
-function gateRejectHtml(){
-  return `<div class="gate-ic">🚫</div><div class="gate-h">사용이 거절되었어요</div>
-    <div class="gate-p">관리자에게 문의해 주세요.</div><div class="tiny muted">${adminLink}</div>`;
+function doLogin(){
+  const ph=normPhone($('#lgPhone').value), pin=($('#lgPin').value||'').trim();
+  if(!ph||!pin){ toast('전화번호와 PIN을 입력하세요'); return; }
+  const u=DB.staff.find(s=>normPhone(s.phone)===ph && String(s.pin||'')===pin && s.active!==false);
+  if(!u){ toast('전화번호 또는 PIN이 맞지 않아요'); return; }
+  setSession(u.id); applyRole(); go('home'); toast(`${u.name}님 환영합니다`);
 }
-function submitJoin(){
-  const name=($('#joinName').value||'').trim(); if(!name){ toast('이름을 입력하세요'); return; }
-  DB.members.push({ id:myDeviceId(), name, dept:($('#joinDept').value||'').trim(), role:'staff', status:'pending', createdAt:now() });
-  saveDB(); toast('사용 요청을 보냈어요'); gateState=null; applyRole();
+function doSetupAdmin(){
+  const name=($('#suName').value||'').trim(), ph=normPhone($('#suPhone').value), pin=($('#suPin').value||'').trim();
+  if(!name||!ph){ toast('이름과 전화번호를 입력하세요'); return; }
+  if(!/^\d{4,8}$/.test(pin)){ toast('PIN은 숫자 4~8자리로 정하세요'); return; }
+  if(DB.staff.some(s=>normPhone(s.phone)===ph)){ toast('이미 등록된 번호예요'); return; }
+  const u={id:uid(), name, dept:'', position:'관리자', phone:ph, pin, role:'관리자', active:true, annualTotal:15, joinDate:'', createdAt:now()};
+  DB.staff.push(u); setSession(u.id); saveDB(); applyRole(); go('home'); toast('관리자 계정을 만들었어요');
 }
-function adminLogin(){
-  modal(`<h3>👑 관리자 로그인</h3>
-    <div class="tiny muted" style="margin-bottom:12px">관리자 PIN을 입력하세요.</div>
-    <label class="field"><input id="pinIn" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
-    <button class="btn block" onclick="doAdminLogin()">로그인</button>`);
-  setTimeout(()=>{ const el=$('#pinIn'); if(el) el.focus(); },150);
+function logout(){ if(!confirm('로그아웃할까요?')) return; setSession(''); closeModal(); applyRole(); toast('로그아웃되었습니다'); }
+function changeMyPin(){
+  if(!currentUser()) return;
+  modal(`<h3>🔒 내 PIN 변경</h3>
+    <label class="field"><span>새 PIN (숫자 4자리 이상)</span><input id="mp1" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    <label class="field"><span>한 번 더</span><input id="mp2" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    <button class="btn block" onclick="saveMyPin()">저장</button>`);
 }
-function doAdminLogin(){
-  const p=($('#pinIn').value||'').trim();
-  if(!DB.adminPin){ toast('아직 관리자 PIN이 없어요'); return; }
-  if(p!==DB.adminPin){ toast('PIN이 올바르지 않아요'); return; }
-  setAdminLocal(true); closeModal(); gateState=null; applyRole(); go('home'); toast('관리자로 로그인했어요');
-}
-function openSetPin(){
-  modal(`<h3>🔑 관리자 PIN ${DB.adminPin?'변경':'설정'}</h3>
-    <div class="tiny muted" style="margin-bottom:12px">${DB.adminPin?'PIN을 새로 정합니다.':'관리자만 아는 숫자 4자리 이상을 정하세요. 직원은 이 PIN이 없으면 관리자 화면을 못 봐요.'}</div>
-    <label class="field"><span>새 PIN (숫자 4자리 이상)</span><input id="pin1" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
-    <label class="field"><span>한 번 더</span><input id="pin2" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
-    <button class="btn block" onclick="saveAdminPin()">저장</button>`);
-}
-function saveAdminPin(){
-  const a=($('#pin1').value||'').trim(), b=($('#pin2').value||'').trim();
+function saveMyPin(){
+  const a=($('#mp1').value||'').trim(), b=($('#mp2').value||'').trim();
   if(!/^\d{4,8}$/.test(a)){ toast('숫자 4~8자리로 정해주세요'); return; }
   if(a!==b){ toast('두 번 입력이 달라요'); return; }
-  DB.adminPin=a; setAdminLocal(true); saveDB(); closeModal(); applyRole(); toast('관리자 PIN을 설정했어요');
-}
-function adminLogout(){
-  if(!confirm('관리자 모드를 해제할까요? 이 기기는 직원 모드가 됩니다.')) return;
-  setAdminLocal(false); closeModal(); gateState=null; applyRole(); go('home'); toast('관리자 모드를 해제했어요');
-}
-/* 직원 사용 승인 (관리자 화면) */
-function setMember(id,status){ const m=DB.members.find(x=>x.id===id); if(!m) return; m.status=status; saveDB(); renderStaff(); renderHome();
-  toast(status==='approved'?'승인했어요':status==='rejected'?'거절했어요':'변경'); }
-function delMember(id){ if(!confirm('이 참여자를 목록에서 지울까요?')) return; DB.members=DB.members.filter(m=>m.id!==id); saveDB(); renderStaff(); toast('삭제했어요'); }
-function memberApprovalHtml(){
-  const pend=DB.members.filter(m=>m.status==='pending');
-  const others=DB.members.filter(m=>m.status!=='pending');
-  let h=`<div class="spread" style="margin:4px 2px 8px"><h2 class="sec" style="margin:0">🙋 직원 사용 승인 ${pend.length?`<span class="pill pend">${pend.length}</span>`:''}</h2></div>`;
-  if(!DB.members.length){ return h+`<div class="card">${emptyBox('🔗','아직 참여 요청이 없어요.<br>직원에게 링크를 보내면 요청이 여기 떠요.')}</div>`; }
-  const row=(m)=>`<div class="item">
-     <div class="avatar">${esc(initials(m.name))}</div>
-     <div class="grow"><div class="t" style="font-size:14.5px">${esc(m.name)} ${m.status==='approved'?'<span class="pill ok">승인됨</span>':m.status==='rejected'?'<span class="pill danger">거절</span>':'<span class="pill pend">대기</span>'}</div>
-       <div class="d tiny muted">${esc(m.dept||'부서 미지정')}</div></div>
-     <div class="row" style="gap:5px">
-       ${m.status!=='approved'?`<button class="btn ok xs" onclick="setMember('${m.id}','approved')">승인</button>`:''}
-       ${m.status!=='rejected'?`<button class="btn danger xs" onclick="setMember('${m.id}','rejected')">거절</button>`:''}
-       <button class="btn soft xs" onclick="delMember('${m.id}')">✕</button>
-     </div></div>`;
-  if(pend.length) h+=`<div class="card" style="padding:6px 12px">${pend.map(row).join('')}</div>`;
-  if(others.length) h+=`<div class="tiny muted" style="margin:12px 2px 6px">전체 참여자</div><div class="card" style="padding:6px 12px">${others.map(row).join('')}</div>`;
-  return h;
+  currentUser().pin=a; saveDB(); closeModal(); toast('PIN을 변경했어요');
 }
 
 /* ---------- 시작 ---------- */
