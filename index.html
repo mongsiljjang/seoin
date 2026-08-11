@@ -190,6 +190,39 @@
     padding:9px 14px; text-align:center; cursor:pointer; display:none}
   #adminBanner.show{display:block}
 
+  /* 출근 키오스크(공용 기기 모드) */
+  #kiosk{position:fixed; inset:0; z-index:75; background:linear-gradient(160deg,var(--hdr1),#0a1626);
+    color:#fff; display:none; overflow:auto}
+  #kiosk.show{display:block}
+  .kwrap{max-width:600px; margin:0 auto; min-height:100dvh; padding:24px 18px 30px; display:flex; flex-direction:column}
+  .khead{display:flex; justify-content:space-between; align-items:flex-start; gap:10px}
+  .khosp{font-size:23px; font-weight:900; letter-spacing:-.5px}
+  .ksub{font-size:13px; opacity:.8; margin-top:2px}
+  .kclock{font-size:30px; font-weight:900; letter-spacing:-1px; font-variant-numeric:tabular-nums; line-height:1}
+  .kdate{font-size:12px; opacity:.75; text-align:right; margin-top:4px}
+  .kgrid{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px}
+  .kcard{background:rgba(255,255,255,.1); border:1.5px solid rgba(255,255,255,.16); border-radius:18px;
+    padding:15px 14px; cursor:pointer; text-align:left; color:#fff; font-family:inherit; transition:transform .05s}
+  .kcard:active{transform:scale(.98)}
+  .kcard .kn{font-size:19px; font-weight:900}
+  .kcard .kd{font-size:12px; opacity:.8; margin-top:2px}
+  .kcard .kstat{margin-top:9px}
+  .kcard.inwork{background:rgba(19,138,91,.3); border-color:rgba(120,230,180,.45)}
+  .kcard.kdone{opacity:.62}
+  .kexit{margin-top:22px; align-self:center; background:rgba(255,255,255,.12); color:#fff; border:0;
+    border-radius:999px; padding:11px 22px; font-weight:800; font-size:13px; cursor:pointer}
+  .kpin{max-width:360px; margin:8px auto 0; text-align:center}
+  .kpin .who{font-size:24px; font-weight:900}
+  .kpin .act{font-size:14px; opacity:.85; margin:4px 0 18px}
+  .kdots{display:flex; gap:13px; justify-content:center; margin-bottom:22px; min-height:16px}
+  .kdot{width:15px; height:15px; border-radius:999px; background:rgba(255,255,255,.28)}
+  .kdot.on{background:#fff}
+  .kpad{display:grid; grid-template-columns:repeat(3,1fr); gap:11px}
+  .kkey{background:rgba(255,255,255,.12); border:0; color:#fff; font-size:24px; font-weight:800;
+    padding:17px 0; border-radius:16px; cursor:pointer; font-family:inherit}
+  .kkey:active{background:rgba(255,255,255,.28)}
+  .kkey.mini{font-size:15px; font-weight:700}
+
   /* 임플란트 모듈 */
   .summary3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px}
   .summary3 .stat{padding:11px 12px}
@@ -242,6 +275,7 @@
 
   <!-- ============ 홈 ============ -->
   <section class="page active" id="page-home">
+    <div id="attReminder"></div>
     <section class="card hero admin-only" id="homeHero" style="margin-top:2px">
       <div class="htop">
         <div><div class="hlabel">🗂️ 오늘 처리할 일</div><div class="hval" id="heroTotal">0건</div></div>
@@ -316,6 +350,10 @@
       <input type="date" id="attDate" style="width:auto" onchange="renderAtt()">
     </div>
     <div class="hint">이름 옆 <b>출근</b>/<b>퇴근</b> 버튼만 누르면 시간이 자동 기록돼요.</div>
+    <div class="spread admin-only" style="margin:0 2px 10px">
+      <span class="tiny muted">잘못 찍힌 날은 정리할 수 있어요</span>
+      <button class="btn xs soft" onclick="resetAttAll()">🗑 이 날 전체 삭제</button>
+    </div>
     <div id="attList"></div>
     <div class="spread" style="margin:18px 2px 8px">
       <h2 class="sec" style="margin:0">이번 달 근무 시간</h2>
@@ -356,6 +394,16 @@
 </nav>
 
 <div id="gate"><div class="gatewrap" id="gateBody"></div></div>
+
+<!-- 공용 기기 출근 키오스크 -->
+<div id="kiosk"><div class="kwrap">
+  <div class="khead">
+    <div><div class="khosp" id="kHosp">출근 체크</div><div class="ksub">이름을 누르고 개인 PIN을 입력하세요</div></div>
+    <div><div class="kclock" id="kClock">--:--</div><div class="kdate" id="kDate"></div></div>
+  </div>
+  <div id="kBody"></div>
+  <button class="kexit" onclick="exitKiosk()">← 나가기 (관리자 PIN)</button>
+</div></div>
 
 <div class="modal-bg" id="modalBg" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modal"><div class="grabber"></div><div id="modalBody"></div></div>
@@ -508,20 +556,56 @@ function renderHome(){
       <span class="pill ${i.qty===0?'danger':'warn'}">${i.qty===0?'품절':'부족'}</span>
     </div>`).join('') + (low.length>6?`<div class="tiny muted" style="text-align:center;padding-top:8px">외 ${low.length-6}건</div>`:'');
 
-  // 오늘 근무
+  // 오늘 근무 + 미출근 강조
   const att = $('#homeAtt');
   const todays = DB.attendance.filter(a=>a.date===tk);
-  if(!DB.staff.length){ att.innerHTML = emptyBox('👤','먼저 직원을 등록해 주세요'); }
-  else att.innerHTML = DB.staff.map(s=>{
+  const roster = DB.staff.filter(s=>s.active!==false);
+  if(!roster.length){ att.innerHTML = emptyBox('👤','먼저 직원을 등록해 주세요'); }
+  else att.innerHTML = roster.map(s=>{
     const a = todays.find(x=>x.staffId===s.id);
-    let st = `<span class="pill grey">미출근</span>`;
+    let st;
     if(a&&a.inAt&&a.outAt) st=`<span class="pill info">퇴근 ${fmtTime(a.outAt)}</span>`;
     else if(a&&a.inAt) st=`<span class="pill ok">근무중 ${fmtTime(a.inAt)}~</span>`;
+    else if(onLeaveToday(s.id)) st=`<span class="pill pend">연차</span>`;
+    else st=`<span class="pill warn">미출근</span>`;
     return `<div class="item"><div class="avatar">${esc(initials(s.name))}</div>
       <div class="grow"><div class="t">${esc(s.name)}</div><div class="d">${esc(s.dept||'')}</div></div>${st}</div>`;
   }).join('');
+
+  // 출근 강제성(소프트): 상단 배너
+  const rem = $('#attReminder'); const u = currentUser();
+  const notCheckedIn = s => { const a=todays.find(x=>x.staffId===s.id); return !(a&&a.inAt) && !onLeaveToday(s.id); };
+  if(rem){
+    if(u && u.role!=='관리자'){
+      const mine = todays.find(x=>x.staffId===u.id);
+      if((!mine||!mine.inAt) && !onLeaveToday(u.id)){
+        rem.innerHTML = `<div class="card" style="background:var(--warn-soft);border:0;box-shadow:none;margin-top:2px;display:flex;align-items:center;gap:10px;justify-content:space-between">
+          <div class="row" style="gap:10px"><span style="font-size:22px">⏰</span>
+            <div><div style="font-weight:900;color:var(--warn)">오늘 출근 체크가 안 됐어요</div>
+            <div class="tiny muted">아래 버튼으로 바로 출근 기록하세요.</div></div></div>
+          <button class="btn warn sm" onclick="selfCheckIn()">지금 출근</button></div>`;
+      } else if(mine && mine.inAt && !mine.outAt){
+        rem.innerHTML = `<div class="card" style="background:var(--ok-soft);border:0;box-shadow:none;margin-top:2px;display:flex;align-items:center;gap:10px;justify-content:space-between">
+          <div class="row" style="gap:10px"><span style="font-size:22px">🟢</span>
+            <div><div style="font-weight:900;color:var(--ok)">근무중 · ${fmtTime(mine.inAt)} 출근</div>
+            <div class="tiny muted">퇴근할 때 눌러주세요.</div></div></div>
+          <button class="btn soft sm" onclick="selfCheckOut()">퇴근</button></div>`;
+      } else rem.innerHTML = '';
+    } else if(u && u.role==='관리자'){
+      const miss = roster.filter(notCheckedIn).length;
+      rem.innerHTML = miss ? `<div class="card" style="background:var(--warn-soft);border:0;box-shadow:none;margin-top:2px;cursor:pointer;display:flex;align-items:center;gap:10px;justify-content:space-between" onclick="go('att')">
+        <div class="row" style="gap:10px"><span style="font-size:22px">🕒</span>
+          <div><div style="font-weight:900;color:var(--warn)">아직 출근 안 한 직원 ${miss}명</div>
+          <div class="tiny muted">출퇴근 화면에서 확인하세요.</div></div></div>
+        <span class="tiny muted">›</span></div>` : '';
+    } else rem.innerHTML = '';
+  }
   refreshBell();
 }
+function onLeaveToday(id){ const tk=todayKey();
+  return DB.leaves.some(l=>l.status==='approved' && l.staffId===id && l.startDate<=tk && (l.endDate||l.startDate)>=tk); }
+function selfCheckIn(){ const u=currentUser(); if(u) checkIn(u.id, todayKey()); }
+function selfCheckOut(){ const u=currentUser(); if(u) checkOut(u.id, todayKey()); }
 function emptyBox(ic,txt){ return `<div class="empty"><span class="ic">${ic}</span>${esc(txt)}</div>`; }
 function dDays(dateStr){ if(!dateStr) return null; const d=new Date(dateStr+'T00:00:00'); if(isNaN(d)) return null;
   const t=new Date(todayKey()+'T00:00:00'); return Math.round((d-t)/86400000); }
@@ -1031,7 +1115,9 @@ function renderAtt(){
     let btns;
     if(!inT) btns=`<button class="btn ok sm" onclick="checkIn('${s.id}','${dk}')">출근</button>`;
     else if(!outT) btns=`<button class="btn warn sm" onclick="checkOut('${s.id}','${dk}')">퇴근</button>`;
-    else btns=`<button class="btn soft sm" onclick="resetAtt('${s.id}','${dk}')">초기화</button>`;
+    else btns = isAdmin()
+      ? `<span class="pill info" style="margin-right:6px">완료</span><button class="btn soft sm" onclick="resetAtt('${s.id}','${dk}')">삭제</button>`
+      : `<span class="pill info">완료</span>`;
     return `<div class="card" style="padding:12px 14px"><div class="spread">
       <div class="row" style="gap:11px"><div class="avatar">${esc(initials(s.name))}</div>
         <div><div class="t" style="font-weight:800">${esc(s.name)}</div>
@@ -1067,9 +1153,21 @@ function checkOut(id,date){
   a.outAt=stampFor(date); saveDB(); renderAtt(); renderHome();
   toast(`${staffById(id).name} 퇴근 · ${fmtHours(hoursBetween(a.inAt,a.outAt))} 근무`);
 }
+function resetAttAll(){
+  if(!isAdmin()){ toast('관리자만 할 수 있어요'); return; }
+  const dk=$('#attDate').value||todayKey();
+  const n=DB.attendance.filter(a=>a.date===dk).length;
+  if(!n){ toast('그 날짜엔 기록이 없어요'); return; }
+  if(!confirm(`${dk} 하루의 출퇴근 기록 ${n}건을 한 번에 삭제할까요?\n(그날 하루만 지워지고, 다른 날 누적 근무시간은 그대로예요)`)) return;
+  DB.attendance = DB.attendance.filter(a=>a.date!==dk);
+  saveDB(); renderAtt(); renderHome(); toast(`${dk} 기록 ${n}건을 삭제했어요`);
+}
 function resetAtt(id,date){
+  if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
+  const s=staffById(id);
+  if(!confirm(`${s?s.name:''}님 ${date} 출퇴근 기록만 삭제할까요?\n(그날 하루치만 지워지고, 다른 날 누적 근무시간은 그대로예요)`)) return;
   DB.attendance = DB.attendance.filter(a=>!(a.staffId===id&&a.date===date));
-  saveDB(); renderAtt(); renderHome(); toast('기록을 초기화했어요');
+  saveDB(); renderAtt(); renderHome(); toast('해당 날짜 기록을 삭제했어요');
 }
 /* 오늘이면 현재 시각, 과거/미래 날짜면 그 날짜의 현재 시각으로 스탬프 */
 function stampFor(date){
@@ -1305,6 +1403,10 @@ function openMenu(){
     </div>
     <div class="tiny muted" style="margin:8px 2px 0">직원 계정(전화번호·PIN·권한)은 <b>직원 탭</b>에서 추가/수정하세요. 직원은 <b>본인 전화번호+PIN</b>으로 로그인해 재고·출퇴근·연월차 신청을 씁니다.</div>
     <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🖥️ 공용 기기 출근 체크</div>
+    <button class="btn soft block" onclick="closeModal(); enterKiosk()">이 기기를 ‘출근 체크 화면’으로 열기</button>
+    <div class="tiny muted" style="margin:8px 2px 0">데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면, 직원이 <b>이름+개인 PIN</b>으로 출근/퇴근을 찍어요(개인폰 로그인 불필요). 주소 뒤에 <b>#kiosk</b>를 붙여 북마크하면 바로 열립니다. 나갈 땐 관리자 PIN.</div>
+    <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
     <div class="two" style="gap:8px">
       <button class="btn soft" onclick="exportInventory()">📦 재고 현황</button>
@@ -1433,6 +1535,7 @@ function cloudSubscribe(){
       applyingRemote=false;
       $('#hospName').textContent = DB.hospName || '우리병원 관리';
       applyRole();
+      if(kioskOn && kSel===null) renderKiosk();   // 키오스크 명단 실시간 갱신(입력 중이 아닐 때만)
       if(!$('#modalBg').classList.contains('open')) rerenderCurrent();
     }else{
       cloudPush(true);  // 원격이 비어있으면 이 기기 데이터로 시작
@@ -1537,6 +1640,104 @@ function saveMyPin(){
   currentUser().pin=a; saveDB(); closeModal(); toast('PIN을 변경했어요');
 }
 
+/* ========================================================================
+   공용 기기 출근 키오스크 (로그인 없이 이름+PIN으로 출퇴근 체크)
+   ======================================================================== */
+let kioskOn=false, kSel=null, kPin='', kClockTimer=null;
+function enterKiosk(){
+  kioskOn=true; kSel=null; kPin='';
+  try{ if(location.hash!=='#kiosk') history.replaceState(null,'','#kiosk'); }catch(e){}
+  closeModal();
+  $('#kHosp').textContent = DB.hospName || '출근 체크';
+  $('#kiosk').classList.add('show'); document.body.style.overflow='hidden';
+  startKClock(); renderKiosk();
+}
+function exitKiosk(){
+  if(hasAdmin()){
+    const pin = prompt('관리자 PIN을 입력하면 출근 화면에서 나갑니다.');
+    if(pin===null) return;
+    const ok = DB.staff.some(s=>s.role==='관리자' && s.active!==false && String(s.pin||'')===String(pin).trim());
+    if(!ok){ toast('관리자 PIN이 맞지 않아요'); return; }
+  }
+  kioskOn=false; stopKClock();
+  $('#kiosk').classList.remove('show'); document.body.style.overflow='';
+  try{ history.replaceState(null,'', location.pathname+location.search); }catch(e){}
+}
+function startKClock(){ stopKClock();
+  const upd=()=>{ const n=new Date();
+    const c=$('#kClock'); if(c) c.textContent=pad(n.getHours())+':'+pad(n.getMinutes());
+    const d=$('#kDate'); if(d) d.textContent=n.toLocaleDateString('ko-KR',{month:'long',day:'numeric',weekday:'long'}); };
+  upd(); kClockTimer=setInterval(upd,15000);
+}
+function stopKClock(){ if(kClockTimer){ clearInterval(kClockTimer); kClockTimer=null; } }
+function renderKiosk(){
+  kSel=null; kPin='';
+  const tk=todayKey();
+  const staff=DB.staff.filter(s=>s.active!==false);
+  if(!staff.length){ $('#kBody').innerHTML=`<div style="opacity:.85;text-align:center;padding:40px 10px;line-height:1.7">등록된 직원이 없어요.<br>관리자 앱의 <b>직원 탭</b>에서 먼저 등록하세요.</div>`; return; }
+  const cards=staff.map(s=>{
+    const a=DB.attendance.find(x=>x.staffId===s.id && x.date===tk);
+    let cls='', stat, hint;
+    if(a&&a.inAt&&a.outAt){ cls='kdone'; stat=`<span class="pill info">퇴근 ${fmtTime(a.outAt)}</span>`; hint='오늘 근무 완료'; }
+    else if(a&&a.inAt){ cls='inwork'; stat=`<span class="pill ok">근무중 ${fmtTime(a.inAt)}~</span>`; hint='👉 눌러서 퇴근'; }
+    else { stat=`<span class="pill warn">미출근</span>`; hint='👉 눌러서 출근'; }
+    return `<button class="kcard ${cls}" onclick="kioskPick('${s.id}')">
+      <div class="kn">${esc(s.name)}</div><div class="kd">${esc(s.dept||'')||'&nbsp;'}</div>
+      <div class="kstat">${stat}</div><div class="kd" style="margin-top:7px">${hint}</div></button>`;
+  }).join('');
+  $('#kBody').innerHTML=`<div class="kgrid">${cards}</div>`;
+}
+function kioskPick(id){
+  const s=staffById(id); if(!s) return;
+  const tk=todayKey();
+  const a=DB.attendance.find(x=>x.staffId===s.id && x.date===tk);
+  if(a&&a.inAt&&a.outAt){ toast(`${s.name}님은 오늘 근무 완료예요`); return; }
+  if(!s.pin){ kioskCommit(id); return; }   // PIN 미설정 직원은 바로 처리
+  kSel=id; kPin=''; renderKpin();
+}
+function renderKpin(){
+  const s=staffById(kSel); if(!s) return;
+  const tk=todayKey();
+  const a=DB.attendance.find(x=>x.staffId===s.id && x.date===tk);
+  const action=(a&&a.inAt&&!a.outAt)?'퇴근':'출근';
+  const dotN=Math.max(4,kPin.length);
+  const dots=Array.from({length:dotN},(_,i)=>`<span class="kdot ${i<kPin.length?'on':''}"></span>`).join('');
+  $('#kBody').innerHTML=`<div class="kpin">
+    <div class="who">${esc(s.name)}</div>
+    <div class="act">${action} · 개인 PIN 입력</div>
+    <div class="kdots">${dots}</div>
+    <div class="kpad">
+      ${[1,2,3,4,5,6,7,8,9].map(n=>`<button class="kkey" onclick="kKey('${n}')">${n}</button>`).join('')}
+      <button class="kkey mini" onclick="kBack()">지움</button>
+      <button class="kkey" onclick="kKey('0')">0</button>
+      <button class="kkey mini" onclick="renderKiosk()">취소</button>
+    </div></div>`;
+}
+function kKey(d){ const s=staffById(kSel); if(!s) return; if(kPin.length>=8) return;
+  kPin+=d; renderKpin();
+  if(kPin.length===String(s.pin).length) setTimeout(kVerify,140);
+}
+function kBack(){ kPin=kPin.slice(0,-1); renderKpin(); }
+function kVerify(){ const s=staffById(kSel); if(!s) return;
+  if(String(kPin)!==String(s.pin)){ toast('PIN이 맞지 않아요'); kPin=''; renderKpin(); return; }
+  kioskCommit(kSel);
+}
+function kioskCommit(id){
+  const s=staffById(id); const tk=todayKey();
+  let a=DB.attendance.find(x=>x.staffId===id && x.date===tk); let msg;
+  if(!a || !a.inAt){ a=getAtt(id,tk,true); a.inAt=stampFor(tk); msg=`${s.name}님 출근 · ${fmtTime(a.inAt)}`; }
+  else if(!a.outAt){ a.outAt=stampFor(tk); msg=`${s.name}님 퇴근 · ${fmtHours(hoursBetween(a.inAt,a.outAt))} 근무`; }
+  else { toast(`${s.name}님은 오늘 근무 완료예요`); renderKiosk(); return; }
+  saveDB();
+  try{ renderHome(); if(currentTab==='att') renderAtt(); }catch(e){}
+  kSel=null; kPin='';
+  $('#kBody').innerHTML=`<div class="kpin" style="padding-top:30px">
+    <div style="font-size:60px">✅</div>
+    <div class="who" style="margin-top:10px">${esc(msg)}</div>
+    <div class="act" style="margin-top:10px">잠시 후 명단으로 돌아갑니다</div></div>`;
+  setTimeout(()=>{ if(kioskOn) renderKiosk(); },1700);
+}
+
 /* ---------- 시작 ---------- */
 function boot(){
   loadDB();
@@ -1546,6 +1747,7 @@ function boot(){
   renderHome();
   applyRole();
   cloudInit();
+  if(location.hash==='#kiosk') enterKiosk();   // 공용 기기: 바로 출근 화면
   // PWA: 오프라인/홈화면 설치 지원 (http/https로 열었을 때만)
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
     navigator.serviceWorker.register('sw.js').catch(()=>{});
