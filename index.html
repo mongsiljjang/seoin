@@ -160,6 +160,8 @@
   body[data-role="staff"] .admin-only{ display:none !important; }
   .roletag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.22);color:#fff;white-space:nowrap;flex:none;cursor:pointer}
   #syncBadge{flex:none}
+  .abadge{position:absolute; top:0; right:0; min-width:17px; height:17px; padding:0 4px; border-radius:999px;
+    background:#e5484d; color:#fff; font-size:10px; font-weight:900; display:none; align-items:center; justify-content:center; line-height:1}
   /* 잠금 화면(참여/승인대기/거절) */
   #gate{position:fixed; inset:0; z-index:70; background:var(--bg); overflow:auto; display:none}
   #gate.show{display:block}
@@ -192,8 +194,9 @@
       <div class="sub" id="todayStr">오늘</div>
     </div>
     <span id="roleTag" class="roletag" style="margin-left:auto" onclick="openMenu()">👤 직원</span>
-    <span id="syncBadge" class="pill grey" style="margin-left:8px; background:rgba(255,255,255,.2); color:#fff" onclick="openMenu()">이 기기</span>
-    <button class="hbtn" style="margin-left:8px" onclick="openMenu()">⚙️</button>
+    <button class="hbtn" style="margin-left:8px; position:relative; padding:8px 10px" onclick="openAlerts()">🔔<span id="alertBadge" class="abadge">0</span></button>
+    <span id="syncBadge" class="pill grey" style="margin-left:6px; background:rgba(255,255,255,.2); color:#fff" onclick="openMenu()">이 기기</span>
+    <button class="hbtn" style="margin-left:6px" onclick="openMenu()">⚙️</button>
   </div>
 </header>
 <div id="adminBanner" onclick="openSetPin()">🔑 관리자 PIN을 설정하세요 — 눌러서 설정</div>
@@ -425,8 +428,48 @@ function renderHome(){
     return `<div class="item"><div class="avatar">${esc(initials(s.name))}</div>
       <div class="grow"><div class="t">${esc(s.name)}</div><div class="d">${esc(s.dept||'')}</div></div>${st}</div>`;
   }).join('');
+  refreshBell();
 }
 function emptyBox(ic,txt){ return `<div class="empty"><span class="ic">${ic}</span>${esc(txt)}</div>`; }
+function dDays(dateStr){ if(!dateStr) return null; const d=new Date(dateStr+'T00:00:00'); if(isNaN(d)) return null;
+  const t=new Date(todayKey()+'T00:00:00'); return Math.round((d-t)/86400000); }
+function expChipHtml(dd){ return dd===null?'' : dd<0?`<span class="pill danger">만료</span>` : dd<=30?`<span class="pill warn">D-${dd}</span>` : ''; }
+function won(n){ return (+n||0).toLocaleString('ko-KR')+'원'; }
+
+/* ===== 알림 인박스 ===== */
+function computeAlerts(){
+  const a=[];
+  DB.inventory.forEach(i=>{
+    if(i.qty===0) a.push({level:'danger',icon:'📦',title:`${i.name} 품절`,sub:`최소 ${i.minQty}${i.unit}`,tab:'inv'});
+    else if(i.qty<=i.minQty) a.push({level:'warn',icon:'📦',title:`${i.name} 부족`,sub:`현재 ${i.qty}${i.unit} · 최소 ${i.minQty}${i.unit}`,tab:'inv'});
+    const dd=dDays(i.expiry);
+    if(dd!==null){
+      if(dd<0) a.push({level:'danger',icon:'📅',title:`${i.name} 유통기한 만료`,sub:`${i.expiry} · ${-dd}일 지남`,tab:'inv'});
+      else if(dd<=30) a.push({level:'warn',icon:'📅',title:`${i.name} 유통기한 임박`,sub:`D-${dd} · ${i.expiry}`,tab:'inv'});
+    }
+  });
+  if(isAdmin()){
+    DB.leaves.filter(l=>l.status==='pending').forEach(l=>{ const s=staffById(l.staffId);
+      a.push({level:'info',icon:'🌴',title:`연월차 승인 대기 · ${s?s.name:'(직원)'}`,sub:`${fmtDate(l.startDate)}${l.startDate!==l.endDate?'~'+fmtDate(l.endDate):''} · ${l.days}일`,tab:'leave'}); });
+  }
+  const rank={danger:0,warn:1,info:2};
+  a.sort((x,y)=>rank[x.level]-rank[y.level]);
+  return a;
+}
+function refreshBell(){ const el=$('#alertBadge'); if(!el) return; const n=computeAlerts().length;
+  el.textContent=n>99?'99+':n; el.style.display=n?'flex':'none'; }
+function openAlerts(){
+  const a=computeAlerts();
+  const body = a.length ? a.map(x=>`
+    <div class="item" style="cursor:pointer" onclick="closeModal(); go('${x.tab}')">
+      <div class="avatar" style="background:${x.level==='danger'?'var(--danger-soft)':x.level==='warn'?'var(--warn-soft)':'var(--brand-soft)'};color:${x.level==='danger'?'var(--danger)':x.level==='warn'?'var(--warn)':'var(--brand)'}">${x.icon}</div>
+      <div class="grow"><div class="t" style="font-size:14.5px">${esc(x.title)}</div><div class="d tiny muted">${esc(x.sub)}</div></div>
+      <span class="tiny muted">›</span>
+    </div>`).join('') : emptyBox('✅','지금은 알림이 없어요');
+  modal(`<h3>🔔 알림 ${a.length?`<span class="pill danger">${a.length}</span>`:''}</h3>
+    <div class="tiny muted" style="margin-bottom:10px">부족·품절·유통기한·연월차 승인 대기를 모았어요. 항목을 누르면 해당 화면으로 이동해요.</div>
+    ${body}`);
+}
 
 /* ========================================================================
    재고
@@ -445,11 +488,13 @@ function renderInv(){
     const lowFlag = i.qty<=i.minQty;
     const pill = i.qty===0?`<span class="pill danger">품절</span>`
       : lowFlag?`<span class="pill warn">부족</span>`:`<span class="pill ok">충분</span>`;
+    const dd=dDays(i.expiry);
+    const sub = [i.category||'분류없음', '최소 '+i.minQty+esc(i.unit), i.vendor?esc(i.vendor):'', dd!==null?(dd<0?'유통기한 만료':'유통기한 '+i.expiry):''].filter(Boolean).join(' · ');
     return `<div class="card" style="padding:12px 14px">
       <div class="spread">
         <div class="grow" onclick="openItemDetail('${i.id}')" style="cursor:pointer">
-          <div class="row" style="gap:7px"><span class="t" style="font-weight:800;font-size:15.5px">${esc(i.name)}</span>${pill}</div>
-          <div class="d tiny muted" style="margin-top:2px">${esc(i.category||'분류없음')} · 최소 ${i.minQty}${esc(i.unit)}</div>
+          <div class="row wrap" style="gap:6px"><span class="t" style="font-weight:800;font-size:15.5px">${esc(i.name)}</span>${pill}${expChipHtml(dd)}</div>
+          <div class="d tiny muted" style="margin-top:2px">${sub}</div>
         </div>
         <div style="text-align:right"><div class="big" style="color:${lowFlag?'var(--warn)':'var(--ink)'}">${i.qty}</div>
           <div class="tiny muted">${esc(i.unit)}</div></div>
@@ -461,6 +506,7 @@ function renderInv(){
       </div>
     </div>`;
   }).join('');
+  refreshBell();
 }
 
 function quickAdjust(id, type){
@@ -508,7 +554,12 @@ function openInvForm(edit){
       <label class="field"><span>최소 보유량</span><input id="fMin" type="number" inputmode="numeric" value="${it?it.minQty:10}"></label>
     </div>
     <div class="tiny muted" style="margin:-2px 2px 12px">현재 수량이 최소 보유량 이하로 내려가면 부족 알림이 떠요.</div>
-    <label class="field"><span>메모 (선택)</span><input id="fNote" value="${it?esc(it.note||''):''}" placeholder="보관 위치·거래처 등"></label>
+    <div class="two">
+      <label class="field"><span>거래처 (선택)</span><input id="fVendor" value="${it?esc(it.vendor||''):''}" placeholder="예: A메디칼"></label>
+      <label class="field"><span>단가 (원, 선택)</span><input id="fPrice" type="number" inputmode="numeric" value="${it&&it.price?it.price:''}" placeholder="0"></label>
+    </div>
+    <label class="field"><span>유통기한 (선택)</span><input id="fExpiry" type="date" value="${it?esc(it.expiry||''):''}"></label>
+    <label class="field"><span>메모 (선택)</span><input id="fNote" value="${it?esc(it.note||''):''}" placeholder="보관 위치 등"></label>
     <div class="row">
       <button class="btn block" onclick="saveItem('${it?it.id:''}')">${it?'저장':'추가'}</button>
       ${it?`<button class="btn danger" onclick="delItem('${it.id}')">삭제</button>`:''}
@@ -518,7 +569,8 @@ function saveItem(id){
   const name=$('#fName').value.trim(); if(!name){ toast('품목명을 입력하세요'); return; }
   const data={ name, category:$('#fCat').value.trim(), unit:$('#fUnit').value.trim()||'개',
     qty:Math.max(0,parseInt($('#fQty').value,10)||0), minQty:Math.max(0,parseInt($('#fMin').value,10)||0),
-    note:$('#fNote').value.trim(), updatedAt:now() };
+    vendor:$('#fVendor').value.trim(), price:Math.max(0,parseInt($('#fPrice').value,10)||0),
+    expiry:$('#fExpiry').value||'', note:$('#fNote').value.trim(), updatedAt:now() };
   if(id){ Object.assign(itemById(id), data); }
   else { DB.inventory.push({id:uid(), ...data}); }
   saveDB(); closeModal(); renderInv(); toast('저장되었습니다');
@@ -543,7 +595,8 @@ function openItemDetail(id){
     <h3>${esc(it.name)}</h3>
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0">
       <div class="spread"><div><div class="big" style="color:var(--brand)">${it.qty}${esc(it.unit)}</div>
-        <div class="tiny muted">${esc(it.category||'분류없음')} · 최소 ${it.minQty}${esc(it.unit)}</div></div>
+        <div class="tiny muted">${esc(it.category||'분류없음')} · 최소 ${it.minQty}${esc(it.unit)}</div>
+        ${(it.vendor||it.price||it.expiry)?`<div class="tiny muted" style="margin-top:3px">${[it.vendor?'거래처 '+esc(it.vendor):'', it.price?'단가 '+won(it.price):'', it.expiry?'유통기한 '+it.expiry+(dDays(it.expiry)!==null?` (${dDays(it.expiry)<0?'만료':'D-'+dDays(it.expiry)})`:''):''].filter(Boolean).join(' · ')}</div>`:''}</div>
         <button class="btn soft sm" onclick="openInvForm('${it.id}')">✏️ 수정</button></div>
     </div>
     <div class="row" style="margin:4px 0 14px">
@@ -562,7 +615,10 @@ const COLMAP = {
   unit:['단위','unit'],
   qty:['현재수량','수량','재고','재고수량','보유수량','현재고','현재','qty','stock'],
   minQty:['최소보유량','최소수량','최소','안전재고','적정재고','min','최소재고'],
-  note:['메모','비고','위치','보관위치','거래처','note','memo'],
+  vendor:['거래처','업체','공급처','구매처','vendor','supplier'],
+  price:['단가','가격','금액','매입가','price'],
+  expiry:['유통기한','유효기간','만료일','소비기한','expiry','exp'],
+  note:['메모','비고','위치','보관위치','note','memo'],
 };
 function openImport(){
   const noXlsx = window.__noXLSX || typeof XLSX==='undefined';
@@ -571,7 +627,7 @@ function openImport(){
     <div class="hint">엑셀(.xlsx) 또는 CSV 파일을 올리면 품목이 한 번에 등록돼요.
       같은 품목명이 있으면 <b>수량이 갱신</b>됩니다.</div>
     <button class="btn soft block" onclick="downloadTemplate()">📄 양식 파일 내려받기 (CSV)</button>
-    <div class="tiny muted" style="margin:8px 2px 14px">양식 열: <b>품목명 · 분류 · 단위 · 현재수량 · 최소보유량 · 메모</b><br>
+    <div class="tiny muted" style="margin:8px 2px 14px">양식 열: <b>품목명 · 분류 · 단위 · 현재수량 · 최소보유량 · 거래처 · 단가 · 유통기한 · 메모</b><br>
       열 제목이 있으면 순서가 달라도 자동 인식해요.</div>
     <label class="btn block" style="cursor:pointer">📂 파일 선택해서 불러오기
       <input type="file" id="impFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImport(event)"></label>
@@ -581,7 +637,7 @@ function openImport(){
       바로 불러올 수 있는 파일로 만들어 드려요.</div>`);
 }
 function downloadTemplate(){
-  const csv='﻿품목명,분류,단위,현재수량,최소보유량,메모\n주사기 10cc,소모품,개,40,100,\n멸균거즈,소모품,팩,22,20,\n니트릴장갑(L),위생,박스,5,10,창고2\n';
+  const csv='﻿품목명,분류,단위,현재수량,최소보유량,거래처,단가,유통기한,메모\n주사기 10cc,소모품,개,40,100,A메디칼,120,,\n리도카인 마취제,약품,관,15,20,B팜,1800,2026-12-31,냉장\n니트릴장갑(L),위생,박스,5,10,C상사,8000,,창고2\n';
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='재고_양식.csv'; a.click(); URL.revokeObjectURL(a.href);
@@ -631,18 +687,23 @@ function rowsToItems(rows){
   // 헤더가 없으면 순서 가정: 품목명,분류,단위,현재수량,최소보유량,메모
   let dataRows, col;
   if(hasHeader){ dataRows=rows.slice(1); col=idx; }
-  else { dataRows=rows; col={name:0,category:1,unit:2,qty:3,minQty:4,note:5}; }
+  else { dataRows=rows; col={name:0,category:1,unit:2,qty:3,minQty:4,vendor:5,price:6,expiry:7,note:8}; }
   const num=v=>{ const n=parseInt(String(v).replace(/[^\d-]/g,''),10); return isNaN(n)?null:n; };
+  const pick=(r,k)=> col[k]>=0 && col[k]!=null ? r[col[k]] : undefined;
+  const normDate=v=>{ v=String(v??'').trim(); if(!v) return ''; const m=v.match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/); return m?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`:''; };
   const items=[];
   for(const r of dataRows){
-    const name=String(r[col.name]??'').trim(); if(!name) continue;
+    const name=String(pick(r,'name')??'').trim(); if(!name) continue;
     items.push({
       name,
-      category:String(r[col.category]??'').trim(),
-      unit:String(r[col.unit]??'').trim()||'개',
-      qty:Math.max(0,num(r[col.qty])??0),
-      minQty:Math.max(0,num(r[col.minQty])??10),
-      note:String(r[col.note]??'').trim(),
+      category:String(pick(r,'category')??'').trim(),
+      unit:String(pick(r,'unit')??'').trim()||'개',
+      qty:Math.max(0,num(pick(r,'qty'))??0),
+      minQty:Math.max(0,num(pick(r,'minQty'))??10),
+      vendor:String(pick(r,'vendor')??'').trim(),
+      price:Math.max(0,num(pick(r,'price'))??0),
+      expiry:normDate(pick(r,'expiry')),
+      note:String(pick(r,'note')??'').trim(),
     });
   }
   return items;
@@ -676,7 +737,8 @@ function applyImport(){
   for(const it of _pendingImport){
     const ex=DB.inventory.find(x=>x.name.trim()===it.name.trim());
     if(ex){ Object.assign(ex,{category:it.category||ex.category, unit:it.unit||ex.unit,
-      qty:it.qty, minQty:it.minQty, note:it.note||ex.note, updatedAt:now()}); updated++; }
+      qty:it.qty, minQty:it.minQty, vendor:it.vendor||ex.vendor, price:it.price||ex.price,
+      expiry:it.expiry||ex.expiry, note:it.note||ex.note, updatedAt:now()}); updated++; }
     else { DB.inventory.push({id:uid(), ...it, updatedAt:now()}); added++; }
   }
   _pendingImport=[]; saveDB(); closeModal(); renderInv(); renderHome();
@@ -966,9 +1028,10 @@ function csvBlob(rows){
 }
 function download(blob,name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href); }
 function exportInventory(){
-  const rows=[['품목명','분류','단위','현재수량','최소보유량','상태','메모']];
-  DB.inventory.forEach(i=>rows.push([i.name,i.category,i.unit,i.qty,i.minQty,
-    i.qty===0?'품절':(i.qty<=i.minQty?'부족':'충분'), i.note]));
+  const rows=[['품목명','분류','단위','현재수량','최소보유량','거래처','단가','유통기한','상태','메모']];
+  DB.inventory.forEach(i=>{ const dd=dDays(i.expiry);
+    rows.push([i.name,i.category,i.unit,i.qty,i.minQty,i.vendor||'',i.price||'',i.expiry||'',
+      i.qty===0?'품절':(i.qty<=i.minQty?'부족':(dd!==null&&dd<0?'유통기한만료':(dd!==null&&dd<=30?'유통기한임박':'충분'))), i.note]); });
   download(csvBlob(rows), `재고현황_${todayKey()}.csv`); toast('재고 현황을 내보냈어요');
 }
 function exportAttendance(mk){
@@ -1107,6 +1170,7 @@ function applyRole(){
     if(currentTab==='staff') go('home');
     if(currentTab==='leave') leaveTab('new');
   }
+  refreshBell();
 }
 function setGate(state){
   if(state===gateState) return;
