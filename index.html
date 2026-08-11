@@ -433,7 +433,9 @@ function loadDB(){
   }
   ensureSchema();
 }
-function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.members=[]; if(typeof DB.adminPin!=='string') DB.adminPin=''; if(!Array.isArray(DB.implants)) DB.implants=[]; }
+function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.members=[]; if(typeof DB.adminPin!=='string') DB.adminPin=''; if(!Array.isArray(DB.implants)) DB.implants=[];
+  if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
+  if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
 function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPush(); }
 
 function seedDemo(){
@@ -1145,8 +1147,27 @@ function getAtt(staffId,date,create){
   return a;
 }
 function checkIn(id,date){
+  // GPS 출근 확인이 켜져 있고, 직원 본인이 본인을 찍는 경우만 위치 확인(관리자 대리·키오스크 제외)
+  if(DB.geo && DB.geo.on && !isAdmin() && currentUser() && currentUser().id===id){ geoCheckIn(id,date); return; }
   const a=getAtt(id,date,true); a.inAt = stampFor(date); saveDB(); renderAtt(); renderHome();
   toast(`${staffById(id).name} 출근 ${fmtTime(a.inAt)}`);
+}
+function haversineM(la1,ln1,la2,ln2){ const R=6371000, r=x=>x*Math.PI/180;
+  const dLa=r(la2-la1), dLn=r(ln2-ln1);
+  const s=Math.sin(dLa/2)**2 + Math.cos(r(la1))*Math.cos(r(la2))*Math.sin(dLn/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(s))); }
+function geoCheckIn(id,date){
+  const g=DB.geo;
+  if(g.lat==null){ toast('병원 위치가 아직 설정 안 됐어요. 관리자에게 문의하세요'); return; }
+  if(!navigator.geolocation){ toast('이 기기는 위치를 지원하지 않아요'); return; }
+  toast('📍 위치 확인 중…');
+  navigator.geolocation.getCurrentPosition(pos=>{
+    const dist=haversineM(g.lat,g.lng,pos.coords.latitude,pos.coords.longitude);
+    if(dist > (g.radiusM||200)){ toast(`병원에서 약 ${Math.round(dist)}m 떨어져 있어요. 병원에서 출근해 주세요`); return; }
+    const a=getAtt(id,date,true); a.inAt=stampFor(date); a.lat=pos.coords.latitude; a.lng=pos.coords.longitude; a.dist=Math.round(dist);
+    saveDB(); renderAtt(); renderHome();
+    toast(`${staffById(id).name} 출근 · 병원 반경 내(${Math.round(dist)}m)`);
+  }, ()=>{ toast('위치 권한이 필요해요. 크롬/사파리에서 열고 위치를 허용해 주세요'); }, {enableHighAccuracy:true, timeout:8000, maximumAge:0});
 }
 function checkOut(id,date){
   const a=getAtt(id,date,true); if(!a.inAt) a.inAt=stampFor(date);
@@ -1407,6 +1428,17 @@ function openMenu(){
     <button class="btn soft block" onclick="closeModal(); enterKiosk()">이 기기를 ‘출근 체크 화면’으로 열기</button>
     <div class="tiny muted" style="margin:8px 2px 0">데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면, 직원이 <b>이름+개인 PIN</b>으로 출근/퇴근을 찍어요(개인폰 로그인 불필요). 주소 뒤에 <b>#kiosk</b>를 붙여 북마크하면 바로 열립니다. 나갈 땐 관리자 PIN.</div>
     <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📍 GPS 출근 확인 (선택 · 무료)</div>
+    <label class="field" style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+      <input type="checkbox" id="geoOn" style="width:auto;margin:0" ${DB.geo.on?'checked':''} onchange="setGeoOn(this.checked)">
+      <span style="margin:0;font-weight:700">직원이 본인 폰으로 출근할 때 병원 위치 확인</span></label>
+    <div class="two" style="gap:8px">
+      <button class="btn soft" onclick="saveClinicLoc()">📍 현재 위치를 병원으로 저장</button>
+      <select id="geoRadius" onchange="setGeoRadius(this.value)">
+        ${[100,200,300,500].map(r=>`<option value="${r}" ${DB.geo.radiusM===r?'selected':''}>반경 ${r}m</option>`).join('')}</select>
+    </div>
+    <div class="tiny muted" style="margin:6px 2px 0">${DB.geo.lat!=null?`✅ 병원 위치 설정됨 · 반경 ${DB.geo.radiusM}m 이내에서만 출근`:'⚠ 병원 위치 미설정 — <b>병원에 계실 때</b> 위 버튼을 눌러 저장하세요'}. GPS는 <b>무료</b>이며, 관리자 대리 출근·공용 키오스크에는 적용되지 않아요. 카톡에서 위치가 막히면 크롬/사파리로 열어주세요.</div>
+    <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
     <div class="two" style="gap:8px">
       <button class="btn soft" onclick="exportInventory()">📦 재고 현황</button>
@@ -1424,6 +1456,19 @@ function openMenu(){
 }
 function saveHospName(){ DB.hospName=$('#setName').value.trim()||'우리병원 관리'; saveDB();
   $('#hospName').textContent=DB.hospName; toast('저장되었습니다'); }
+function setGeoOn(v){ DB.geo.on=!!v; saveDB();
+  if(v && DB.geo.lat==null) toast('켜짐 · 먼저 "현재 위치를 병원으로 저장"을 눌러주세요');
+  else toast(v?'GPS 출근 확인 켜짐':'GPS 출근 확인 꺼짐'); }
+function setGeoRadius(v){ DB.geo.radiusM=parseInt(v,10)||200; saveDB(); toast(`반경 ${DB.geo.radiusM}m로 설정`); }
+function saveClinicLoc(){
+  if(!navigator.geolocation){ toast('이 기기는 위치를 지원하지 않아요'); return; }
+  toast('📍 위치 확인 중…');
+  navigator.geolocation.getCurrentPosition(pos=>{
+    DB.geo.lat=pos.coords.latitude; DB.geo.lng=pos.coords.longitude; saveDB();
+    toast('병원 위치를 저장했어요');
+    if($('#modalBg').classList.contains('open')) openMenu();
+  }, ()=>{ toast('위치 권한이 필요해요(크롬/사파리에서 위치 허용)'); }, {enableHighAccuracy:true, timeout:8000, maximumAge:0});
+}
 function exportData(){
   const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
