@@ -117,6 +117,19 @@
   .stat .l{font-size:12px; color:var(--sub); font-weight:700; margin-top:2px}
   .stat.tap{cursor:pointer}
 
+  /* 홈 히어로(오늘 처리할 일) */
+  .hero{background:linear-gradient(135deg,var(--hdr1),var(--hdr2)); color:#fff; border:0;
+    box-shadow:0 12px 30px rgba(16,33,59,.28); border-radius:22px; padding:18px}
+  .hero .htop{display:flex; justify-content:space-between; align-items:flex-start; gap:10px}
+  .hero .hlabel{font-size:12.5px; font-weight:800; opacity:.9}
+  .hero .hval{font-size:34px; font-weight:900; letter-spacing:-1.5px; margin:5px 0 0}
+  .hero .hbtn2{background:rgba(255,255,255,.2); border:0; color:#fff; font-weight:800; font-size:12.5px;
+    padding:8px 13px; border-radius:999px; cursor:pointer; flex:none; white-space:nowrap}
+  .grid4{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:15px}
+  .grid4 .g{background:rgba(255,255,255,.13); border-radius:14px; padding:11px 6px; text-align:center; cursor:pointer}
+  .grid4 .g .gn{font-size:21px; font-weight:900; letter-spacing:-.5px}
+  .grid4 .g .gl{font-size:10.5px; opacity:.88; margin-top:3px; font-weight:700}
+
   /* segmented control */
   .seg{display:flex; background:#eaf1f3; border-radius:12px; padding:4px; gap:4px; margin-bottom:12px}
   .seg button{flex:1; border:0; background:transparent; font-weight:800; font-size:13px; color:var(--sub);
@@ -229,6 +242,18 @@
 
   <!-- ============ 홈 ============ -->
   <section class="page active" id="page-home">
+    <section class="card hero admin-only" id="homeHero" style="margin-top:2px">
+      <div class="htop">
+        <div><div class="hlabel">🗂️ 오늘 처리할 일</div><div class="hval" id="heroTotal">0건</div></div>
+        <button class="hbtn2" onclick="openAlerts()">전체 보기</button>
+      </div>
+      <div class="grid4">
+        <div class="g" onclick="go('leave')"><div class="gn" id="heroLeave">0</div><div class="gl">연월차 승인</div></div>
+        <div class="g" onclick="go('inv')"><div class="gn" id="heroLow">0</div><div class="gl">재고 부족</div></div>
+        <div class="g" onclick="go('inv')"><div class="gn" id="heroZero">0</div><div class="gl">품절</div></div>
+        <div class="g" onclick="go('inv')"><div class="gn" id="heroExp">0</div><div class="gl">유통기한</div></div>
+      </div>
+    </section>
     <h2 class="sec">오늘 한눈에</h2>
     <div class="stats">
       <div class="stat tap" onclick="go('att')"><div class="n" id="hStatIn">0</div><div class="l">현재 근무중</div></div>
@@ -459,6 +484,18 @@ function renderHome(){
   $('#hStatLow').textContent = low.length;
   $('#hStatPend').textContent = pend.length;
   $('#hStatStaff').textContent = DB.staff.length;
+
+  // 히어로: 오늘 처리할 일(관리자)
+  if($('#heroTotal')){
+    const zero = DB.inventory.filter(i=>i.qty===0).length;
+    const lowOnly = DB.inventory.filter(i=>i.qty>0 && i.qty<=i.minQty).length;
+    const expSoon = DB.inventory.filter(i=>{ const d=dDays(i.expiry); return d!==null && d<=30; }).length;
+    $('#heroLeave').textContent = pend.length;
+    $('#heroLow').textContent = lowOnly;
+    $('#heroZero').textContent = zero;
+    $('#heroExp').textContent = expSoon;
+    $('#heroTotal').textContent = (pend.length + lowOnly + zero + expSoon) + '건';
+  }
 
   // 부족 재고
   const lowBox = $('#homeLow');
