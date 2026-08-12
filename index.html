@@ -380,6 +380,7 @@
       <h2 class="sec" style="margin:0">👥 직원 명단</h2>
       <button class="btn sm" onclick="openStaffForm()">＋ 직원</button>
     </div>
+    <div class="hint">직원 <b>이름을 누르면</b> 정보·연차를 바로 수정할 수 있어요.</div>
     <div id="staffList"></div>
   </section>
 
@@ -1341,7 +1342,8 @@ function renderStaff(){
         <div><div class="t" style="font-weight:800">${esc(s.name)} <span class="tiny muted" style="font-weight:600">${esc(s.position||'')}</span></div>
           <div class="d tiny muted">${esc(s.dept||'부서 미지정')}${s.joinDate?' · 입사 '+s.joinDate+(serviceNth(s.joinDate)?' · '+serviceNth(s.joinDate)+'년차':''):''}</div></div></div>
         <div style="text-align:right"><div style="font-weight:800;color:var(--brand)">연차 ${r.remain}일</div>
-          <div class="tiny muted">/ 총 ${r.total}일${s.annualAuto===false?' (수동)':''}</div></div></div></div>`;
+          <div class="tiny muted">/ 총 ${r.total}일${s.annualAuto===false?' (수동)':''}</div>
+          <div class="tiny" style="color:var(--brand);font-weight:700;margin-top:2px">✏️ 수정 ›</div></div></div></div>`;
   }).join('');
 }
 function openStaffForm(edit){
@@ -1363,7 +1365,7 @@ function openStaffForm(edit){
     <label class="field"><span>${s?'PIN 재설정 (비우면 기존 유지)':'개인 PIN * (숫자 4자리 이상)'}</span><input id="sPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
     <div class="two">
       <label class="field"><span>입사일</span><input id="sJoin" type="date" value="${s?esc(s.joinDate||''):''}" onchange="staffAnnualSync()"></label>
-      <label class="field"><span>연간 연차(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?annualTotalOf(s):15}"></label>
+      <label class="field"><span>연간 연차(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?annualTotalOf(s):15}" oninput="staffAnnualManualEdit()"></label>
     </div>
     <label class="field" style="display:flex;align-items:center;gap:8px;margin:-4px 2px 8px">
       <input type="checkbox" id="sAnnualAuto" style="width:auto;margin:0" ${(!s||s.annualAuto!==false)?'checked':''} onchange="staffAnnualSync()">
@@ -1378,18 +1380,24 @@ function openStaffForm(edit){
     <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 권장(기록 보존).</div>`);
   staffAnnualSync();
 }
-function staffAnnualSync(){
+function staffAnnualSync(){   // 체크박스 토글 / 입사일 변경 시
   const auto=$('#sAnnualAuto'), an=$('#sAnnual'), hint=$('#sAnnualHint'); if(!auto||!an||!hint) return;
   const calc=annualByService($('#sJoin').value);
+  an.disabled=false;   // 항상 직접 수정 가능
   if(auto.checked){
-    an.disabled=true; an.style.opacity=.6;
     if(calc!=null){ an.value=calc;
-      hint.innerHTML=`입사일 기준 <b>자동 ${calc}일</b> · 1년차 11 · 2~3년차 15 · 4년차부터 16(2년마다 +1, 최대 25)`; }
-    else hint.textContent='입사일을 넣으면 연차가 자동으로 계산돼요';
+      hint.innerHTML=`입사일 기준 <b>자동 ${calc}일</b> · 1년차 11 · 2~3년차 15 · 4년차부터 16(2년마다 +1). 숫자를 바꾸면 <b>수동</b>으로 바뀌어요.`; }
+    else hint.innerHTML='입사일을 넣으면 자동 계산돼요. 숫자를 직접 넣어도 됩니다(수동).';
   } else {
-    an.disabled=false; an.style.opacity=1;
-    hint.textContent='✏️ 관리자 수동 지정 — 위 칸에 직접 입력한 값을 사용해요';
+    hint.innerHTML=`✏️ <b>수동 지정</b> — 입력한 값을 그대로 사용해요.${calc!=null?` · <a href="javascript:void(0)" onclick="staffAnnualUseAuto()" style="color:var(--brand);font-weight:800">입사일 자동(${calc}일)으로 되돌리기</a>`:''}`;
   }
+}
+function staffAnnualManualEdit(){   // 연차 칸을 직접 입력하면 '수동'으로 전환
+  const auto=$('#sAnnualAuto'); if(auto && auto.checked) auto.checked=false;
+  staffAnnualSync();
+}
+function staffAnnualUseAuto(){      // 다시 입사일 자동으로
+  const auto=$('#sAnnualAuto'); if(auto) auto.checked=true; staffAnnualSync();
 }
 function saveStaff(id){
   const name=$('#sName').value.trim(); if(!name){ toast('이름을 입력하세요'); return; }
