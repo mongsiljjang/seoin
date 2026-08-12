@@ -490,12 +490,39 @@ function leaveUsed(staffId, type, year){
       && l.startDate && l.startDate.startsWith(String(year)))
     .reduce((s,l)=>s+(+l.days||0),0);
 }
+/* 입사일 기준 연차 자동 계산: 1년차 11 · 2~3년차 15 · 4년차부터 16(2년마다 +1, 최대 25) */
+function annualByService(joinDate, ref){
+  if(!joinDate) return null;
+  const j=new Date(joinDate+'T00:00:00'); if(isNaN(j)) return null;
+  const now = ref? new Date(ref+'T00:00:00') : new Date();
+  let years = now.getFullYear()-j.getFullYear();
+  const m = now.getMonth()-j.getMonth();
+  if(m<0 || (m===0 && now.getDate()<j.getDate())) years--;   // 만근속 연수
+  const nth = years + 1;                                      // n년차(1-based)
+  if(nth<=1) return 11;
+  if(nth<=3) return 15;
+  return Math.min(25, 16 + Math.floor((nth-4)/2));
+}
+function serviceNth(joinDate, ref){   // n년차(1-based). 입사일 없으면 null
+  if(!joinDate) return null;
+  const j=new Date(joinDate+'T00:00:00'); if(isNaN(j)) return null;
+  const now = ref? new Date(ref+'T00:00:00') : new Date();
+  let years=now.getFullYear()-j.getFullYear(); const m=now.getMonth()-j.getMonth();
+  if(m<0 || (m===0 && now.getDate()<j.getDate())) years--;
+  return Math.max(1, years+1);
+}
+/* 실제 적용 총 연차: 자동(입사일) 또는 관리자 수동 지정 */
+function annualTotalOf(st){
+  if(st.annualAuto!==false){ const a=annualByService(st.joinDate); if(a!=null) return a; }
+  return (+st.annualTotal||0);
+}
 function annualRemain(st){
   const y = new Date().getFullYear();
   const used = DB.leaves.filter(l=>l.staffId===st.id && l.status==='approved'
       && l.startDate && l.startDate.startsWith(String(y)))
     .reduce((s,l)=>s+(+l.days||0),0);
-  return { total:(+st.annualTotal||0), used, remain:(+st.annualTotal||0)-used };
+  const total = annualTotalOf(st);
+  return { total, used, remain: total-used };
 }
 
 /* ========================================================================
@@ -1312,9 +1339,9 @@ function renderStaff(){
     return `<div class="card" style="padding:13px 14px" onclick="openStaffForm('${s.id}')">
       <div class="spread"><div class="row" style="gap:11px"><div class="avatar">${esc(initials(s.name))}</div>
         <div><div class="t" style="font-weight:800">${esc(s.name)} <span class="tiny muted" style="font-weight:600">${esc(s.position||'')}</span></div>
-          <div class="d tiny muted">${esc(s.dept||'부서 미지정')}${s.joinDate?' · 입사 '+s.joinDate:''}</div></div></div>
+          <div class="d tiny muted">${esc(s.dept||'부서 미지정')}${s.joinDate?' · 입사 '+s.joinDate+(serviceNth(s.joinDate)?' · '+serviceNth(s.joinDate)+'년차':''):''}</div></div></div>
         <div style="text-align:right"><div style="font-weight:800;color:var(--brand)">연차 ${r.remain}일</div>
-          <div class="tiny muted">/ ${r.total}일</div></div></div></div>`;
+          <div class="tiny muted">/ 총 ${r.total}일${s.annualAuto===false?' (수동)':''}</div></div></div></div>`;
   }).join('');
 }
 function openStaffForm(edit){
@@ -1335,9 +1362,12 @@ function openStaffForm(edit){
     </div>
     <label class="field"><span>${s?'PIN 재설정 (비우면 기존 유지)':'개인 PIN * (숫자 4자리 이상)'}</span><input id="sPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
     <div class="two">
-      <label class="field"><span>입사일</span><input id="sJoin" type="date" value="${s?esc(s.joinDate||''):''}"></label>
-      <label class="field"><span>연간 연차(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?s.annualTotal:15}"></label>
+      <label class="field"><span>입사일</span><input id="sJoin" type="date" value="${s?esc(s.joinDate||''):''}" onchange="staffAnnualSync()"></label>
+      <label class="field"><span>연간 연차(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?annualTotalOf(s):15}"></label>
     </div>
+    <label class="field" style="display:flex;align-items:center;gap:8px;margin:-4px 2px 8px">
+      <input type="checkbox" id="sAnnualAuto" style="width:auto;margin:0" ${(!s||s.annualAuto!==false)?'checked':''} onchange="staffAnnualSync()">
+      <span id="sAnnualHint" class="tiny muted" style="margin:0;font-weight:600"></span></label>
     ${s?`<label class="field"><span>재직 상태</span><select id="sActive">
       <option value="1" ${s.active!==false?'selected':''}>재직</option>
       <option value="0" ${s.active===false?'selected':''}>퇴사 (로그인 차단)</option></select></label>`:''}
@@ -1346,6 +1376,20 @@ function openStaffForm(edit){
       ${s?`<button class="btn danger" onclick="delStaff('${s.id}')">삭제</button>`:''}
     </div>
     <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 권장(기록 보존).</div>`);
+  staffAnnualSync();
+}
+function staffAnnualSync(){
+  const auto=$('#sAnnualAuto'), an=$('#sAnnual'), hint=$('#sAnnualHint'); if(!auto||!an||!hint) return;
+  const calc=annualByService($('#sJoin').value);
+  if(auto.checked){
+    an.disabled=true; an.style.opacity=.6;
+    if(calc!=null){ an.value=calc;
+      hint.innerHTML=`입사일 기준 <b>자동 ${calc}일</b> · 1년차 11 · 2~3년차 15 · 4년차부터 16(2년마다 +1, 최대 25)`; }
+    else hint.textContent='입사일을 넣으면 연차가 자동으로 계산돼요';
+  } else {
+    an.disabled=false; an.style.opacity=1;
+    hint.textContent='✏️ 관리자 수동 지정 — 위 칸에 직접 입력한 값을 사용해요';
+  }
 }
 function saveStaff(id){
   const name=$('#sName').value.trim(); if(!name){ toast('이름을 입력하세요'); return; }
@@ -1353,8 +1397,12 @@ function saveStaff(id){
   if(DB.staff.some(x=>x.id!==id && normPhone(x.phone)===phone)){ toast('이미 등록된 전화번호예요'); return; }
   const role=$('#sRole').value==='관리자'?'관리자':'직원';
   const pinIn=($('#sPin').value||'').trim();
+  const annualAuto = $('#sAnnualAuto') ? $('#sAnnualAuto').checked : true;
+  const jd=$('#sJoin').value;
+  const annualTotal = annualAuto ? (annualByService(jd) ?? Math.max(0,parseInt($('#sAnnual').value,10)||0))
+                                 : Math.max(0,parseInt($('#sAnnual').value,10)||0);
   const base={ name, dept:$('#sDept').value.trim(), position:$('#sPos').value.trim(),
-    joinDate:$('#sJoin').value, annualTotal:Math.max(0,parseInt($('#sAnnual').value,10)||0), phone, role };
+    joinDate:jd, annualAuto, annualTotal, phone, role };
   if(id){
     const s=staffById(id);
     if(pinIn){ if(!/^\d{4,8}$/.test(pinIn)){ toast('PIN은 숫자 4~8자리'); return; } base.pin=pinIn; }
