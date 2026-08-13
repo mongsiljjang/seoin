@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <img src="icons/icon-48.png" width="28" height="28" alt="" />
+    <h1>병원 관리 앱</h1>
+  </header>
+
+  <button id="open" class="primary" disabled>앱 열기</button>
+  <button id="openWin" class="ghost" disabled>앱 창으로 열기</button>
+
+  <p id="hint" class="hint">
+    먼저 아래에 앱 주소를 넣어주세요. 앱을 웹에 올려둔 주소(예: GitHub Pages,
+    Firebase 호스팅)를 붙여넣으면 됩니다.
+  </p>
+
+  <details id="settings">
+    <summary>설정</summary>
+    <label for="url">앱 주소 (URL)</label>
+    <input id="url" type="url" placeholder="https://내-앱-주소.example.com/index.html" />
+
+    <label class="row">
+      <input id="modeWindow" type="checkbox" />
+      기본으로 <b>앱 창</b>(주소창 없는 창)으로 열기
+    </label>
+
+    <button id="save" class="primary">저장</button>
+    <p class="tip">단축키: <kbd>Ctrl/⌘</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd></p>
+  </details>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="popup.js"></script>
+</body>
+</html>

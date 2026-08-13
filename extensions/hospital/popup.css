@@ -1,0 +1,60 @@
+:root {
+  --brand: #1f9d8f;
+  --brand-dark: #157f73;
+  --ink: #142027;
+  --muted: #62707a;
+  --line: #e3e8eb;
+  --bg: #ffffff;
+}
+* { box-sizing: border-box; }
+body {
+  width: 300px;
+  margin: 0;
+  padding: 14px;
+  font: 14px/1.45 -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+header img { border-radius: 7px; }
+h1 { font-size: 15px; margin: 0; }
+button {
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+button:disabled { opacity: .45; cursor: not-allowed; }
+.primary { background: var(--brand); color: #fff; }
+.primary:hover:not(:disabled) { background: var(--brand-dark); }
+.ghost { background: #f1f4f5; color: var(--ink); }
+.ghost:hover:not(:disabled) { background: #e7ecee; }
+.hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 10px; }
+.hint.ok { color: var(--brand-dark); }
+details { border-top: 1px solid var(--line); padding-top: 8px; }
+summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+label { display: block; font-size: 12.5px; color: var(--muted); margin: 8px 0 4px; }
+label.row { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 13px; }
+label.row input { width: auto; margin: 0; }
+input[type="url"] {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 13px;
+}
+input[type="url"]:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
+.tip { color: var(--muted); font-size: 12px; margin: 10px 0 0; }
+kbd {
+  background: #f1f4f5; border: 1px solid var(--line); border-radius: 5px;
+  padding: 1px 5px; font-size: 11px;
+}
+.toast {
+  position: fixed; left: 14px; right: 14px; bottom: 12px;
+  background: var(--ink); color: #fff; text-align: center;
+  padding: 8px; border-radius: 8px; font-size: 12.5px;
+}
