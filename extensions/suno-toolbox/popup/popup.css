@@ -60,6 +60,8 @@ textarea#memoText:focus { outline: 2px solid var(--brand); }
 .list li input[type="checkbox"] { width: 16px; height: 16px; }
 
 h3 { margin: 2px 0 10px; font-size: 14px; }
+.fld-label { display: block; font-size: 12px; color: var(--muted); margin: 2px 0 5px; }
+#folderHint { margin: 6px 0 12px; }
 .help { margin: 0 0 10px; padding-left: 18px; }
 .help li { margin-bottom: 5px; }
 .note {

@@ -38,6 +38,16 @@
 
   <section id="suno" class="panel">
     <h3>Suno 곡 일괄 저장</h3>
+
+    <label class="fld-label" for="sunoFolder">저장 폴더 (다운로드 폴더 안 하위 폴더)</label>
+    <form id="folderForm" class="add">
+      <input id="sunoFolder" placeholder="Suno" autocomplete="off" />
+      <button type="submit">저장</button>
+    </form>
+    <p id="folderHint" class="muted">
+      예) <b>Suno</b> → 다운로드\Suno 폴더에 저장. 비워두면 다운로드 폴더에 바로 저장돼요.
+    </p>
+
     <ol class="help">
       <li><b>suno.com</b> 에서 내 라이브러리/플레이리스트를 엽니다.</li>
       <li>곡들이 화면에 보이도록 스크롤합니다.</li>

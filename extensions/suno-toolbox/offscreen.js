@@ -57,7 +57,17 @@ function encodeWAV(audioBuffer) {
   return buffer;
 }
 
-async function convertOne(track, tabId, index, total) {
+// 저장 하위 폴더 이름 정리 (다운로드 폴더 기준 상대경로만 허용)
+function sanitizeFolder(folder) {
+  let f = (folder == null ? "Suno" : String(folder));
+  f = f.replace(/\\/g, "/")                 // 백슬래시 → 슬래시
+       .replace(/[:*?"<>|]+/g, " ")         // 파일시스템 금지문자
+       .replace(/\.\.+/g, ".")              // 상위경로(..) 차단
+       .split("/").map((s) => s.trim()).filter(Boolean).join("/");
+  return f; // 비어 있으면 "" (다운로드 폴더 루트에 저장)
+}
+
+async function convertOne(track, tabId, index, total, folder) {
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title });
   const res = await fetch(track.url, { credentials: "omit" });
   if (!res.ok) throw new Error("HTTP " + res.status);
@@ -69,19 +79,22 @@ async function convertOne(track, tabId, index, total) {
   const blob = new Blob([wav], { type: "audio/wav" });
   const blobUrl = URL.createObjectURL(blob);
 
+  const name = sanitize(track.title) + ".wav";
   send({
     type: "TRACK_READY",
     tabId, index, total,
     blobUrl,
-    filename: "Suno/" + sanitize(track.title) + ".wav",
+    filename: folder ? folder + "/" + name : name,
   });
 }
 
 async function runBatch(tracks, tabId) {
   const total = tracks.length;
+  const { sunoFolder } = await chrome.storage.local.get({ sunoFolder: "Suno" });
+  const folder = sanitizeFolder(sunoFolder);
   for (let i = 0; i < total; i++) {
     try {
-      await convertOne(tracks[i], tabId, i, total);
+      await convertOne(tracks[i], tabId, i, total, folder);
     } catch (e) {
       send({ type: "TRACK_ERROR", tabId, index: i, total, error: String(e && e.message || e), title: tracks[i].title });
     }

@@ -35,6 +35,20 @@
       map.set(id, cur);
     });
 
+    // 2.5) 곡 커버 이미지에서 곡 id + 제목(alt) 뽑기
+    //   Suno 커버 URL 예: https://cdn2.suno.ai/image_<uuid>.jpeg  (uuid = 곡 id)
+    document.querySelectorAll("img[src]").forEach((img) => {
+      const src = img.getAttribute("src") || "";
+      if (!/suno\.ai/i.test(src)) return;               // 수노 CDN 이미지만
+      const m = src.match(UUID);
+      if (!m) return;
+      const id = m[0].toLowerCase();
+      const title = (img.getAttribute("alt") || "").trim();
+      const cur = map.get(id) || { id, title: "", url: null };
+      if (title && (!cur.title || title.length > cur.title.length)) cur.title = title;
+      map.set(id, cur);
+    });
+
     // 3) 페이지 HTML 전체에서 오디오 URL 패턴 스캔 (JSON 상태 등)
     const html = document.documentElement.innerHTML;
     let mm;

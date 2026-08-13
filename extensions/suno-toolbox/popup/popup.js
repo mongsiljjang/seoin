@@ -128,11 +128,31 @@ function initPages() {
   renderPages();
 }
 
+// ---------- 수노 저장 폴더 설정 ----------
+async function initSunoFolder() {
+  const input = $("#sunoFolder");
+  input.value = await store.get("sunoFolder", "Suno");
+  const save = async () => {
+    const v = input.value.trim();
+    await store.set("sunoFolder", v);
+    const hint = $("#folderHint");
+    hint.innerHTML = v
+      ? `저장됨 ✓ → 다운로드\\<b>${v.replace(/</g, "&lt;")}</b> 폴더`
+      : "저장됨 ✓ → 다운로드 폴더에 바로 저장";
+    setTimeout(() => {
+      hint.innerHTML =
+        "예) <b>Suno</b> → 다운로드\\Suno 폴더에 저장. 비워두면 다운로드 폴더에 바로 저장돼요.";
+    }, 2200);
+  };
+  $("#folderForm").addEventListener("submit", (e) => { e.preventDefault(); save(); });
+}
+
 // ---------- 초기화 ----------
 (async () => {
   await initMemo();
   initTodo();
   initPages();
+  initSunoFolder();
   const last = await store.get("lastTab", "memo");
   const btn = document.querySelector(`.tabs button[data-tab="${last}"]`);
   if (btn) btn.click();
