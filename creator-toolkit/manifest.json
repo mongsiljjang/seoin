@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Creator All-in-One Toolkit",
+  "version": "1.0.0",
+  "description": "유튜브 SEO 태그 · 수노(Suno) 프롬프트 · 미드저니(Midjourney) 명령어를 한 번에 만들어 복사/자동입력하는 크리에이터 올인원 툴킷.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "올인원 크리에이터 툴킷",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["clipboardWrite", "activeTab", "scripting", "storage"],
+  "host_permissions": ["https://studio.youtube.com/*"]
+}

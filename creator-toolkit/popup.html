@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root { --brand: #4CAF50; --brand-dark: #45a049; }
+    * { box-sizing: border-box; }
+    body { width: 360px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", sans-serif; padding: 12px; margin: 0; color: #222; }
+    h3 { margin: 0 0 12px; font-size: 16px; }
+    .tab { display: flex; overflow: hidden; border: 1px solid #ccc; border-radius: 8px 8px 0 0; background-color: #f1f1f1; }
+    .tab button {
+      flex: 1; background-color: inherit; border: none; outline: none;
+      cursor: pointer; padding: 10px 6px; font-size: 13px; font-weight: bold;
+      transition: background-color 0.15s;
+    }
+    .tab button:hover { background-color: #ddd; }
+    .tab button.active { background-color: #fff; color: var(--brand-dark); }
+    .tabcontent { display: none; padding: 15px 12px; border: 1px solid #ccc; border-top: none; border-radius: 0 0 8px 8px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin-top: 10px; }
+    input, select, textarea {
+      width: 100%; margin-top: 6px; padding: 8px; border: 1px solid #ccc;
+      border-radius: 6px; font-size: 13px; font-family: inherit;
+    }
+    textarea { resize: vertical; min-height: 70px; }
+    button.action-btn {
+      width: 100%; margin-top: 12px; padding: 10px; border: none; border-radius: 6px;
+      background-color: var(--brand); color: white; cursor: pointer; font-weight: bold; font-size: 14px;
+      transition: background-color 0.15s;
+    }
+    button.action-btn:hover { background-color: var(--brand-dark); }
+    button.action-btn.secondary { background-color: #607d8b; }
+    button.action-btn.secondary:hover { background-color: #546e7a; }
+    .hint { font-size: 12px; color: #666; margin: 8px 0 0; line-height: 1.5; }
+    .preview { margin-top: 10px; padding: 8px; background: #f7f7f7; border-radius: 6px; font-size: 12px; white-space: pre-wrap; word-break: break-word; color: #333; max-height: 120px; overflow: auto; display: none; }
+    #toast {
+      position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+      background: #323232; color: #fff; padding: 8px 14px; border-radius: 20px;
+      font-size: 12px; opacity: 0; transition: opacity 0.2s; pointer-events: none; max-width: 300px; text-align: center;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h3>🚀 올인원 크리에이터 툴킷</h3>
+
+  <!-- 탭 메뉴 -->
+  <div class="tab">
+    <button class="tablinks" data-tab="Suno" id="defaultOpen">🎵 수노</button>
+    <button class="tablinks" data-tab="Midjourney">🎨 미드저니</button>
+    <button class="tablinks" data-tab="Youtube">🎬 유튜브</button>
+  </div>
+
+  <!-- 1. 수노 탭 -->
+  <div id="Suno" class="tabcontent">
+    <label for="suno-genre">음악 장르</label>
+    <select id="suno-genre">
+      <option value="City Pop, groovy bass">시티팝</option>
+      <option value="Acoustic Folk, warm">어쿠스틱</option>
+      <option value="Lo-fi Hip Hop, chill, mellow">Lo-fi</option>
+      <option value="K-Ballad, emotional piano">발라드</option>
+      <option value="EDM, energetic drop, festival">EDM</option>
+    </select>
+    <label for="suno-topic">곡 주제</label>
+    <input type="text" id="suno-topic" placeholder="예: 퇴근길, 첫사랑, 비 오는 날">
+    <button class="action-btn" id="btn-suno">수노 프롬프트 복사</button>
+    <div class="preview" id="suno-preview"></div>
+  </div>
+
+  <!-- 2. 미드저니 탭 -->
+  <div id="Midjourney" class="tabcontent">
+    <label for="mj-style">썸네일 스타일</label>
+    <select id="mj-style">
+      <option value="minimalist, cinematic lighting, 8k --ar 16:9 --v 6.0">미니멀리즘 (유튜브 16:9)</option>
+      <option value="anime style, vibrant colors, studio ghibli --ar 16:9 --v 6.0">애니메이션 스타일</option>
+      <option value="photorealistic, dramatic lighting, ultra detailed, 8k --ar 16:9 --v 6.0">실사 (포토리얼)</option>
+      <option value="3d render, pixar style, soft lighting --ar 16:9 --v 6.0">3D 픽사 스타일</option>
+      <option value="flat vector illustration, bold colors --ar 1:1 --v 6.0">플랫 일러스트 (1:1)</option>
+    </select>
+    <label for="mj-subject">피사체</label>
+    <input type="text" id="mj-subject" placeholder="예: 커피 마시는 고양이">
+    <button class="action-btn" id="btn-mj">미드저니 명령어 복사</button>
+    <div class="preview" id="mj-preview"></div>
+  </div>
+
+  <!-- 3. 유튜브 탭 -->
+  <div id="Youtube" class="tabcontent">
+    <p class="hint">글로벌 SEO 태그를 아래에서 편집하세요. YouTube 스튜디오의 영상 세부정보 페이지에서 <b>자동입력</b>을 누르면 태그 칸에 채워집니다. (자동입력이 안 되면 <b>복사</b> 후 직접 붙여넣으세요.)</p>
+    <label for="yt-tags">글로벌 태그 (쉼표로 구분)</label>
+    <textarea id="yt-tags" placeholder="tag1, tag2, tag3"></textarea>
+    <button class="action-btn" id="btn-yt-inject">스튜디오에 태그 자동입력</button>
+    <button class="action-btn secondary" id="btn-yt-copy">태그 복사</button>
+  </div>
+
+  <div id="toast"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
