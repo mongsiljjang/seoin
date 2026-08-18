@@ -1522,7 +1522,7 @@ function caseById(id){ return (DB.implantCases||[]).find(c=>c.id===id); }
 function abCount(c){ return (c.teeth||[]).filter(t=>(t.ab||'').trim()||t.abT==='커스텀').length; }
 // 규격 추천 목록 — 등록된 임플란트 제품에서 끌어온다
 function lcOpts(part){
-  const k = part==='픽스처'?'fixtures' : part==='힐링'?'healings' : 'abutments';
+  const k = part==='픽스처'?'fixtures' : part==='힐링'?'healings' : part==='골이식'?'grafts' : part==='코핑'?'copings' : 'abutments';
   const m = mUsable(k).map(r=>mLabel(k,r)).filter(Boolean);
   if(m.length) return m;                       // 재료 목록을 잡아두면 그것만 쓴다
   const out=[];                                // 아직 안 잡았으면 등록된 임플란트 제품에서 끌어온다
@@ -1538,7 +1538,11 @@ const MKINDS={
   fixtures:{ko:'픽스처', cols:['제조사','브랜드','사이즈'], keys:['maker','brand','size']},
   abutments:{ko:'어버트먼트', cols:['이름'], keys:['name']},
   healings:{ko:'힐링', cols:['이름'], keys:['name']},
+  grafts:{ko:'골이식', cols:['이름'], keys:['name']},      // 골이식재·멤브레인·메쉬 — 비급여
+  copings:{ko:'코핑', cols:['이름'], keys:['name']},        // 커스텀이 대세라 가끔 쓴다
 };
+// 국내에서 많이 쓰는 제조사 — 나머지는 직접 입력
+const MAKERS=['오스템','네오','디오','메가젠','Dentium','스트라우만'];
 function ensureMasters(){
   if(!DB.masters || typeof DB.masters!=='object') DB.masters={};
   Object.keys(MKINDS).forEach(k=>{ if(!Array.isArray(DB.masters[k])) DB.masters[k]=[]; });
@@ -1562,6 +1566,8 @@ const PCOL={
 function pKind(txt){
   const t=String(txt||'').toLowerCase();
   if(/힐링|healing/.test(t)) return 'healings';        // '힐링 어버트먼트'는 힐링이다 — 먼저 본다
+  if(/코핑|coping|아날로그|analog|스캔바디|scanbody/.test(t)) return 'copings';
+  if(/골이식|본그라프트|bone|멤브레인|membrane|메쉬|mesh|차폐막|graft/.test(t)) return 'grafts';
   if(/어버트|abut|지대주/.test(t)) return 'abutments';
   return 'fixtures';
 }
@@ -1674,7 +1680,7 @@ function applyPurchase(){
       DB.masters[l.kind].push(row); added++;
     }
     // 2) 재고 제품·규격
-    const part = l.kind==='fixtures'?'픽스처' : l.kind==='abutments'?'어버트먼트':'힐링캡';
+    const part = {fixtures:'픽스처',abutments:'어버트먼트',healings:'힐링캡',grafts:'골이식',copings:'코핑'}[l.kind];
     let prod, vlabel;
     if(l.kind==='fixtures'){
       prod=(DB.implants||[]).find(x=>x.brand===l.maker && (x.line||'')===(l.brand||'') && x.part===part);
@@ -1732,7 +1738,8 @@ function openMasters(kind){
     </div>
     <div class="card" style="box-shadow:none;background:var(--bg);padding:11px 12px;margin-bottom:10px">
       <div class="tiny muted" style="margin-bottom:7px" id="mFormTitle">새 항목 추가</div>
-      ${K.keys.map((key,i)=>`<input id="m_${key}" placeholder="${K.cols[i]}" style="margin-bottom:5px">`).join('')}
+      ${K.keys.map((key,i)=>`<input id="m_${key}" placeholder="${K.cols[i]}" style="margin-bottom:5px"${key==='maker'?' list="makerList"':''}>`).join('')}
+      <datalist id="makerList">${MAKERS.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
       <div class="row">
         <button class="btn sm grow" onclick="mSave()">추가</button>
         <button class="btn soft sm" onclick="openMasters('${mKind}')">취소</button>
@@ -1784,7 +1791,7 @@ function mToStock(){
     groups[k].forEach(sz=>{ if(!sz) return;
       if(!p.variants.find(v=>v.label===sz)){ p.variants.push({id:uid(),label:sz,qty:0,minQty:2,lot:''}); made++; } });
   });
-  [['abutments','어버트먼트'],['healings','힐링캡']].forEach(pair=>{
+  [['abutments','어버트먼트'],['healings','힐링캡'],['grafts','골이식'],['copings','코핑']].forEach(pair=>{
     const rows=DB.masters[pair[0]].filter(r=>r.name); if(!rows.length) return;
     let p=(DB.implants||[]).find(x=>x.part===pair[1] && x.brand==='재료목록');
     if(!p){ p={id:uid(), brand:'재료목록', line:'', part:pair[1], vendor:'', price:0, note:'', variants:[]}; DB.implants.push(p); }
@@ -1837,6 +1844,9 @@ function caseTally(teeth, insur){
     const cat = t.fail? 'fail' : (insur==='보험'?'insurance':'normal');
     [t.fx,t.heal,t.ab].forEach(lb=>{ const k=String(lb||'').trim(); if(!k) return;
       const key=k+'|'+cat; m.set(key,(m.get(key)||0)+1); });
+    // 골이식재는 부위마다 병 수가 다르다. 비급여라 보험 구분과 무관하게 일반으로 센다.
+    const gq=Math.max(0,+t.graftQty||0), gk=String(t.graft||'').trim();
+    if(gk && gq){ const key=gk+'|normal'; m.set(key,(m.get(key)||0)+gq); }
   });
   return m;
 }
@@ -1860,6 +1870,53 @@ function applyCaseStock(oldT, oldIns, newT, newIns, memo){
     }
   });
   return {out,back,miss,missing:[...missing]};
+}
+
+/* ---- 힐링 회수 ----------------------------------------------------------
+   힐링은 2차 수술 때 나가서 2주 뒤 인상채득 때 돌아온다. 돌아오지 않은
+   개수가 곧 분실이다 — 직원이 따로 반납을 적을 필요가 없다. */
+const HEAL_DAYS=14;
+function healOut(c){ return (c.teeth||[]).filter(t=>String(t.heal||'').trim()).length; }
+function isOut(c){ return !!c.d2 && !c.recallAt && healOut(c)>0; }
+function healDue(c){ return c.d2? tms(c.d2)+HEAL_DAYS*DAY_MS : null; }
+function healLate(c){ const d=healDue(c); return d? Math.floor((tms(now())-d)/DAY_MS) : 0; }
+function outCases(){ return (DB.implantCases||[]).filter(isOut).sort((a,b)=>(healDue(a)||0)-(healDue(b)||0)); }
+
+function openRecall(id){
+  const c=caseById(id); if(!c) return;
+  const out=healOut(c), late=healLate(c);
+  const sizes={}; (c.teeth||[]).forEach(t=>{ const k=String(t.heal||'').trim(); if(k) sizes[k]=(sizes[k]||0)+1; });
+  modal(`<h3>📥 힐링 회수 · ${esc(c.chart)}</h3>
+    <div class="tiny muted" style="margin:-6px 2px 12px">2차 수술 ${esc(c.d2||'—')} · 나간 힐링 <b>${out}개</b>${late>0?` · <b style="color:var(--danger)">${late}일 지남</b>`:''}</div>
+    <div class="card" style="box-shadow:none;background:var(--bg);margin-bottom:12px;padding:10px 12px">
+      ${Object.keys(sizes).map(k=>`<div class="spread" style="padding:2px 0"><span class="tiny">${esc(k)}</span><b class="tiny">${sizes[k]}개</b></div>`).join('')}
+    </div>
+    <label class="field"><span>회수한 개수</span>
+      <input id="rcBack" type="number" inputmode="numeric" min="0" max="${out}" value="${out}"
+        style="font-size:22px;text-align:center;font-weight:800"></label>
+    <div class="tiny muted" style="margin:-4px 2px 12px">안 돌아온 것은 <b>분실</b>로 잡힙니다. 빠져서 못 쓰게 된 것도 여기서 빼세요.</div>
+    <label class="field"><span>회수일</span><input id="rcDate" type="date" value="${todayKey()}"></label>
+    <button class="btn block" onclick="saveRecall('${id}')">회수 처리</button>`);
+}
+function saveRecall(id){
+  const c=caseById(id); if(!c) return;
+  const out=healOut(c);
+  const back=Math.max(0,Math.min(out,parseInt($('#rcBack').value,10)||0));
+  c.recallAt=$('#rcDate').value||todayKey(); c.recallBack=back; c.recallLost=out-back;
+  // 재활용이니 돌아온 것만 재고로 되돌린다
+  const sizes=new Map();
+  (c.teeth||[]).forEach(t=>{ const k=String(t.heal||'').trim(); if(k) sizes.set(k,(sizes.get(k)||0)+1); });
+  let left=back;
+  sizes.forEach((n,label)=>{
+    if(left<=0) return;
+    const take=Math.min(n,left); left-=take;
+    const f=findVar(label); if(!f) return;
+    const {p,v}=f, before=v.qty; v.qty=before+take;
+    v.uNor=Math.max(0,(+v.uNor||0)-take);
+    implantLog(p.id,v.id,'in',null,take,before,v.qty,`힐링 회수 · ${c.chart}`);
+  });
+  saveDB(); closeModal(); renderLedger();
+  toast(c.recallLost? `${back}개 회수 · ${c.recallLost}개 분실` : `${back}개 모두 회수했어요`);
 }
 
 let lcQ='';
@@ -1893,14 +1950,33 @@ function renderLedger(){
     <div class="summary3">
       <div class="stat"><div class="n">${monT}</div><div class="l">이번 달 식립</div></div>
       <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">이번 달 지대주</div></div>
-      <div class="stat"><div class="n" style="color:var(--warn)">${wait}</div><div class="l">2차 수술 대기</div></div>
+      <div class="stat"><div class="n" style="color:var(--warn)">${(DB.implantCases||[]).filter(isOut).reduce((s,c)=>s+healOut(c),0)}</div><div class="l">나가 있는 힐링</div></div>
     </div>
     <div class="search"><span class="ic">🔎</span><input id="lcSearch" placeholder="차트번호·이름·생년월일 검색"
       value="${esc(lcQ)}" oninput="lcQ=this.value; renderLedger(); const e=$('#lcSearch'); if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}"></div>`;
 
-  if(!list.length){ box.innerHTML=head+`<div class="card">${emptyBox('🦷', all.length?'찾는 케이스가 없어요':'＋케이스 버튼으로 첫 대장을 적어보세요')}</div>`; return; }
+  const outs=outCases();
+  const outN=outs.reduce((s,c)=>s+healOut(c),0);
+  const lateN=outs.filter(c=>healLate(c)>0).length;
+  const outCard = outs.length? `<div class="card" style="padding:12px 14px;margin-bottom:10px">
+      <div class="spread" style="margin-bottom:8px">
+        <b style="font-size:14.5px">📤 나가 있는 힐링</b>
+        <span class="tiny ${lateN?'':'muted'}" style="${lateN?'color:var(--danger);font-weight:800':''}">${outN}개${lateN?` · ${lateN}건 늦음`:''}</span>
+      </div>
+      ${outs.slice(0,6).map(c=>{ const late=healLate(c);
+        return `<div class="trow" style="gap:8px">
+          <div class="grow" style="min-width:0">
+            <div style="font-weight:700;font-size:14px">${esc(c.chart)}${c.pname?' <span class="muted">'+esc(c.pname)+'</span>':''} <span class="tiny muted">×${healOut(c)}</span></div>
+            <div class="tiny" style="color:${late>0?'var(--danger)':'var(--muted)'}">${late>0?`${late}일 지남`:`${mdy(healDue(c))} 회수 예정`}</div>
+          </div>
+          <button class="btn soft xs" onclick="event.stopPropagation();openRecall('${c.id}')">회수</button>
+        </div>`; }).join('')}
+      ${outs.length>6?`<div class="tiny muted" style="margin-top:6px">외 ${outs.length-6}건</div>`:''}
+    </div>` : '';
 
-  box.innerHTML = head + list.map(c=>{
+  if(!list.length){ box.innerHTML=head+outCard+`<div class="card">${emptyBox('🦷', all.length?'찾는 케이스가 없어요':'＋케이스 버튼으로 첫 대장을 적어보세요')}</div>`; return; }
+
+  box.innerHTML = head + outCard + list.map(c=>{
     const t=c.teeth||[];
     const teeth=t.map(x=>'#'+x.fdi).slice(0,6).join(' ')+(t.length>6?` 외 ${t.length-6}`:'');
     const fails=t.filter(x=>x.fail).length;
@@ -1912,7 +1988,7 @@ function renderLedger(){
           <span class="pill ${c.insur==='보험'?'pend':'info'}" style="margin-left:4px">${esc(c.insur||'일반')}</span>
           ${fails?`<span class="pill danger">페일 ${fails}</span>`:''}</div>
         <div class="tiny muted" style="margin-top:2px">${c.birth?esc(c.birth)+' · ':''}${esc(teeth)}</div>
-        <div class="tiny" style="margin-top:2px;color:${st}">1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}</div>
+        <div class="tiny" style="margin-top:2px;color:${st}">1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}${c.recallAt?` · 회수 ${c.recallAt}${c.recallLost?` (분실 ${c.recallLost})`:''}`:''}</div>
       </div>
       <div class="qty">${t.length}<u>개</u></div>
       <span class="chev">›</span>
@@ -1926,7 +2002,8 @@ function lcAbsorb(){          // 다시 그리기 전에 화면에 적힌 값을
   $$('#lcTeeth .trow').forEach(r=>{
     const n=+r.dataset.n, g=k=>{ const el=r.querySelector('[data-k="'+k+'"]'); return el?el.value.trim():''; };
     const chk=r.querySelector('[data-k="fail"]');
-    lcTeeth[n]={fx:g('fx'), lot:g('lot'), heal:g('heal'), abT:g('abT')||'기성', ab:g('ab'), fail:!!(chk&&chk.checked)};
+    lcTeeth[n]={fx:g('fx'), lot:g('lot'), heal:g('heal'), abT:g('abT')||'기성', ab:g('ab'),
+      graft:g('graft'), graftQty:Math.max(0,parseInt(g('graftQty'),10)||0), fail:!!(chk&&chk.checked)};
   });
 }
 function lcToggle(n){
@@ -1968,6 +2045,10 @@ function lcRenderTeeth(){
           <label class="tiny" style="display:flex;align-items:center;gap:3px;white-space:nowrap">
             <input type="checkbox" data-k="fail" ${d.fail?'checked':''} style="width:auto;margin:0">페일</label>
         </div>
+        <div class="row" style="gap:4px;margin-top:4px">
+          <input data-k="graft" list="gfList" placeholder="골이식재 (선택)" value="${esc(d.graft||'')}" style="flex:1">
+          <input data-k="graftQty" type="number" inputmode="numeric" min="0" placeholder="병" value="${d.graftQty||''}" style="flex:0 0 56px;text-align:center">
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1975,10 +2056,10 @@ function lcRenderTeeth(){
 function lcApplyAll(){
   lcAbsorb();
   const fx=$('#lcBfx').value.trim(), heal=$('#lcBheal').value.trim(),
-        abT=$('#lcBabT').value, ab=$('#lcBab').value.trim();
+        abT=$('#lcBabT').value, ab=$('#lcBab').value.trim(), gf=$('#lcBgf').value.trim();
   if(!lcSel.length){ toast('치아를 먼저 선택하세요'); return; }
   lcSel.forEach(n=>{ const d=lcTeeth[n]||{};
-    lcTeeth[n]={...d, fx:fx||d.fx||'', heal:heal||d.heal||'', abT:abT, ab:ab||d.ab||''}; });
+    lcTeeth[n]={...d, fx:fx||d.fx||'', heal:heal||d.heal||'', abT:abT, ab:ab||d.ab||'', graft:gf||d.graft||''}; });
   lcRenderTeeth(); toast(`${lcSel.length}개 치아에 넣었어요 · LOT만 하나씩 적으면 돼요`);
 }
 function openCaseForm(id){
@@ -1990,6 +2071,7 @@ function openCaseForm(id){
     <datalist id="fxList">${lcOpts('픽스처').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <datalist id="hlList">${lcOpts('힐링').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <datalist id="abList">${lcOpts('어버트').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <datalist id="gfList">${lcOpts('골이식').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <div class="two">
       <label class="field"><span>차트번호 *</span><input id="lcChart" value="${c?esc(c.chart):''}" placeholder="A-1234"></label>
       <label class="field"><span>환자</span><input id="lcName" value="${c?esc(c.pname||''):''}" placeholder="김민수"></label>
@@ -2023,7 +2105,8 @@ function openCaseForm(id){
         <input id="lcBheal" list="hlList" placeholder="힐링 사이즈" style="flex:1">
         <select id="lcBabT" style="flex:0 0 84px"><option>기성</option><option>커스텀</option></select>
       </div>
-      <input id="lcBab" list="abList" placeholder="지대주 규격" style="margin-bottom:8px">
+      <input id="lcBab" list="abList" placeholder="지대주 규격" style="margin-bottom:5px">
+      <input id="lcBgf" list="gfList" placeholder="골이식재 (선택 · 병 수는 치아마다)" style="margin-bottom:8px">
       <button class="btn soft sm block" onclick="lcApplyAll()">선택한 치아에 적용</button>
     </div>
 
