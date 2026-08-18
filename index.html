@@ -1546,6 +1546,168 @@ function ensureMasters(){
 function mLabel(k,r){ return MKINDS[k].keys.map(x=>r[x]).filter(Boolean).join(' '); }
 function mUsable(k){ ensureMasters(); return DB.masters[k].filter(r=>!r.off); }
 
+/* ---- 거래명세서 올리기 ---------------------------------------------------
+   목록을 손으로 만들 필요가 없다. 어차피 매입은 기록해야 하니, 거래처가 준
+   명세서를 그대로 올리면 브랜드·사이즈가 잡히고 입고까지 한 번에 된다. */
+const PCOL={
+  name:['품목명','품명','품목','제품명','상품명','내역','품목및규격','자재명','item','품목/규격'],
+  size:['규격','사이즈','size','스펙','spec'],
+  maker:['제조사','메이커','제조원','maker','brand','브랜드'],
+  qty:['수량','입고수량','개수','qty','수'],
+  price:['단가','공급가','공급가액','금액','단가(원)','price'],
+  vendor:['거래처','업체','공급자','판매처','상호','공급처','vendor'],
+  date:['일자','날짜','거래일자','거래일','입고일','date'],
+  lot:['lot','로트','제조번호','lot번호','로트번호','lotno'],
+};
+function pKind(txt){
+  const t=String(txt||'').toLowerCase();
+  if(/힐링|healing/.test(t)) return 'healings';        // '힐링 어버트먼트'는 힐링이다 — 먼저 본다
+  if(/어버트|abut|지대주/.test(t)) return 'abutments';
+  return 'fixtures';
+}
+// "Dentium SuperLine 4010" → 제조사 Dentium · 브랜드 SuperLine · 사이즈 4010
+function splitFixture(name, sizeCol, makerCol){
+  let maker=String(makerCol||'').trim(), size=String(sizeCol||'').trim(), rest=String(name||'').trim();
+  if(!size){
+    const t=rest.split(/[\s,·\/]+/).filter(Boolean);
+    for(let i=t.length-1;i>=0;i--){
+      if(/^[Øø⌀]?\d+(\.\d+)?([x×*]\d+(\.\d+)?)?$/i.test(t[i]) || /^\d{4}$/.test(t[i])){ size=t[i]; t.splice(i,1); break; }
+    }
+    rest=t.join(' ');
+  }
+  let brand=rest;
+  if(!maker){
+    const t=rest.split(/\s+/).filter(Boolean);
+    if(t.length>=2){ maker=t[0]; brand=t.slice(1).join(' '); }
+  }
+  return {maker, brand, size};
+}
+function openPurchase(){
+  const noXlsx = window.__noXLSX || typeof XLSX==='undefined';
+  modal(`<h3>📥 거래명세서 올리기</h3>
+    <div class="hint">거래처가 준 <b>엑셀·CSV 명세서</b>를 그대로 올리면, 브랜드와 사이즈가 <b>재료 목록에 자동으로</b> 들어가고 <b>입고까지</b> 한 번에 됩니다.</div>
+    <div class="tiny muted" style="margin:8px 2px 14px">읽는 열: <b>품목명 · 규격 · 제조사 · 수량 · 단가 · 거래처 · 일자 · LOT</b><br>
+      열 제목만 있으면 순서가 달라도 알아서 찾아요. 품목명에 "어버트·지대주"가 있으면 어버트먼트로, "힐링"이면 힐링으로 갑니다.</div>
+    <label class="btn block" style="cursor:pointer">📂 명세서 파일 고르기
+      <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handlePurchase(event)"></label>
+    ${noXlsx?`<div class="tiny" style="color:var(--warn);margin-top:10px">⚠️ 지금은 CSV만 읽을 수 있어요(엑셀 라이브러리 미로딩).</div>`:''}
+    <div class="divider"></div>
+    <div class="tiny muted">📷 종이 명세서는 <b>사진을 찍어 Claude 대화창에 보내주세요.</b> 올릴 수 있는 파일로 만들어 드려요.</div>`);
+}
+function handlePurchase(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  const isCsv=/\.csv$/i.test(f.name), r=new FileReader();
+  r.onload=()=>{
+    try{
+      let rows;
+      if(!isCsv && typeof XLSX!=='undefined'){
+        const wb=XLSX.read(new Uint8Array(r.result),{type:'array'});
+        rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+      } else rows=parseCSV(typeof r.result==='string'?r.result:new TextDecoder('utf-8').decode(r.result));
+      const lines=purchaseRows(rows);
+      if(!lines.length){ toast('읽을 수 있는 품목이 없어요'); return; }
+      previewPurchase(lines);
+    }catch(e){ toast('파일을 읽지 못했어요. 양식을 확인해 주세요'); }
+  };
+  if(!isCsv && typeof XLSX!=='undefined') r.readAsArrayBuffer(f); else r.readAsText(f,'utf-8');
+}
+function purchaseRows(rows){
+  rows=(rows||[]).filter(r=>r&&r.some(c=>String(c).trim()!==''));
+  if(!rows.length) return [];
+  const norm=s=>String(s||'').replace(/\s|\(.*?\)/g,'').toLowerCase();
+  const header=rows[0].map(norm), idx={};
+  for(const k in PCOL) idx[k]=header.findIndex(h=>PCOL[k].some(x=>norm(x)===h||(h&&h.includes(norm(x)))));
+  const hasHeader = idx.name>=0 || idx.qty>=0;
+  const body = hasHeader? rows.slice(1) : rows;
+  const col = hasHeader? idx : {name:0,size:1,qty:2,price:3,vendor:4,date:5,lot:6,maker:-1};
+  const pick=(r,k)=> (col[k]!=null && col[k]>=0)? r[col[k]] : undefined;
+  const num=v=>{ const n=parseInt(String(v??'').replace(/[^\d-]/g,''),10); return isNaN(n)?0:n; };
+  const nd=v=>{ const m=String(v??'').match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/); return m?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`:''; };
+  const out=[];
+  for(const r of body){
+    const nm=String(pick(r,'name')??'').trim(); if(!nm) continue;
+    if(/합\s*계|소\s*계|총\s*계|부가세/.test(nm)) continue;          // 합계 줄은 건너뛴다
+    const kind=pKind(nm+' '+String(pick(r,'size')??''));
+    const sp=splitFixture(nm, pick(r,'size'), pick(r,'maker'));
+    const label = kind==='fixtures'? [sp.maker,sp.brand,sp.size].filter(Boolean).join(' ')
+                                   : [nm,String(pick(r,'size')??'').trim()].filter(Boolean).join(' ');
+    out.push({kind, ...sp, label, qty:Math.max(0,num(pick(r,'qty'))||1),
+      price:Math.max(0,num(pick(r,'price'))), vendor:String(pick(r,'vendor')??'').trim(),
+      date:nd(pick(r,'date')), lot:String(pick(r,'lot')??'').trim()});
+  }
+  return out;
+}
+let pPending=null;
+function previewPurchase(lines){
+  ensureMasters(); pPending=lines;
+  const isNew=l=>!(DB.masters[l.kind]||[]).some(r=>mLabel(l.kind,r)===l.label);
+  const nNew=lines.filter(isNew).length, totQ=lines.reduce((s,l)=>s+l.qty,0);
+  const vendor=[...new Set(lines.map(l=>l.vendor).filter(Boolean))].join(', ');
+  const date=[...new Set(lines.map(l=>l.date).filter(Boolean))].join(', ');
+  modal(`<h3>📥 이대로 넣을까요?</h3>
+    <div class="summary3" style="margin-bottom:10px">
+      <div class="stat"><div class="n">${lines.length}</div><div class="l">줄</div></div>
+      <div class="stat"><div class="n" style="color:var(--brand)">${nNew}</div><div class="l">새 규격</div></div>
+      <div class="stat"><div class="n" style="color:var(--ok)">${totQ}</div><div class="l">입고 수량</div></div>
+    </div>
+    ${(vendor||date)?`<div class="tiny muted" style="margin:0 2px 10px">${vendor?'거래처 '+esc(vendor):''}${vendor&&date?' · ':''}${date?esc(date):''}</div>`:''}
+    <div style="max-height:40vh;overflow:auto;margin-bottom:12px">
+      ${lines.map(l=>`<div class="trow">
+        <div class="grow" style="min-width:0">
+          <div style="font-weight:700;font-size:14px">${esc(l.label)||'(이름 없음)'} ${isNew(l)?'<span class="pill ok">새로</span>':''}</div>
+          <div class="tiny muted">${MKINDS[l.kind].ko}${l.lot?' · LOT '+esc(l.lot):''}${l.price?' · '+won(l.price):''}</div>
+        </div>
+        <b style="white-space:nowrap">＋${l.qty}</b></div>`).join('')}
+    </div>
+    <button class="btn block" onclick="applyPurchase()">재료 목록에 넣고 입고 처리</button>`);
+}
+function applyPurchase(){
+  if(!pPending) return;
+  ensureMasters();
+  let added=0, stocked=0;
+  pPending.forEach(l=>{
+    // 1) 재료 목록
+    let row=(DB.masters[l.kind]||[]).find(r=>mLabel(l.kind,r)===l.label);
+    if(!row){
+      row = l.kind==='fixtures'? {id:uid(),maker:l.maker,brand:l.brand,size:l.size,off:false}
+                               : {id:uid(),name:l.label,off:false};
+      DB.masters[l.kind].push(row); added++;
+    }
+    // 2) 재고 제품·규격
+    const part = l.kind==='fixtures'?'픽스처' : l.kind==='abutments'?'어버트먼트':'힐링캡';
+    let prod, vlabel;
+    if(l.kind==='fixtures'){
+      prod=(DB.implants||[]).find(x=>x.brand===l.maker && (x.line||'')===(l.brand||'') && x.part===part);
+      if(!prod){ prod={id:uid(),brand:l.maker||'미지정',line:l.brand||'',part,vendor:l.vendor||'',price:l.price||0,note:'',variants:[]}; DB.implants.push(prod); }
+      vlabel=l.size||l.label;
+    } else {
+      prod=(DB.implants||[]).find(x=>x.part===part && x.brand==='재료목록');
+      if(!prod){ prod={id:uid(),brand:'재료목록',line:'',part,vendor:l.vendor||'',price:0,note:'',variants:[]}; DB.implants.push(prod); }
+      vlabel=l.label;
+    }
+    if(l.vendor && !prod.vendor) prod.vendor=l.vendor;
+    if(l.price && !prod.price) prod.price=l.price;
+    let v=prod.variants.find(x=>x.label===vlabel);
+    if(!v){ v={id:uid(),label:vlabel,qty:0,minQty:2,lot:''}; prod.variants.push(v); }
+    // 3) 입고
+    if(l.qty>0){
+      const before=v.qty; v.qty=before+l.qty; v.inTot=(+v.inTot||0)+l.qty;
+      if(l.lot) v.lot=l.lot;
+      implantLog(prod.id,v.id,'in',null,l.qty,before,v.qty,`거래명세서${l.vendor?' · '+l.vendor:''}${l.date?' · '+l.date:''}`);
+      stocked+=l.qty;
+    }
+  });
+  // 4) 명세서 자체도 남긴다 — 세무조사 때 필요하다
+  if(!Array.isArray(DB.purchases)) DB.purchases=[];
+  DB.purchases.unshift({id:uid(), at:now(),
+    date:(pPending.find(l=>l.date)||{}).date||todayKey(),
+    vendor:(pPending.find(l=>l.vendor)||{}).vendor||'',
+    lines:pPending.map(l=>({label:l.label,kind:l.kind,qty:l.qty,price:l.price,lot:l.lot}))});
+  if(DB.purchases.length>300) DB.purchases=DB.purchases.slice(0,300);
+  pPending=null; saveDB(); closeModal(); renderInvPage();
+  toast(`새 규격 ${added}개 · 입고 ${stocked}개 반영했어요`);
+}
+
 let mKind='fixtures', mEditId='';
 function openMasters(kind){
   ensureMasters(); mKind=kind||mKind; mEditId='';
@@ -1554,6 +1716,7 @@ function openMasters(kind){
     <div class="seg" style="margin-bottom:10px">
       ${Object.keys(MKINDS).map(k=>`<button class="${k===mKind?'on':''}" onclick="openMasters('${k}')">${MKINDS[k].ko}</button>`).join('')}
     </div>
+    <button class="btn block" style="margin-bottom:10px" onclick="openPurchase()">📥 거래명세서 올리기 &mdash; 목록·입고 한 번에</button>
     <div class="tiny muted" style="margin:-2px 2px 8px">▲▼ 로 순서를 바꾸고, <b>사용안함</b> 을 켜면 대장 목록에서 숨겨져요(기록은 남습니다).</div>
     <div style="max-height:38vh;overflow:auto;margin-bottom:12px">
       ${rows.length? rows.map((r,i)=>`<div class="trow" style="gap:6px">
