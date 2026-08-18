@@ -1575,6 +1575,7 @@ function openMasters(kind){
         <button class="btn soft sm" onclick="openMasters('${mKind}')">취소</button>
       </div>
     </div>
+    <button class="btn soft sm block" style="margin-bottom:8px" onclick="mToStock()">📦 이 목록을 임플란트 재고에 등록</button>
     <div class="row">
       <button class="btn soft sm grow" onclick="mExport()">📄 파일로 저장</button>
       <label class="btn soft sm grow" style="cursor:pointer;text-align:center">📂 파일로 복구
@@ -1607,6 +1608,28 @@ function mDel(id){
   if(!confirm('이 항목을 지울까요? (이미 적은 대장 기록은 그대로 남습니다)')) return;
   DB.masters[mKind]=DB.masters[mKind].filter(r=>r.id!==id); saveDB(); openMasters(mKind);
 }
+// 재료 목록을 임플란트 재고의 제품·규격으로 만들어 준다 (수량은 0에서 시작)
+function mToStock(){
+  ensureMasters(); let made=0;
+  const groups={};
+  DB.masters.fixtures.forEach(r=>{ const k=(r.maker||'')+'|'+(r.brand||''); (groups[k]=groups[k]||[]).push(r.size||''); });
+  Object.keys(groups).forEach(k=>{
+    const [maker,brand]=k.split('|');
+    if(!maker && !brand) return;
+    let p=(DB.implants||[]).find(x=>x.brand===maker && (x.line||'')===brand && x.part==='픽스처');
+    if(!p){ p={id:uid(), brand:maker, line:brand, part:'픽스처', vendor:'', price:0, note:'', variants:[]}; DB.implants.push(p); }
+    groups[k].forEach(sz=>{ if(!sz) return;
+      if(!p.variants.find(v=>v.label===sz)){ p.variants.push({id:uid(),label:sz,qty:0,minQty:2,lot:''}); made++; } });
+  });
+  [['abutments','어버트먼트'],['healings','힐링캡']].forEach(pair=>{
+    const rows=DB.masters[pair[0]].filter(r=>r.name); if(!rows.length) return;
+    let p=(DB.implants||[]).find(x=>x.part===pair[1] && x.brand==='재료목록');
+    if(!p){ p={id:uid(), brand:'재료목록', line:'', part:pair[1], vendor:'', price:0, note:'', variants:[]}; DB.implants.push(p); }
+    rows.forEach(r=>{ if(!p.variants.find(v=>v.label===r.name)){ p.variants.push({id:uid(),label:r.name,qty:0,minQty:2,lot:''}); made++; } });
+  });
+  saveDB(); openMasters(mKind);
+  toast(made? `재고에 ${made}개 규격을 만들었어요 · 수량은 임플란트 탭에서 입고로 채우세요` : '이미 다 등록되어 있어요');
+}
 function mExport(){
   const K=MKINDS[mKind];
   const csv='﻿'+K.cols.join(',')+'\n'+DB.masters[mKind].map(r=>K.keys.map(k=>`"${String(r[k]||'').replace(/"/g,'""')}"`).join(',')).join('\n')+'\n';
@@ -1632,6 +1655,48 @@ function mImport(ev){
     saveDB(); openMasters(mKind); toast(`${n}개 불러왔어요`);
   };
   r.readAsText(f,'utf-8');
+}
+
+/* ---- 대장에 적으면 재고가 준다 ------------------------------------------
+   한 번 적으면 끝나야 한다. 수정하면 바뀐 만큼만 반영한다. */
+function findVar(label){
+  const t=String(label||'').replace(/\s+/g,' ').trim(); if(!t) return null;
+  for(const p of (DB.implants||[])) for(const v of (p.variants||[])){
+    const a=`${p.brand} ${p.line||''} ${v.label}`.replace(/\s+/g,' ').trim();
+    const b=`${p.brand} ${v.label}`.replace(/\s+/g,' ').trim();
+    if(a===t || b===t || v.label===t) return {p,v};
+  }
+  return null;
+}
+function caseTally(teeth, insur){
+  const m=new Map();                                   // "규격|구분" → 개수
+  (teeth||[]).forEach(t=>{
+    const cat = t.fail? 'fail' : (insur==='보험'?'insurance':'normal');
+    [t.fx,t.heal,t.ab].forEach(lb=>{ const k=String(lb||'').trim(); if(!k) return;
+      const key=k+'|'+cat; m.set(key,(m.get(key)||0)+1); });
+  });
+  return m;
+}
+function applyCaseStock(oldT, oldIns, newT, newIns, memo){
+  const a=caseTally(oldT,oldIns), b=caseTally(newT,newIns);
+  let out=0, back=0, miss=0; const missing=new Set();
+  new Set([...a.keys(),...b.keys()]).forEach(k=>{
+    const d=(b.get(k)||0)-(a.get(k)||0); if(!d) return;
+    const i=k.lastIndexOf('|'), label=k.slice(0,i), cat=k.slice(i+1);
+    const f=findVar(label);
+    if(!f){ if(d>0){ miss+=d; missing.add(label); } return; }
+    const {p,v}=f, before=v.qty;
+    if(d>0){                                            // 새로 쓴 만큼 뺀다
+      v.qty=Math.max(0,v.qty-d);
+      if(cat==='insurance') v.uIns=(+v.uIns||0)+d; else if(cat==='fail') v.uFail=(+v.uFail||0)+d; else v.uNor=(+v.uNor||0)+d;
+      implantLog(p.id,v.id,'out',cat,d,before,v.qty,memo); out+=d;
+    } else {                                            // 지웠으면 되돌린다
+      const n=-d; v.qty=v.qty+n;
+      if(cat==='insurance') v.uIns=Math.max(0,(+v.uIns||0)-n); else if(cat==='fail') v.uFail=Math.max(0,(+v.uFail||0)-n); else v.uNor=Math.max(0,(+v.uNor||0)-n);
+      implantLog(p.id,v.id,'in',null,n,before,v.qty,memo+' 되돌림'); back+=n;
+    }
+  });
+  return {out,back,miss,missing:[...missing]};
 }
 
 let lcQ='';
@@ -1816,10 +1881,16 @@ function saveCase(id){
     birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d1:$('#lcD1').value, d2:$('#lcD2').value,
     memo:$('#lcMemo').value.trim(),
     teeth:lcSel.map(n=>({fdi:n, ...(lcTeeth[n]||{})})), updatedAt:now() };
+  const old=id?caseById(id):null;
+  const r=applyCaseStock(old?old.teeth:[], old?old.insur:'', data.teeth, data.insur, `대장 ${chart}`);
   if(id){ Object.assign(caseById(id), data); }
   else { DB.implantCases.push({id:uid(), createdAt:now(), ...data}); }
   saveDB(); closeModal(); renderLedger();
-  toast(`${chart} · 임플란트 ${lcSel.length}개 기록했어요`);
+  const bits=[`${chart} · 임플란트 ${lcSel.length}개 기록`];
+  if(r.out) bits.push(`재고 ${r.out}개 차감`);
+  if(r.back) bits.push(`${r.back}개 되돌림`);
+  toast(bits.join(' · '));
+  if(r.miss) setTimeout(()=>toast(`⚠️ 재고에 없는 규격 ${r.miss}개는 못 뺐어요 — 재료 목록에서 '재고에 등록'을 눌러주세요`),1600);
 }
 function delCase(id){
   if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
