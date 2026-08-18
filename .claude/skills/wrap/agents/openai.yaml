@@ -1,0 +1,7 @@
+interface:
+  display_name: "Wrap"
+  short_description: "Commit work and leave a restart-ready handoff"
+  default_prompt: "Use $wrap to finish this session, commit the work, and leave a restart-ready handoff."
+
+policy:
+  allow_implicit_invocation: false
