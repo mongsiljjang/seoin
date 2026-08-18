@@ -137,6 +137,17 @@
     padding:9px 4px; border-radius:9px; cursor:pointer}
   .seg button.on{background:#fff; color:var(--brand); box-shadow:0 1px 4px rgba(0,0,0,.08)}
 
+  /* 치식도 — 16개가 한 줄에 들어가야 해서 칸을 최대한 좁게 */
+  .teeth{display:grid; grid-template-columns:repeat(16,1fr); gap:2px}
+  .teeth button{padding:7px 0; font-size:10px; font-weight:800; color:var(--sub);
+    border:1px solid var(--line); background:var(--card); border-radius:5px; cursor:pointer}
+  .teeth button.on{background:var(--brand); border-color:var(--brand); color:#fff}
+  .teeth button:nth-child(8){margin-right:6px}
+  .archl{font-size:10.5px; color:var(--muted); font-weight:700; margin:8px 2px 3px}
+  .trow{display:flex; align-items:center; gap:8px; padding:9px 2px; border-bottom:1px solid var(--line)}
+  .trow:last-child{border-bottom:0}
+  .tno{font-weight:900; font-size:14px; min-width:30px}
+
   /* 재고 한 줄 목록 — 카드 대신 줄로 쌓아 세로 길이를 줄인다 */
   .irow{display:flex; align-items:center; gap:11px; padding:13px 14px; background:var(--card);
     border:1px solid var(--line); border-radius:14px; margin-bottom:7px; cursor:pointer}
@@ -332,6 +343,7 @@
     <div class="seg" id="invMode">
       <button class="on" data-m="general" onclick="setInvMode('general')">📦 일반 재고</button>
       <button data-m="implant" onclick="setInvMode('implant')">🦷 임플란트</button>
+      <button data-m="ledger" onclick="setInvMode('ledger')">📋 대장</button>
     </div>
     <div id="invGeneral">
       <div class="spread" style="margin:4px 2px 12px">
@@ -352,6 +364,7 @@
       <div id="invList"></div>
     </div>
     <div id="invImplant" style="display:none"></div>
+    <div id="invLedger" style="display:none"></div>
   </section>
 
   <!-- ============ 출퇴근 ============ -->
@@ -446,7 +459,8 @@ function loadDB(){
   ensureSchema();
 }
 function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.members=[];
-  if(!DB.prefs || typeof DB.prefs!=='object') DB.prefs={};   // 계정별 개인 설정 (자주 쓰는 품목 순서 등) if(typeof DB.adminPin!=='string') DB.adminPin=''; if(!Array.isArray(DB.implants)) DB.implants=[];
+  if(!DB.prefs || typeof DB.prefs!=='object') DB.prefs={};   // 계정별 개인 설정 (자주 쓰는 품목 순서 등)
+  if(!Array.isArray(DB.implantCases)) DB.implantCases=[];    // 임플란트 대장 (수기 관리대장을 그대로 옮긴 것) if(typeof DB.adminPin!=='string') DB.adminPin=''; if(!Array.isArray(DB.implants)) DB.implants=[];
   if(!Array.isArray(DB.implantLogs)) DB.implantLogs=[];
   if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
   if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
@@ -548,9 +562,10 @@ function setInvMode(m){ invMode=m;
   $$('#invMode button').forEach(b=>b.classList.toggle('on', b.dataset.m===m));
   $('#invGeneral').style.display = m==='general'?'':'none';
   $('#invImplant').style.display = m==='implant'?'':'none';
+  $('#invLedger').style.display = m==='ledger'?'':'none';
   renderInvPage();
 }
-function renderInvPage(){ if(invMode==='implant') renderImplant(); else renderInv(); }
+function renderInvPage(){ if(invMode==='implant') renderImplant(); else if(invMode==='ledger') renderLedger(); else renderInv(); }
 let currentTab='home';
 function go(tab){
   if(tab==='staff' && !isAdmin()) tab='home';   // 직원은 직원탭 접근 불가
@@ -1483,6 +1498,214 @@ function doBulkVariants(pid){
   let added=0;
   ds.forEach(d=>ls.forEach(l=>{ const label=`${d}×${l}`; if(!p.variants.find(v=>v.label===label)){ p.variants.push({id:uid(),label,qty:0,minQty:min,lot:''}); added++; } }));
   saveDB(); closeModal(); renderImplant(); toast(`${added}개 규격을 추가했어요`);
+}
+
+/* ========================================================================
+   임플란트 대장 — 손으로 쓰던 관리대장을 그대로 옮긴 것
+   한 줄 = 임플란트 하나 = 치아 하나. 전악은 16~18줄이라 치식도에서
+   찍어 한 번에 넣고, LOT만 치아별로 적는다.
+   ======================================================================== */
+const FDI_UP=[18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28];
+const FDI_LO=[48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38];
+const FDI_ALL=[...FDI_UP,...FDI_LO];
+// 목록은 숫자순이 아니라 치식도에 적힌 순서로 — 그래야 눈으로 따라간다
+const fdiSort=(a,b)=>FDI_ALL.indexOf(a)-FDI_ALL.indexOf(b);
+const CHO='ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+function chosung(ch){ const c=ch.charCodeAt(0)-0xAC00; return (c>=0&&c<11172)? CHO[Math.floor(c/588)] : ch; }
+// 성은 그대로, 나머지는 초성만. 덴트웹에서 초성으로 찾히면서 이름은 앱에 안 남는다.
+function maskName(name){
+  const t=(name||'').replace(/\s/g,''); if(!t) return '';
+  return t[0] + t.slice(1).split('').map(chosung).join('');
+}
+function caseById(id){ return (DB.implantCases||[]).find(c=>c.id===id); }
+function abCount(c){ return (c.teeth||[]).filter(t=>(t.ab||'').trim()||t.abT==='커스텀').length; }
+// 규격 추천 목록 — 등록된 임플란트 제품에서 끌어온다
+function lcOpts(part){
+  const out=[];
+  (DB.implants||[]).filter(p=>(p.part||'').includes(part)).forEach(p=>
+    (p.variants||[]).forEach(v=>out.push(part==='픽스처'? `${p.brand} ${v.label}` : v.label)));
+  return [...new Set(out)];
+}
+
+let lcQ='';
+function renderLedger(){
+  const box=$('#invLedger');
+  const all=(DB.implantCases||[]).slice().sort((a,b)=>String(b.d1||'').localeCompare(String(a.d1||'')));
+  const q=lcQ.trim().toLowerCase();
+  const list=q? all.filter(c=>(c.chart+' '+(c.pname||'')).toLowerCase().includes(q)) : all;
+
+  const ym=todayKey().slice(0,7);
+  const mon=all.filter(c=>String(c.d1||'').startsWith(ym));
+  const monT=mon.reduce((s,c)=>s+(c.teeth||[]).length,0);
+  const monA=mon.reduce((s,c)=>s+abCount(c),0);
+  const wait=all.filter(c=>c.d1 && !c.d2).length;
+
+  const head=`<div class="spread" style="margin:4px 2px 12px">
+      <h2 class="sec" style="margin:0">📋 임플란트 대장</h2>
+      <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
+    </div>
+    <div class="summary3">
+      <div class="stat"><div class="n">${monT}</div><div class="l">이번 달 식립</div></div>
+      <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">이번 달 지대주</div></div>
+      <div class="stat"><div class="n" style="color:var(--warn)">${wait}</div><div class="l">2차 수술 대기</div></div>
+    </div>
+    <div class="search"><span class="ic">🔎</span><input id="lcSearch" placeholder="차트번호·이름 검색"
+      value="${esc(lcQ)}" oninput="lcQ=this.value; renderLedger(); const e=$('#lcSearch'); if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}"></div>`;
+
+  if(!list.length){ box.innerHTML=head+`<div class="card">${emptyBox('🦷', all.length?'찾는 케이스가 없어요':'＋케이스 버튼으로 첫 대장을 적어보세요')}</div>`; return; }
+
+  box.innerHTML = head + list.map(c=>{
+    const t=c.teeth||[];
+    const teeth=t.map(x=>'#'+x.fdi).slice(0,6).join(' ')+(t.length>6?` 외 ${t.length-6}`:'');
+    const fails=t.filter(x=>x.fail).length;
+    const st=c.d1&&!c.d2? 'var(--warn)' : 'var(--ok)';
+    return `<div class="irow" style="align-items:flex-start" onclick="openCaseForm('${c.id}')">
+      <span class="dot" style="background:${st};margin-top:5px"></span>
+      <div class="grow" style="min-width:0">
+        <div class="nm">${esc(c.chart)}${c.pname?` <span class="muted" style="font-weight:700">${esc(c.pname)}</span>`:''}
+          <span class="pill ${c.insur==='보험'?'pend':'info'}" style="margin-left:4px">${esc(c.insur||'일반')}</span>
+          ${fails?`<span class="pill danger">페일 ${fails}</span>`:''}</div>
+        <div class="tiny muted" style="margin-top:2px">${esc(teeth)}</div>
+        <div class="tiny" style="margin-top:2px;color:${st}">1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}</div>
+      </div>
+      <div class="qty">${t.length}<u>개</u></div>
+      <span class="chev">›</span>
+    </div>`;
+  }).join('');
+}
+
+/* ---- 케이스 입력 ---- */
+let lcSel=[], lcTeeth={}, lcEditId='';
+function lcAbsorb(){          // 다시 그리기 전에 화면에 적힌 값을 먼저 담는다
+  $$('#lcTeeth .trow').forEach(r=>{
+    const n=+r.dataset.n, g=k=>{ const el=r.querySelector('[data-k="'+k+'"]'); return el?el.value.trim():''; };
+    const chk=r.querySelector('[data-k="fail"]');
+    lcTeeth[n]={fx:g('fx'), lot:g('lot'), heal:g('heal'), abT:g('abT')||'기성', ab:g('ab'), fail:!!(chk&&chk.checked)};
+  });
+}
+function lcToggle(n){
+  lcAbsorb();
+  lcSel = lcSel.includes(n)? lcSel.filter(x=>x!==n) : [...lcSel,n];
+  lcSel.sort(fdiSort);
+  const b=document.querySelector('.teeth button[data-n="'+n+'"]'); if(b) b.classList.toggle('on');
+  lcRenderTeeth();
+}
+function lcArch(which){
+  lcAbsorb();
+  const arr = which==='up'? FDI_UP : FDI_LO;
+  const allOn = arr.every(n=>lcSel.includes(n));
+  lcSel = allOn? lcSel.filter(n=>!arr.includes(n)) : [...new Set([...lcSel,...arr])];
+  lcSel.sort(fdiSort);
+  lcSyncChart(); lcRenderTeeth();
+}
+function lcClear(){ lcAbsorb(); lcSel=[]; lcSyncChart(); lcRenderTeeth(); }
+function lcSyncChart(){ $$('.teeth button').forEach(b=>b.classList.toggle('on', lcSel.includes(+b.dataset.n))); }
+function lcRenderTeeth(){
+  const box=$('#lcTeeth'); if(!box) return;
+  $('#lcCnt').textContent = lcSel.length;
+  if(!lcSel.length){ box.innerHTML=`<div class="tiny muted" style="padding:10px 2px">위 치식도에서 심은 치아를 눌러주세요.</div>`; return; }
+  box.innerHTML = lcSel.map(n=>{
+    const d=lcTeeth[n]||{};
+    return `<div class="trow" data-n="${n}">
+      <span class="tno">#${n}</span>
+      <div class="grow" style="min-width:0">
+        <input data-k="fx" list="fxList" placeholder="픽스처 규격" value="${esc(d.fx||'')}" style="margin-bottom:4px">
+        <div class="row" style="gap:4px">
+          <input data-k="lot" placeholder="LOT" value="${esc(d.lot||'')}" style="flex:1.2">
+          <input data-k="heal" list="hlList" placeholder="힐링" value="${esc(d.heal||'')}" style="flex:1">
+        </div>
+        <div class="row" style="gap:4px;margin-top:4px">
+          <select data-k="abT" style="flex:0 0 78px">
+            <option ${d.abT!=='커스텀'?'selected':''}>기성</option>
+            <option ${d.abT==='커스텀'?'selected':''}>커스텀</option></select>
+          <input data-k="ab" list="abList" placeholder="지대주 규격" value="${esc(d.ab||'')}" style="flex:1">
+          <label class="tiny" style="display:flex;align-items:center;gap:3px;white-space:nowrap">
+            <input type="checkbox" data-k="fail" ${d.fail?'checked':''} style="width:auto;margin:0">페일</label>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function lcApplyAll(){
+  lcAbsorb();
+  const fx=$('#lcBfx').value.trim(), heal=$('#lcBheal').value.trim(),
+        abT=$('#lcBabT').value, ab=$('#lcBab').value.trim();
+  if(!lcSel.length){ toast('치아를 먼저 선택하세요'); return; }
+  lcSel.forEach(n=>{ const d=lcTeeth[n]||{};
+    lcTeeth[n]={...d, fx:fx||d.fx||'', heal:heal||d.heal||'', abT:abT, ab:ab||d.ab||''}; });
+  lcRenderTeeth(); toast(`${lcSel.length}개 치아에 넣었어요 · LOT만 하나씩 적으면 돼요`);
+}
+function openCaseForm(id){
+  const c=id?caseById(id):null;
+  lcEditId=id||''; lcSel=[]; lcTeeth={};
+  if(c){ (c.teeth||[]).forEach(t=>{ lcSel.push(t.fdi); lcTeeth[t.fdi]={fx:t.fx,lot:t.lot,heal:t.heal,abT:t.abT,ab:t.ab,fail:t.fail}; }); lcSel.sort(fdiSort); }
+  const chart=n=>`<div class="teeth">${n.map(x=>`<button type="button" data-n="${x}" class="${lcSel.includes(x)?'on':''}" onclick="lcToggle(${x})">${x}</button>`).join('')}</div>`;
+  modal(`<h3>${c?'대장 수정':'새 케이스'}</h3>
+    <datalist id="fxList">${lcOpts('픽스처').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <datalist id="hlList">${lcOpts('힐링').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <datalist id="abList">${lcOpts('어버트').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <div class="two">
+      <label class="field"><span>차트번호 *</span><input id="lcChart" value="${c?esc(c.chart):''}" placeholder="A-1234"></label>
+      <label class="field"><span>환자</span><input id="lcName" value="${c?esc(c.pname||''):''}" placeholder="김민수"></label>
+    </div>
+    <div class="tiny muted" style="margin:-4px 2px 10px">이름은 <b>성만 남기고 나머지는 초성</b>으로 저장돼요 (김민수 → 김ㅁㅅ). 덴트웹에서 초성으로 찾을 수 있어요.</div>
+    <div class="two">
+      <label class="field"><span>구분</span><select id="lcIns">
+        <option ${c&&c.insur==='보험'?'selected':''}>보험</option>
+        <option ${!c||c.insur!=='보험'?'selected':''}>일반</option></select></label>
+      <label class="field"><span>1차 수술일</span><input id="lcD1" type="date" value="${c?esc(c.d1||''):todayKey()}"></label>
+    </div>
+    <label class="field"><span>2차 수술일 (선택)</span><input id="lcD2" type="date" value="${c?esc(c.d2||''):''}"></label>
+
+    <div class="divider"></div>
+    <div class="spread" style="margin-bottom:4px"><b style="font-size:14px">심은 치아</b>
+      <span class="tiny muted"><b id="lcCnt">${lcSel.length}</b>개 선택</span></div>
+    <div class="archl">상악</div>${chart(FDI_UP)}
+    <div class="archl">하악</div>${chart(FDI_LO)}
+    <div class="row" style="margin-top:8px">
+      <button class="btn soft xs grow" onclick="lcArch('up')">상악 전체</button>
+      <button class="btn soft xs grow" onclick="lcArch('lo')">하악 전체</button>
+      <button class="btn soft xs grow" onclick="lcClear()">지우기</button>
+    </div>
+
+    <div class="card" style="box-shadow:none;background:var(--bg);margin:12px 0 4px;padding:11px 12px">
+      <div class="tiny muted" style="margin-bottom:7px">선택한 치아에 <b>한 번에 넣기</b> — 같은 규격이면 여기서 채우고 LOT만 따로 적으세요</div>
+      <input id="lcBfx" list="fxList" placeholder="픽스처 규격 (예: 오스템 4.0×10)" style="margin-bottom:5px">
+      <div class="row" style="gap:5px;margin-bottom:5px">
+        <input id="lcBheal" list="hlList" placeholder="힐링 사이즈" style="flex:1">
+        <select id="lcBabT" style="flex:0 0 84px"><option>기성</option><option>커스텀</option></select>
+      </div>
+      <input id="lcBab" list="abList" placeholder="지대주 규격" style="margin-bottom:8px">
+      <button class="btn soft sm block" onclick="lcApplyAll()">선택한 치아에 적용</button>
+    </div>
+
+    <div id="lcTeeth" style="max-height:40vh;overflow:auto;margin-bottom:12px"></div>
+    <label class="field"><span>메모 (선택)</span><input id="lcMemo" value="${c?esc(c.memo||''):''}"></label>
+    <div class="row">
+      <button class="btn block" onclick="saveCase('${id||''}')">${c?'저장':'대장에 적기'}</button>
+      ${c&&isAdmin()?`<button class="btn danger" onclick="delCase('${c.id}')">삭제</button>`:''}
+    </div>`);
+  lcRenderTeeth();
+}
+function saveCase(id){
+  lcAbsorb();
+  const chart=$('#lcChart').value.trim();
+  if(!chart){ toast('차트번호를 입력하세요'); return; }
+  if(!lcSel.length){ toast('심은 치아를 골라주세요'); return; }
+  const data={ chart, pname:maskName($('#lcName').value),   // 이름 원본은 저장하지 않는다
+    insur:$('#lcIns').value, d1:$('#lcD1').value, d2:$('#lcD2').value,
+    memo:$('#lcMemo').value.trim(),
+    teeth:lcSel.map(n=>({fdi:n, ...(lcTeeth[n]||{})})), updatedAt:now() };
+  if(id){ Object.assign(caseById(id), data); }
+  else { DB.implantCases.push({id:uid(), createdAt:now(), ...data}); }
+  saveDB(); closeModal(); renderLedger();
+  toast(`${chart} · 임플란트 ${lcSel.length}개 기록했어요`);
+}
+function delCase(id){
+  if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
+  if(!confirm('이 케이스를 대장에서 지울까요?')) return;
+  DB.implantCases=DB.implantCases.filter(c=>c.id!==id);
+  saveDB(); closeModal(); renderLedger(); toast('삭제되었습니다');
 }
 
 /* ========================================================================
