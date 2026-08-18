@@ -808,6 +808,42 @@ function recordCount(it, actual, memo){
   return used;
 }
 
+/* 노션처럼 — 평소엔 버튼이 안 보이고, 누르면 할 수 있는 것이 나온다.
+   탭하면 상세, 꾹 누르면 바로 짧은 메뉴. */
+let lpTimer=null, lpFired=false;
+function bindRowGestures(){
+  $$('#invList .irow').forEach(el=>{
+    const id=el.dataset.id;
+    const hold=()=>{ lpFired=false; clearTimeout(lpTimer);
+      lpTimer=setTimeout(()=>{ lpFired=true; try{navigator.vibrate&&navigator.vibrate(12);}catch(e){} openRowMenu(id); },450); };
+    const drop=()=>clearTimeout(lpTimer);
+    el.addEventListener('touchstart',hold,{passive:true});
+    ['touchend','touchmove','touchcancel'].forEach(ev=>el.addEventListener(ev,drop,{passive:true}));
+    el.addEventListener('mousedown',hold); ['mouseup','mouseleave'].forEach(ev=>el.addEventListener(ev,drop));
+    el.addEventListener('contextmenu',e=>{ e.preventDefault(); drop(); openRowMenu(id); });
+    el.addEventListener('click',()=>{ if(lpFired){ lpFired=false; return; } openItemDetail(id); });
+  });
+}
+function openRowMenu(id){
+  const it=itemById(id); if(!it) return;
+  modal(`<h3>${esc(it.name)}</h3>
+    <div class="tiny muted" style="margin:-6px 2px 14px">${it.qty}${esc(it.unit)} · ${esc(it.category||'분류없음')}</div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn ok grow" onclick="quickAdjust('${id}','in')">＋ 입고</button>
+      <button class="btn warn grow" onclick="quickAdjust('${id}','out')">－ 출고</button>
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn soft grow" onclick="countOne('${id}')">📋 세기</button>
+      <button class="btn soft grow" onclick="togglePin('${id}');closeModal()">${isPinned(id)?'★ 자주 해제':'☆ 자주 등록'}</button>
+    </div>
+    <div class="divider"></div>
+    <div class="row">
+      <button class="btn soft grow" onclick="openInvForm('${id}')">✏️ 수정</button>
+      ${isAdmin()?`<button class="btn danger grow" onclick="delItem('${id}')">🗑 삭제</button>`:''}
+    </div>
+    ${isAdmin()?'':'<div class="tiny muted" style="text-align:center;margin-top:10px">삭제는 관리자만 할 수 있어요</div>'}`);
+}
+
 // 여러 품목을 한 번에 세는 화면
 function openCountSheet(){
   const list=pinSort(DB.inventory.slice().sort((a,b)=>a.name.localeCompare(b.name,'ko')));
@@ -894,7 +930,7 @@ function renderInv(){
       : (f&&f.left<=7)? (f.left<=0?'지금 주문':`${f.left}일 뒤 주문`)
       : (dd!==null&&dd<0)? '유통기한 만료' : (dd!==null&&dd<=30)? `유통기한 D-${dd}`
       : [esc(i.category||''), f?`하루 ${num1(f.daily)}${esc(i.unit)}`:''].filter(Boolean).join(' · ');
-    return `<div class="irow" onclick="openItemDetail('${i.id}')">
+    return `<div class="irow" data-id="${i.id}">
       <span class="dot" style="background:${st}"></span>
       <div class="grow" style="min-width:0">
         <div class="nm">${isPinned(i.id)?'<span style="color:var(--warn)">★</span> ':''}${esc(i.name)}</div>
@@ -904,6 +940,7 @@ function renderInv(){
       <span class="chev">›</span>
     </div>`;
   }).join('');
+  bindRowGestures();
   refreshBell();
 }
 
@@ -974,6 +1011,7 @@ function saveItem(id){
   saveDB(); closeModal(); renderInv(); toast('저장되었습니다');
 }
 function delItem(id){
+  if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
   if(!confirm('이 품목을 삭제할까요? 입출고 내역도 함께 삭제됩니다.')) return;
   DB.inventory = DB.inventory.filter(i=>i.id!==id);
   DB.invLogs = DB.invLogs.filter(l=>l.itemId!==id);
@@ -998,7 +1036,8 @@ function openItemDetail(id){
         <div class="row" style="gap:6px">
           <button class="btn soft sm" onclick="togglePin('${it.id}');openItemDetail('${it.id}')"
             title="자주 쓰는 품목" style="${isPinned(it.id)?'color:var(--warn)':''}">${isPinned(it.id)?'★':'☆'}</button>
-          <button class="btn soft sm" onclick="openInvForm('${it.id}')">✏️ 수정</button>
+          <button class="btn soft sm" onclick="openInvForm('${it.id}')">✏️</button>
+          ${isAdmin()?`<button class="btn soft sm" onclick="delItem('${it.id}')" style="color:var(--danger)">🗑</button>`:''}
         </div></div>
     </div>
     ${isPinned(it.id)? `<div class="spread" style="margin:10px 2px 0">
