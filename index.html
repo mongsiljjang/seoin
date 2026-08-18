@@ -460,7 +460,8 @@ function loadDB(){
 }
 function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.members=[];
   if(!DB.prefs || typeof DB.prefs!=='object') DB.prefs={};   // 계정별 개인 설정 (자주 쓰는 품목 순서 등)
-  if(!Array.isArray(DB.implantCases)) DB.implantCases=[];    // 임플란트 대장 (수기 관리대장을 그대로 옮긴 것) if(typeof DB.adminPin!=='string') DB.adminPin=''; if(!Array.isArray(DB.implants)) DB.implants=[];
+  if(!Array.isArray(DB.implantCases)) DB.implantCases=[];    // 임플란트 대장 (수기 관리대장을 그대로 옮긴 것)
+  ensureMasters();                                           // 재료 목록(제조사·브랜드·사이즈) if(typeof DB.adminPin!=='string') DB.adminPin=''; if(!Array.isArray(DB.implants)) DB.implants=[];
   if(!Array.isArray(DB.implantLogs)) DB.implantLogs=[];
   if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
   if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
@@ -1521,10 +1522,116 @@ function caseById(id){ return (DB.implantCases||[]).find(c=>c.id===id); }
 function abCount(c){ return (c.teeth||[]).filter(t=>(t.ab||'').trim()||t.abT==='커스텀').length; }
 // 규격 추천 목록 — 등록된 임플란트 제품에서 끌어온다
 function lcOpts(part){
-  const out=[];
+  const k = part==='픽스처'?'fixtures' : part==='힐링'?'healings' : 'abutments';
+  const m = mUsable(k).map(r=>mLabel(k,r)).filter(Boolean);
+  if(m.length) return m;                       // 재료 목록을 잡아두면 그것만 쓴다
+  const out=[];                                // 아직 안 잡았으면 등록된 임플란트 제품에서 끌어온다
   (DB.implants||[]).filter(p=>(p.part||'').includes(part)).forEach(p=>
     (p.variants||[]).forEach(v=>out.push(part==='픽스처'? `${p.brand} ${v.label}` : v.label)));
   return [...new Set(out)];
+}
+
+/* ---- 재료 목록(마스터) — 덴트웹의 "픽스쳐 설정"과 같은 자리 -------------
+   제조사 → 브랜드 → 사이즈를 미리 잡아두고, 대장에서는 고르기만 한다.
+   사이즈는 병원이 부르는 대로 적는다(예: 3607 = Ø3.6×7). */
+const MKINDS={
+  fixtures:{ko:'픽스처', cols:['제조사','브랜드','사이즈'], keys:['maker','brand','size']},
+  abutments:{ko:'어버트먼트', cols:['이름'], keys:['name']},
+  healings:{ko:'힐링', cols:['이름'], keys:['name']},
+};
+function ensureMasters(){
+  if(!DB.masters || typeof DB.masters!=='object') DB.masters={};
+  Object.keys(MKINDS).forEach(k=>{ if(!Array.isArray(DB.masters[k])) DB.masters[k]=[]; });
+}
+function mLabel(k,r){ return MKINDS[k].keys.map(x=>r[x]).filter(Boolean).join(' '); }
+function mUsable(k){ ensureMasters(); return DB.masters[k].filter(r=>!r.off); }
+
+let mKind='fixtures', mEditId='';
+function openMasters(kind){
+  ensureMasters(); mKind=kind||mKind; mEditId='';
+  const K=MKINDS[mKind], rows=DB.masters[mKind];
+  modal(`<h3>⚙️ 재료 목록</h3>
+    <div class="seg" style="margin-bottom:10px">
+      ${Object.keys(MKINDS).map(k=>`<button class="${k===mKind?'on':''}" onclick="openMasters('${k}')">${MKINDS[k].ko}</button>`).join('')}
+    </div>
+    <div class="tiny muted" style="margin:-2px 2px 8px">▲▼ 로 순서를 바꾸고, <b>사용안함</b> 을 켜면 대장 목록에서 숨겨져요(기록은 남습니다).</div>
+    <div style="max-height:38vh;overflow:auto;margin-bottom:12px">
+      ${rows.length? rows.map((r,i)=>`<div class="trow" style="gap:6px">
+        <span class="tiny muted" style="min-width:16px">${i+1}</span>
+        <div class="grow" style="min-width:0"><div style="font-weight:700;font-size:14px;${r.off?'opacity:.45;text-decoration:line-through':''}">${esc(mLabel(mKind,r))||'(빈 항목)'}</div></div>
+        <button class="btn soft xs" onclick="mMove('${r.id}',-1)">▲</button>
+        <button class="btn soft xs" onclick="mMove('${r.id}',1)">▼</button>
+        <label class="tiny" style="display:flex;align-items:center;gap:3px;white-space:nowrap">
+          <input type="checkbox" ${r.off?'checked':''} onchange="mToggle('${r.id}')" style="width:auto;margin:0">안씀</label>
+        <button class="btn soft xs" onclick="mEdit('${r.id}')">✏️</button>
+        <button class="btn soft xs" style="color:var(--danger)" onclick="mDel('${r.id}')">✕</button>
+      </div>`).join('') : emptyBox('📄','아래에서 항목을 추가하세요')}
+    </div>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:11px 12px;margin-bottom:10px">
+      <div class="tiny muted" style="margin-bottom:7px" id="mFormTitle">새 항목 추가</div>
+      ${K.keys.map((key,i)=>`<input id="m_${key}" placeholder="${K.cols[i]}" style="margin-bottom:5px">`).join('')}
+      <div class="row">
+        <button class="btn sm grow" onclick="mSave()">추가</button>
+        <button class="btn soft sm" onclick="openMasters('${mKind}')">취소</button>
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn soft sm grow" onclick="mExport()">📄 파일로 저장</button>
+      <label class="btn soft sm grow" style="cursor:pointer;text-align:center">📂 파일로 복구
+        <input type="file" accept=".csv" style="display:none" onchange="mImport(event)"></label>
+    </div>`);
+}
+function mFind(id){ return DB.masters[mKind].find(r=>r.id===id); }
+function mEdit(id){
+  const r=mFind(id); if(!r) return; mEditId=id;
+  MKINDS[mKind].keys.forEach(k=>{ const el=$('#m_'+k); if(el) el.value=r[k]||''; });
+  $('#mFormTitle').textContent='항목 수정';
+  const btn=$('#mFormTitle').parentElement.querySelector('.btn.sm'); if(btn) btn.textContent='수정 저장';
+}
+function mSave(){
+  const K=MKINDS[mKind], data={};
+  K.keys.forEach(k=>data[k]=($('#m_'+k).value||'').trim());
+  if(!K.keys.some(k=>data[k])){ toast(K.cols.join('·')+' 를 입력하세요'); return; }
+  if(mEditId){ Object.assign(mFind(mEditId), data); }
+  else DB.masters[mKind].push({id:uid(), ...data, off:false});
+  saveDB(); openMasters(mKind); toast(mEditId?'수정했어요':'추가했어요');
+}
+function mMove(id,dir){
+  const a=DB.masters[mKind], i=a.findIndex(r=>r.id===id), t=i+dir;
+  if(i<0||t<0||t>=a.length) return;
+  [a[i],a[t]]=[a[t],a[i]]; saveDB(); openMasters(mKind);
+}
+function mToggle(id){ const r=mFind(id); if(!r) return; r.off=!r.off; saveDB(); openMasters(mKind); }
+function mDel(id){
+  if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
+  if(!confirm('이 항목을 지울까요? (이미 적은 대장 기록은 그대로 남습니다)')) return;
+  DB.masters[mKind]=DB.masters[mKind].filter(r=>r.id!==id); saveDB(); openMasters(mKind);
+}
+function mExport(){
+  const K=MKINDS[mKind];
+  const csv='﻿'+K.cols.join(',')+'\n'+DB.masters[mKind].map(r=>K.keys.map(k=>`"${String(r[k]||'').replace(/"/g,'""')}"`).join(',')).join('\n')+'\n';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`재료목록_${K.ko}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  toast('파일로 저장했어요');
+}
+function mImport(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  const K=MKINDS[mKind], r=new FileReader();
+  r.onload=()=>{
+    const lines=String(r.result).replace(/^﻿/,'').split(/\r?\n/).filter(Boolean);
+    if(!lines.length){ toast('빈 파일이에요'); return; }
+    const body = /제조사|이름|브랜드/.test(lines[0])? lines.slice(1) : lines;
+    let n=0;
+    body.forEach(l=>{
+      const cells=l.split(',').map(x=>x.trim().replace(/^"|"$/g,'').replace(/""/g,'"'));
+      const data={}; K.keys.forEach((k,i)=>data[k]=cells[i]||'');
+      if(!K.keys.some(k=>data[k])) return;
+      if(DB.masters[mKind].some(x=>mLabel(mKind,x)===mLabel(mKind,data))) return;   // 같은 건 건너뜀
+      DB.masters[mKind].push({id:uid(), ...data, off:false}); n++;
+    });
+    saveDB(); openMasters(mKind); toast(`${n}개 불러왔어요`);
+  };
+  r.readAsText(f,'utf-8');
 }
 
 let lcQ='';
@@ -1532,7 +1639,15 @@ function renderLedger(){
   const box=$('#invLedger');
   const all=(DB.implantCases||[]).slice().sort((a,b)=>String(b.d1||'').localeCompare(String(a.d1||'')));
   const q=lcQ.trim().toLowerCase();
-  const list=q? all.filter(c=>(c.chart+' '+(c.pname||'')).toLowerCase().includes(q)) : all;
+  // 생년월일은 480302 로 쳐도 1948-03-02 이 잡히게 숫자만 떼어 견준다
+  const digits=v=>String(v||'').replace(/\D/g,''), qd=digits(q);
+  const hit=c=>{
+    if((c.chart+' '+(c.pname||'')).toLowerCase().includes(q)) return true;
+    if(!qd) return false;
+    const bd=digits(c.birth);
+    return bd.includes(qd) || (bd.length===8 && bd.slice(2).includes(qd));
+  };
+  const list=q? all.filter(hit) : all;
 
   const ym=todayKey().slice(0,7);
   const mon=all.filter(c=>String(c.d1||'').startsWith(ym));
@@ -1542,14 +1657,17 @@ function renderLedger(){
 
   const head=`<div class="spread" style="margin:4px 2px 12px">
       <h2 class="sec" style="margin:0">📋 임플란트 대장</h2>
-      <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
+      <div class="row" style="gap:6px">
+        <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
+        <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
+      </div>
     </div>
     <div class="summary3">
       <div class="stat"><div class="n">${monT}</div><div class="l">이번 달 식립</div></div>
       <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">이번 달 지대주</div></div>
       <div class="stat"><div class="n" style="color:var(--warn)">${wait}</div><div class="l">2차 수술 대기</div></div>
     </div>
-    <div class="search"><span class="ic">🔎</span><input id="lcSearch" placeholder="차트번호·이름 검색"
+    <div class="search"><span class="ic">🔎</span><input id="lcSearch" placeholder="차트번호·이름·생년월일 검색"
       value="${esc(lcQ)}" oninput="lcQ=this.value; renderLedger(); const e=$('#lcSearch'); if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}"></div>`;
 
   if(!list.length){ box.innerHTML=head+`<div class="card">${emptyBox('🦷', all.length?'찾는 케이스가 없어요':'＋케이스 버튼으로 첫 대장을 적어보세요')}</div>`; return; }
@@ -1565,7 +1683,7 @@ function renderLedger(){
         <div class="nm">${esc(c.chart)}${c.pname?` <span class="muted" style="font-weight:700">${esc(c.pname)}</span>`:''}
           <span class="pill ${c.insur==='보험'?'pend':'info'}" style="margin-left:4px">${esc(c.insur||'일반')}</span>
           ${fails?`<span class="pill danger">페일 ${fails}</span>`:''}</div>
-        <div class="tiny muted" style="margin-top:2px">${esc(teeth)}</div>
+        <div class="tiny muted" style="margin-top:2px">${c.birth?esc(c.birth)+' · ':''}${esc(teeth)}</div>
         <div class="tiny" style="margin-top:2px;color:${st}">1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}</div>
       </div>
       <div class="qty">${t.length}<u>개</u></div>
@@ -1648,7 +1766,9 @@ function openCaseForm(id){
       <label class="field"><span>차트번호 *</span><input id="lcChart" value="${c?esc(c.chart):''}" placeholder="A-1234"></label>
       <label class="field"><span>환자</span><input id="lcName" value="${c?esc(c.pname||''):''}" placeholder="김민수"></label>
     </div>
-    <div class="tiny muted" style="margin:-4px 2px 10px">이름은 <b>성만 남기고 나머지는 초성</b>으로 저장돼요 (김민수 → 김ㅁㅅ). 덴트웹에서 초성으로 찾을 수 있어요.</div>
+    <label class="field"><span>생년월일</span><input id="lcBirth" value="${c?esc(c.birth||''):''}" placeholder="1948-03-02 또는 480302" inputmode="numeric"></label>
+    <div class="tiny muted" style="margin:-4px 2px 10px">이름은 <b>성만 남기고 나머지는 초성</b>으로 저장돼요 (김민수 → 김ㅁㅅ).
+      동명이인은 <b>차트번호와 생년월일</b>로 가립니다.</div>
     <div class="two">
       <label class="field"><span>구분</span><select id="lcIns">
         <option ${c&&c.insur==='보험'?'selected':''}>보험</option>
@@ -1693,7 +1813,7 @@ function saveCase(id){
   if(!chart){ toast('차트번호를 입력하세요'); return; }
   if(!lcSel.length){ toast('심은 치아를 골라주세요'); return; }
   const data={ chart, pname:maskName($('#lcName').value),   // 이름 원본은 저장하지 않는다
-    insur:$('#lcIns').value, d1:$('#lcD1').value, d2:$('#lcD2').value,
+    birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d1:$('#lcD1').value, d2:$('#lcD2').value,
     memo:$('#lcMemo').value.trim(),
     teeth:lcSel.map(n=>({fdi:n, ...(lcTeeth[n]||{})})), updatedAt:now() };
   if(id){ Object.assign(caseById(id), data); }
