@@ -137,6 +137,19 @@
     padding:9px 4px; border-radius:9px; cursor:pointer}
   .seg button.on{background:#fff; color:var(--brand); box-shadow:0 1px 4px rgba(0,0,0,.08)}
 
+  /* 재고 한 줄 목록 — 카드 대신 줄로 쌓아 세로 길이를 줄인다 */
+  .irow{display:flex; align-items:center; gap:11px; padding:13px 14px; background:var(--card);
+    border:1px solid var(--line); border-radius:14px; margin-bottom:7px; cursor:pointer}
+  .irow:active{background:#f2f6f8}
+  .irow .dot{width:9px; height:9px; border-radius:50%; flex:0 0 9px}
+  .irow .nm{font-weight:800; font-size:15px; line-height:1.32}
+  .irow .qty{font-weight:800; font-size:19px; white-space:nowrap; text-align:right}
+  .irow .qty u{font-size:11.5px; font-weight:700; color:var(--muted); margin-left:2px; text-decoration:none}
+  .irow .chev{color:var(--muted); font-size:17px; margin-left:-2px}
+  .cntrow{display:flex; align-items:center; gap:10px; padding:8px 2px; border-bottom:1px solid var(--line)}
+  .cntrow:last-child{border-bottom:0}
+  .cntrow input{width:74px; text-align:center; font-weight:800; padding:9px 6px}
+
   /* search */
   .search{position:relative; margin-bottom:10px}
   .search input{padding-left:38px}
@@ -328,19 +341,14 @@
           <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
         </div>
       </div>
-      <div class="summary3">
-        <div class="stat"><div class="n" id="invStatAll">0</div><div class="l">전체 품목</div></div>
-        <div class="stat"><div class="n" id="invStatLow" style="color:var(--warn)">0</div><div class="l">부족·품절</div></div>
-        <div class="stat"><div class="n" id="invStatExp" style="color:var(--danger)">0</div><div class="l">유통기한 임박</div></div>
-      </div>
-      <div class="search"><span class="ic">🔎</span><input id="invSearch" placeholder="품목·분류 검색" oninput="renderInv()"></div>
+      <button class="btn block" style="margin-bottom:11px" onclick="openCountSheet()">📋 재고 세기 &mdash; 남은 개수만 적으면 끝</button>
       <div class="seg" id="invFilter">
         <button class="on" data-f="all" onclick="setInvFilter('all')">전체</button>
-        <button data-f="low" onclick="setInvFilter('low')">부족</button>
         <button data-f="order" onclick="setInvFilter('order')">주문임박</button>
+        <button data-f="low" onclick="setInvFilter('low')">부족</button>
         <button data-f="ok" onclick="setInvFilter('ok')">충분</button>
       </div>
-      <button class="btn block" style="margin-bottom:12px" onclick="openCountSheet()">📋 재고 세기 &mdash; 남은 개수만 적으면 끝</button>
+      <div class="search" id="invSearchWrap"><span class="ic">🔎</span><input id="invSearch" placeholder="품목·분류 검색" oninput="renderInv()"></div>
       <div id="invList"></div>
     </div>
     <div id="invImplant" style="display:none"></div>
@@ -764,24 +772,17 @@ function openCountSheet(){
   if(!list.length){ toast('먼저 품목을 등록하세요'); return; }
   modal(`
     <h3>📋 재고 세기</h3>
-    <div class="hint" style="margin-bottom:12px">지금 <b>남아 있는 개수</b>만 적으면 돼요.
-      쓸 때마다 －출고를 누르지 않아도, 지난번 센 것과 비교해 <b>사용량이 자동 계산</b>됩니다.
-      안 센 품목은 <b>비워두면</b> 그대로 넘어가요.</div>
-    <div style="max-height:44vh;overflow:auto;margin-bottom:14px">
-      ${list.map(i=>{
-        const f=forecast(i);
-        return `<div class="item" style="padding:9px 2px">
-          <div class="grow"><div class="t" style="font-size:14.5px">${esc(i.name)}</div>
-            <div class="d">앱 기록 ${i.qty}${esc(i.unit)}${f?` · 하루 ${num1(f.daily)}${esc(i.unit)}`:''}</div></div>
-          <input class="cntIn" data-id="${i.id}" type="number" inputmode="numeric" min="0"
-            placeholder="${i.qty}" style="width:80px;text-align:center;font-weight:800"></div>`;
-      }).join('')}
+    <div class="tiny muted" style="margin:-4px 2px 10px">남은 개수만 적으세요. <b>안 센 건 비워두면</b> 넘어가요.</div>
+    <div style="max-height:52vh;overflow:auto;margin-bottom:12px">
+      ${list.map(i=>`<div class="cntrow">
+          <div class="grow" style="min-width:0"><div style="font-weight:700;font-size:14.5px">${esc(i.name)}</div>
+            <div class="tiny muted">${i.qty}${esc(i.unit)}</div></div>
+          <input class="cntIn" data-id="${i.id}" type="number" inputmode="numeric" min="0" placeholder="${i.qty}"></div>`).join('')}
     </div>
-    <label class="field"><span>메모 (선택)</span><input id="cntMemo" placeholder="예: 월말 실사"></label>
-    <button class="btn block" onclick="saveCountSheet()">📋 적은 것만 반영하기</button>`);
+    <button class="btn block" onclick="saveCountSheet()">다 셌어요</button>`);
 }
 function saveCountSheet(){
-  const memo=($('#cntMemo').value||'').trim();
+  const memo='';
   let n=0, gap=0;
   $$('.cntIn').forEach(el=>{
     const v=el.value.trim(); if(v==='') return;
@@ -826,34 +827,36 @@ function renderInv(){
   if(invFilter==='ok') list=list.filter(i=>i.qty>i.minQty);
   if(invFilter==='order') list=list.filter(needsOrder);
   const box = $('#invList');
-  if($('#invStatAll')){
-    const all=DB.inventory;
-    $('#invStatAll').textContent=all.length;
-    $('#invStatLow').textContent=all.filter(i=>i.qty<=i.minQty).length;
-    $('#invStatExp').textContent=all.filter(i=>{const d=dDays(i.expiry);return d!==null&&d<=30;}).length;
-  }
+  // 품목이 적으면 검색창을 숨긴다 — 화면이 짧을수록 쓰기 쉽다
+  const sw=$('#invSearchWrap'); if(sw) sw.style.display = (DB.inventory.length>8||q)?'':'none';
+  // 필터 칩에 개수를 얹어 통계 블록을 대신한다
+  const all=DB.inventory, cnt={all:all.length, low:all.filter(i=>i.qty<=i.minQty).length,
+    order:all.filter(needsOrder).length, ok:all.filter(i=>i.qty>i.minQty).length};
+  $$('#invFilter button').forEach(b=>{
+    const base={all:'전체',order:'주문임박',low:'부족',ok:'충분'}[b.dataset.f];
+    const n=cnt[b.dataset.f];
+    b.innerHTML = base + (n?` <span style="opacity:.65;font-size:11.5px">${n}</span>`:'');
+  });
   if(!list.length){ box.innerHTML = `<div class="card">${emptyBox('📦', DB.inventory.length?'조건에 맞는 품목이 없어요':'＋품목 버튼으로 재고를 추가하세요')}</div>`; refreshBell(); return; }
   box.innerHTML = list.map(i=>{
-    const lowFlag = i.qty<=i.minQty;
-    const pill = i.qty===0?`<span class="pill danger">품절</span>`
-      : lowFlag?`<span class="pill warn">부족</span>`:`<span class="pill ok">충분</span>`;
-    const dd=dDays(i.expiry);
-    const sub = [i.category||'분류없음', '최소 '+i.minQty+esc(i.unit), i.vendor?esc(i.vendor):'', dd!==null?(dd<0?'유통기한 만료':'유통기한 '+i.expiry):''].filter(Boolean).join(' · ');
-    return `<div class="card" style="padding:12px 14px">
-      <div class="spread">
-        <div class="grow" onclick="openItemDetail('${i.id}')" style="cursor:pointer">
-          <div class="row wrap" style="gap:6px"><span class="t" style="font-weight:800;font-size:15.5px">${esc(i.name)}</span>${pill}${expChipHtml(dd)}</div>
-          <div class="d tiny muted" style="margin-top:2px">${sub}</div>
-          ${fcLine(i)}
-        </div>
-        <div style="text-align:right"><div class="big" style="color:${lowFlag?'var(--warn)':'var(--ink)'}">${i.qty}</div>
-          <div class="tiny muted">${esc(i.unit)}</div></div>
+    const f=forecast(i), dd=dDays(i.expiry);
+    // 색 하나로 상태를 말한다 — 품절 빨강, 부족 주황, 주문 임박 주황, 그 외 초록
+    const st = i.qty===0? 'var(--danger)' : i.qty<=i.minQty? 'var(--warn)'
+      : (f&&f.left<=7)? 'var(--warn)' : (dd!==null&&dd<=30)? 'var(--danger)' : 'var(--ok)';
+    // 한 줄만 보여준다. 급한 게 있으면 그것만, 없으면 분류·최소량.
+    const note = i.qty===0? '품절'
+      : i.qty<=i.minQty? `부족 · 최소 ${i.minQty}${esc(i.unit)}`
+      : (f&&f.left<=7)? (f.left<=0?'지금 주문':`${f.left}일 뒤 주문`)
+      : (dd!==null&&dd<0)? '유통기한 만료' : (dd!==null&&dd<=30)? `유통기한 D-${dd}`
+      : [esc(i.category||''), f?`하루 ${num1(f.daily)}${esc(i.unit)}`:''].filter(Boolean).join(' · ');
+    return `<div class="irow" onclick="openItemDetail('${i.id}')">
+      <span class="dot" style="background:${st}"></span>
+      <div class="grow" style="min-width:0">
+        <div class="nm">${esc(i.name)}</div>
+        ${note?`<div class="tiny" style="color:${st===('var(--ok)')?'var(--muted)':st};margin-top:1px">${note}</div>`:''}
       </div>
-      <div class="row" style="margin-top:10px">
-        <button class="btn ok sm grow" onclick="quickAdjust('${i.id}','in')">＋ 입고</button>
-        <button class="btn warn sm grow" onclick="quickAdjust('${i.id}','out')">－ 출고</button>
-        <button class="btn soft sm grow" onclick="countOne('${i.id}')">📋 세기</button>
-      </div>
+      <div class="qty">${i.qty}<u>${esc(i.unit)}</u></div>
+      <span class="chev">›</span>
     </div>`;
   }).join('');
   refreshBell();
@@ -949,6 +952,11 @@ function openItemDetail(id){
         ${(it.vendor||it.price||it.expiry)?`<div class="tiny muted" style="margin-top:3px">${[it.vendor?'거래처 '+esc(it.vendor):'', it.price?'단가 '+won(it.price):'', it.expiry?'유통기한 '+it.expiry+(dDays(it.expiry)!==null?` (${dDays(it.expiry)<0?'만료':'D-'+dDays(it.expiry)})`:''):''].filter(Boolean).join(' · ')}</div>`:''}</div>
         <button class="btn soft sm" onclick="openInvForm('${it.id}')">✏️ 수정</button></div>
     </div>
+    <div class="row" style="margin:10px 0 14px">
+      <button class="btn ok grow" onclick="quickAdjust('${it.id}','in')">＋ 입고</button>
+      <button class="btn warn grow" onclick="quickAdjust('${it.id}','out')">－ 출고</button>
+      <button class="btn soft grow" onclick="countOne('${it.id}')">📋 세기</button>
+    </div>
     ${(()=>{ const f=forecast(it), oc=orderCycle(it); if(!f&&!oc) return `<div class="hint" style="margin:10px 0 4px">📋 <b>재고 세기</b>를 두 번 하면 하루 평균 사용량과 주문 시점이 계산돼요.</div>`;
       const rows=[]; if(f){ rows.push(['하루 평균 사용', `${num1(f.daily)}${esc(it.unit)}`]);
         rows.push(['주문 시점', f.left<=0?'지금':`${f.left}일 뒤 (${mdy(f.at)})`]);
@@ -957,11 +965,7 @@ function openItemDetail(id){
       return `<div class="card" style="box-shadow:none;background:var(--bg);margin:10px 0 4px">
         <div class="tiny muted" style="margin-bottom:6px">📈 소진 예측 ${f&&f.src==='out'?'<span class="muted">(출고 기록 기준 — 재고 세기를 쓰면 더 정확해요)</span>':''}</div>
         ${rows.map(r=>`<div class="spread" style="padding:3px 0"><span class="tiny muted">${r[0]}</span><b class="tiny">${r[1]}</b></div>`).join('')}</div>`; })()}
-    <div class="row" style="margin:10px 0 14px">
-      <button class="btn ok grow" onclick="quickAdjust('${it.id}','in')">＋ 입고</button>
-      <button class="btn warn grow" onclick="quickAdjust('${it.id}','out')">－ 출고</button>
-      <button class="btn soft grow" onclick="countOne('${it.id}')">📋 세기</button>
-    </div>
+
     <h2 class="sec" style="margin-top:4px">입출고 내역</h2>${logHtml}`);
 }
 
