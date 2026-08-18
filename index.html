@@ -197,6 +197,10 @@
 
   /* 역할(권한) — 직원 모드에서는 관리자 전용 요소 숨김 */
   body[data-role="staff"] .admin-only{ display:none !important; }
+  /* 권한 변경·PIN 재설정·직원 삭제처럼 오너만 만지는 것 */
+  body:not([data-role="owner"]) .owner-only{ display:none !important; }
+  /* 노무(공지 관리·계약서·급여·사직서 처리)는 오너와 인사담당자 */
+  body[data-role="staff"] .hr-only{ display:none !important; }
   .roletag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.22);color:#fff;white-space:nowrap;flex:none;cursor:pointer}
   #syncBadge{flex:none}
   .abadge{position:absolute; top:0; right:0; min-width:17px; height:17px; padding:0 4px; border-radius:999px;
@@ -300,6 +304,7 @@
 
   <!-- ============ 홈 ============ -->
   <section class="page active" id="page-home">
+    <div id="homeNotice" style="display:none"></div>
     <div id="attReminder"></div>
     <section class="card hero admin-only" id="homeHero" style="margin-top:2px">
       <div class="htop">
@@ -400,12 +405,7 @@
 
   <!-- ============ 직원 ============ -->
   <section class="page" id="page-staff">
-    <div class="spread" style="margin:4px 2px 12px">
-      <h2 class="sec" style="margin:0">👥 직원 명단</h2>
-      <button class="btn sm" onclick="openStaffForm()">＋ 직원</button>
-    </div>
-    <div class="hint">직원 <b>이름을 누르면</b> 정보·연차를 바로 수정할 수 있어요.</div>
-    <div id="staffList"></div>
+    <div id="staffWrap"></div>
   </section>
 
 </main>
@@ -415,7 +415,7 @@
   <button data-t="inv" onclick="go('inv')"><span class="i">📦</span><span class="x">재고</span></button>
   <button data-t="att" onclick="go('att')"><span class="i">🕒</span><span class="x">출퇴근</span></button>
   <button data-t="leave" onclick="go('leave')"><span class="i">🌴</span><span class="x">연월차</span></button>
-  <button class="admin-only" data-t="staff" onclick="go('staff')"><span class="i">👥</span><span class="x">직원</span></button>
+  <button data-t="staff" onclick="go('staff')"><span class="i">👥</span><span class="x">직원</span></button>
 </nav>
 
 <div id="gate"><div class="gatewrap" id="gateBody"></div></div>
@@ -465,6 +465,13 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(typeof DB.adminPin!=='string') DB.adminPin='';
   if(!Array.isArray(DB.implants)) DB.implants=[];            // 예전 버전에서 올라온 데이터엔 없다
   if(!Array.isArray(DB.implantLogs)) DB.implantLogs=[];
+  // 노무 — 공지·근로계약서·급여명세서·사직서. 금액이 든 것은 enc 안에 잠겨 있다.
+  if(!Array.isArray(DB.notices)) DB.notices=[];
+  if(!Array.isArray(DB.contracts)) DB.contracts=[];
+  if(!Array.isArray(DB.payslips)) DB.payslips=[];
+  if(!Array.isArray(DB.resignations)) DB.resignations=[];
+  if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
+  if(DB.payLock && typeof DB.payLock!=='object') DB.payLock=null;
   if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
   if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
 function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPush(); }
@@ -571,7 +578,7 @@ function setInvMode(m){ invMode=m;
 function renderInvPage(){ if(invMode==='implant') renderImplant(); else if(invMode==='ledger') renderLedger(); else renderInv(); }
 let currentTab='home';
 function go(tab){
-  if(tab==='staff' && !isAdmin()) tab='home';   // 직원은 직원탭 접근 불가
+  // 직원 탭은 모두 연다 — 관리자는 노무 화면, 직원은 자기 1페이지를 본다
   currentTab=tab;
   $$('.page').forEach(p=>p.classList.remove('active'));
   $('#page-'+tab).classList.add('active');
@@ -585,6 +592,7 @@ function rerenderCurrent(){ (RENDER[currentTab]||renderHome)(); }
    홈
    ======================================================================== */
 function renderHome(){
+  renderNoticeBanner();          // 필독 공지는 확인 전까지 맨 위에 붙어 있다
   const tk = todayKey();
   const inNow = DB.attendance.filter(a=>a.date===tk && a.inAt && !a.outAt).length;
   const low = DB.inventory.filter(i=>i.qty <= i.minQty);
@@ -637,7 +645,7 @@ function renderHome(){
   const rem = $('#attReminder'); const u = currentUser();
   const notCheckedIn = s => { const a=todays.find(x=>x.staffId===s.id); return !(a&&a.inAt) && !onLeaveToday(s.id); };
   if(rem){
-    if(u && u.role!=='관리자'){
+    if(u && !isHR()){
       const mine = todays.find(x=>x.staffId===u.id);
       if((!mine||!mine.inAt) && !onLeaveToday(u.id)){
         rem.innerHTML = `<div class="card" style="background:var(--warn-soft);border:0;box-shadow:none;margin-top:2px;display:flex;align-items:center;gap:10px;justify-content:space-between">
@@ -652,7 +660,7 @@ function renderHome(){
             <div class="tiny muted">퇴근할 때 눌러주세요.</div></div></div>
           <button class="btn soft sm" onclick="selfCheckOut()">퇴근</button></div>`;
       } else rem.innerHTML = '';
-    } else if(u && u.role==='관리자'){
+    } else if(u && isHR()){
       const miss = roster.filter(notCheckedIn).length;
       rem.innerHTML = miss ? `<div class="card" style="background:var(--warn-soft);border:0;box-shadow:none;margin-top:2px;cursor:pointer;display:flex;align-items:center;gap:10px;justify-content:space-between" onclick="go('att')">
         <div class="row" style="gap:10px"><span style="font-size:22px">🕒</span>
@@ -692,7 +700,12 @@ function computeAlerts(){
   if(isAdmin()){
     DB.leaves.filter(l=>l.status==='pending').forEach(l=>{ const s=staffById(l.staffId);
       a.push({level:'info',icon:'🌴',title:`연월차 승인 대기 · ${s?s.name:'(직원)'}`,sub:`${fmtDate(l.startDate)}${l.startDate!==l.endDate?'~'+fmtDate(l.endDate):''} · ${l.days}일`,tab:'leave'}); });
+    (DB.resignations||[]).filter(r=>r.status==='제출').forEach(r=>{ const s=staffById(r.staffId);
+      a.push({level:'warn',icon:'📄',title:`사직서 · ${s?s.name:'(직원)'}`,sub:`${fmtDate(String(r.submittedAt).slice(0,10))} 제출 · 마지막 ${r.lastDay||'-'}`,tab:'staff'}); });
   }
+  const me=currentUser();
+  if(me) noticeMustUnread(me.id).forEach(n=>
+    a.push({level:'warn',icon:'📌',title:`필독 공지 · ${n.title}`,sub:'아직 확인하지 않았어요',tab:'home'}));
   const rank={danger:0,warn:1,info:2};
   a.sort((x,y)=>rank[x.level]-rank[y.level]);
   return a;
@@ -857,9 +870,9 @@ function openRowMenu(id){
     <div class="divider"></div>
     <div class="row">
       <button class="btn soft grow" onclick="openInvForm('${id}')">✏️ 수정</button>
-      ${isAdmin()?`<button class="btn danger grow" onclick="delItem('${id}')">🗑 삭제</button>`:''}
+      ${isOwner()?`<button class="btn danger grow" onclick="delItem('${id}')">🗑 삭제</button>`:''}
     </div>
-    ${isAdmin()?'':'<div class="tiny muted" style="text-align:center;margin-top:10px">삭제는 관리자만 할 수 있어요</div>'}`);
+    ${isOwner()?'':'<div class="tiny muted" style="text-align:center;margin-top:10px">삭제는 최고관리자만 할 수 있어요</div>'}`);
 }
 
 // 여러 품목을 한 번에 세는 화면
@@ -1029,7 +1042,7 @@ function saveItem(id){
   saveDB(); closeModal(); renderInv(); toast('저장되었습니다');
 }
 function delItem(id){
-  if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
+  if(!isOwner()){ toast('삭제는 최고관리자만 할 수 있어요'); return; }
   if(!confirm('이 품목을 삭제할까요? 입출고 내역도 함께 삭제됩니다.')) return;
   DB.inventory = DB.inventory.filter(i=>i.id!==id);
   DB.invLogs = DB.invLogs.filter(l=>l.itemId!==id);
@@ -1055,7 +1068,7 @@ function openItemDetail(id){
           <button class="btn soft sm" onclick="togglePin('${it.id}');openItemDetail('${it.id}')"
             title="자주 쓰는 품목" style="${isPinned(it.id)?'color:var(--warn)':''}">${isPinned(it.id)?'★':'☆'}</button>
           <button class="btn soft sm" onclick="openInvForm('${it.id}')">✏️</button>
-          ${isAdmin()?`<button class="btn soft sm" onclick="delItem('${it.id}')" style="color:var(--danger)">🗑</button>`:''}
+          ${isOwner()?`<button class="btn soft sm" onclick="delItem('${it.id}')" style="color:var(--danger)">🗑</button>`:''}
         </div></div>
     </div>
     ${isPinned(it.id)? `<div class="spread" style="margin:10px 2px 0">
@@ -1834,7 +1847,7 @@ function mMove(id,dir){
 }
 function mToggle(id){ const r=mFind(id); if(!r) return; r.off=!r.off; saveDB(); openMasters(mKind); }
 function mDel(id){
-  if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
+  if(!isOwner()){ toast('삭제는 최고관리자만 할 수 있어요'); return; }
   if(!confirm('이 항목을 지울까요? (이미 적은 대장 기록은 그대로 남습니다)')) return;
   DB.masters[mKind]=DB.masters[mKind].filter(r=>r.id!==id); saveDB(); openMasters(mKind);
 }
@@ -2178,7 +2191,7 @@ function openCaseForm(id){
     <label class="field"><span>메모 (선택)</span><input id="lcMemo" value="${c?esc(c.memo||''):''}"></label>
     <div class="row">
       <button class="btn block" onclick="saveCase('${id||''}')">${c?'저장':'대장에 적기'}</button>
-      ${c&&isAdmin()?`<button class="btn danger" onclick="delCase('${c.id}')">삭제</button>`:''}
+      ${c&&isOwner()?`<button class="btn danger" onclick="delCase('${c.id}')">삭제</button>`:''}
     </div>`);
   lcRenderTeeth();
 }
@@ -2203,7 +2216,7 @@ function saveCase(id){
   if(r.miss) setTimeout(()=>toast(`⚠️ 재고에 없는 규격 ${r.miss}개는 못 뺐어요 — 재료 목록에서 '재고에 등록'을 눌러주세요`),1600);
 }
 function delCase(id){
-  if(!isAdmin()){ toast('삭제는 관리자만 할 수 있어요'); return; }
+  if(!isOwner()){ toast('삭제는 최고관리자만 할 수 있어요'); return; }
   if(!confirm('이 케이스를 대장에서 지울까요?')) return;
   DB.implantCases=DB.implantCases.filter(c=>c.id!==id);
   saveDB(); closeModal(); renderLedger(); toast('삭제되었습니다');
@@ -2414,20 +2427,6 @@ function submitLeave(){
 /* ========================================================================
    직원
    ======================================================================== */
-function renderStaff(){
-  const box=$('#staffList');
-  if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👥','＋직원 버튼으로 직원을 추가하세요')}</div>`; return; }
-  box.innerHTML = DB.staff.map(s=>{
-    const r=annualRemain(s);
-    return `<div class="card" style="padding:13px 14px" onclick="openStaffForm('${s.id}')">
-      <div class="spread"><div class="row" style="gap:11px"><div class="avatar">${esc(initials(s.name))}</div>
-        <div><div class="t" style="font-weight:800">${esc(s.name)} <span class="tiny muted" style="font-weight:600">${esc(s.position||'')}</span></div>
-          <div class="d tiny muted">${esc(s.dept||'부서 미지정')}${s.joinDate?' · 입사 '+s.joinDate+(serviceNth(s.joinDate)?' · '+serviceNth(s.joinDate)+'년차':''):''}</div></div></div>
-        <div style="text-align:right"><div style="font-weight:800;color:var(--brand)">연차 ${r.remain}일</div>
-          <div class="tiny muted">/ 총 ${r.total}일${s.annualAuto===false?' (수동)':''}</div>
-          <div class="tiny" style="color:var(--brand);font-weight:700;margin-top:2px">✏️ 수정 ›</div></div></div></div>`;
-  }).join('');
-}
 function openStaffForm(edit){
   const s=edit?staffById(edit):null;
   modal(`
@@ -2439,12 +2438,11 @@ function openStaffForm(edit){
     </div>
     <div class="two">
       <label class="field"><span>전화번호 * (로그인 ID)</span><input id="sPhone" inputmode="numeric" value="${s?esc(s.phone||''):''}" placeholder="01012345678"></label>
-      <label class="field"><span>권한</span><select id="sRole">
-        <option value="직원" ${!s||s.role!=='관리자'?'selected':''}>직원</option>
-        <option value="관리자" ${s&&s.role==='관리자'?'selected':''}>관리자</option>
-      </select></label>
+      <label class="field"><span>권한</span>${isOwner()? `<select id="sRole">
+        ${[ROLE_STAFF,ROLE_HR,ROLE_OWNER].map(r=>`<option value="${r}" ${(s?s.role:ROLE_STAFF)===r?'selected':''}>${ROLE_KO[r]}</option>`).join('')}
+      </select>` : `<input value="${ROLE_KO[(s&&s.role)||ROLE_STAFF]}" disabled title="권한은 최고관리자만 바꿀 수 있어요">`}</label>
     </div>
-    <label class="field"><span>${s?'PIN 재설정 (비우면 기존 유지)':'개인 PIN * (숫자 4자리 이상)'}</span><input id="sPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    ${(!s || isOwner())? `<label class="field"><span>${s?'PIN 재설정 (비우면 기존 유지)':'개인 PIN * (숫자 4자리 이상)'}</span><input id="sPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>` : ''}
     <div class="two">
       <label class="field"><span>입사일</span><input id="sJoin" type="date" value="${s?esc(s.joinDate||''):''}" onchange="staffAnnualSync()"></label>
       <label class="field"><span>연간 연차(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?annualTotalOf(s):15}" oninput="staffAnnualManualEdit()"></label>
@@ -2457,7 +2455,7 @@ function openStaffForm(edit){
       <option value="0" ${s.active===false?'selected':''}>퇴사 (로그인 차단)</option></select></label>`:''}
     <div class="row">
       <button class="btn block" onclick="saveStaff('${s?s.id:''}')">${s?'저장':'추가'}</button>
-      ${s?`<button class="btn danger" onclick="delStaff('${s.id}')">삭제</button>`:''}
+      ${s&&isOwner()?`<button class="btn danger" onclick="delStaff('${s.id}')">삭제</button>`:''}
     </div>
     <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 권장(기록 보존).</div>`);
   staffAnnualSync();
@@ -2485,8 +2483,12 @@ function saveStaff(id){
   const name=$('#sName').value.trim(); if(!name){ toast('이름을 입력하세요'); return; }
   const phone=normPhone($('#sPhone').value); if(!phone){ toast('전화번호(로그인 ID)를 입력해야 저장돼요'); return; }
   if(DB.staff.some(x=>x.id!==id && normPhone(x.phone)===phone)){ toast('이미 등록된 전화번호예요'); return; }
-  const role=$('#sRole').value==='관리자'?'관리자':'직원';
-  const pinIn=($('#sPin').value||'').trim();
+  const sEdit=id?staffById(id):null;
+  // 권한 변경과 PIN 재설정은 오너만 — 인사담당자가 오너 계정을 건드리지 못하게
+  const roleSel=$('#sRole');
+  const role = roleSel ? ([ROLE_STAFF,ROLE_HR,ROLE_OWNER].includes(roleSel.value)?roleSel.value:ROLE_STAFF)
+                       : ((sEdit&&sEdit.role)||ROLE_STAFF);
+  const pinEl=$('#sPin'); const pinIn=pinEl?(pinEl.value||'').trim():'';
   const annualAuto = $('#sAnnualAuto') ? $('#sAnnualAuto').checked : true;
   const jd=$('#sJoin').value;
   const annualTotal = annualAuto ? (annualByService(jd) ?? Math.max(0,parseInt($('#sAnnual').value,10)||0))
@@ -2497,9 +2499,9 @@ function saveStaff(id){
     const s=staffById(id);
     if(pinIn){ if(!/^\d{4,8}$/.test(pinIn)){ toast('PIN은 숫자 4~8자리'); return; } base.pin=pinIn; }
     const act=$('#sActive'); if(act) base.active = act.value==='1';
-    if(s.role==='관리자' && (role!=='관리자' || base.active===false)){
-      const others=DB.staff.filter(x=>x.id!==id && x.role==='관리자' && x.active!==false);
-      if(!others.length){ toast('최소 1명의 관리자가 필요해요'); return; }
+    if(s.role===ROLE_OWNER && (role!==ROLE_OWNER || base.active===false)){
+      const others=DB.staff.filter(x=>x.id!==id && x.role===ROLE_OWNER && x.active!==false);
+      if(!others.length){ toast('최소 1명의 최고관리자가 필요해요'); return; }
     }
     Object.assign(s, base);
   } else {
@@ -2509,10 +2511,11 @@ function saveStaff(id){
   saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('저장되었습니다');
 }
 function delStaff(id){
+  if(!isOwner()){ toast('직원 삭제는 최고관리자만 할 수 있어요'); return; }
   const s=staffById(id);
-  if(s && s.role==='관리자'){
-    const others=DB.staff.filter(x=>x.id!==id && x.role==='관리자' && x.active!==false);
-    if(!others.length){ toast('마지막 관리자는 삭제할 수 없어요'); return; }
+  if(s && s.role===ROLE_OWNER){
+    const others=DB.staff.filter(x=>x.id!==id && x.role===ROLE_OWNER && x.active!==false);
+    if(!others.length){ toast('마지막 최고관리자는 삭제할 수 없어요'); return; }
   }
   if(!confirm('이 직원을 삭제할까요? 출퇴근·연월차 기록도 함께 삭제됩니다. (퇴사 처리를 권장)')) return;
   DB.staff=DB.staff.filter(s=>s.id!==id);
@@ -2520,6 +2523,907 @@ function delStaff(id){
   DB.leaves=DB.leaves.filter(l=>l.staffId!==id);
   if(sessionId()===id) setSession('');
   saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('삭제되었습니다');
+}
+
+
+/* ========================================================================
+   노무 — 공지 · 근로계약서 · 급여명세서 · 사직서 · 직원 1페이지
+   ------------------------------------------------------------------------
+   이 앱은 데이터 전체를 JSON 한 덩어리로 Firestore 문서 하나에 넣고, 모든
+   기기가 그걸 통째로 내려받는다. 그래서 화면에서 가리는 것만으로는 급여를
+   못 지킨다 — 직원 폰에 이미 내려와 있기 때문이다.
+   그래서 금액과 계약서 본문은 **브라우저에서 암호로 잠근 뒤** DB에 넣는다.
+   열쇠는 오너·인사담당자 머릿속에만 있고 어디에도 저장하지 않는다.
+   (제대로 된 해법 — Firebase Auth + 문서 분리 + 보안규칙 — 은 로드맵에 있다)
+   ======================================================================== */
+
+/* ---- 급여 열쇠 ---------------------------------------------------------
+   PBKDF2 로 열쇠를 만들고 AES-GCM 으로 잠근다. 둘 다 브라우저에 들어 있어
+   라이브러리도 서버도 필요 없다. 다만 https 에서만 동작한다. */
+const PAY_TTL = 3*60*1000;                 // 3분 지나면 다시 잠긴다
+const PAY_ITER = 250000;
+let payKeyCache=null, payKeyAt=0, payAfter=null;
+
+function cryptoOK(){ return !!(window.crypto && window.crypto.subtle && window.isSecureContext); }
+function b64e(buf){ let s=''; new Uint8Array(buf).forEach(b=>s+=String.fromCharCode(b)); return btoa(s); }
+function b64d(str){ const bin=atob(String(str||'')), a=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return a; }
+
+async function payDerive(pass, saltB64){
+  const base=await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt:b64d(saltB64), iterations:PAY_ITER, hash:'SHA-256'},
+    base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+}
+async function payEnc(key, obj){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(JSON.stringify(obj)));
+  return b64e(iv)+'.'+b64e(ct);
+}
+async function payDec(key, blob){
+  const p=String(blob||'').split('.'); if(p.length!==2) return null;
+  try{
+    const pt=await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(p[0])}, key, b64d(p[1]));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }catch(e){ return null; }               // 열쇠가 틀리면 여기로 온다
+}
+function payUnlocked(){ if(payKeyCache && Date.now()-payKeyAt<PAY_TTL) return payKeyCache; payKeyCache=null; return null; }
+function payRelock(){ payKeyCache=null; payKeyAt=0; }
+
+// 급여를 만지는 모든 길목은 여기를 지난다
+function withPayKey(fn){
+  if(!isHR()){ toast('급여는 최고관리자와 인사담당자만 볼 수 있어요'); return; }
+  if(!cryptoOK()){ toast('이 브라우저에서는 급여 잠금을 쓸 수 없어요 — https 주소로 열어주세요'); return; }
+  const k=payUnlocked();
+  if(k){ payKeyAt=Date.now(); fn(k); return; }
+  payAfter=fn;
+  DB.payLock? openPayUnlock() : openPayKeySetup();
+}
+function hrLog(kind, memo){
+  if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
+  const u=currentUser();
+  DB.hrLogs.unshift({id:uid(), at:now(), by:u?u.id:'', byName:u?u.name:'', kind, memo:memo||''});
+  if(DB.hrLogs.length>400) DB.hrLogs=DB.hrLogs.slice(0,400);
+}
+
+function openPayUnlock(){
+  modal(`<h3>🔐 급여 열쇠</h3>
+    <div class="tiny muted" style="margin:-6px 2px 12px">급여와 근로계약서는 잠겨 있어요. 열쇠를 넣으면 <b>3분간</b> 열립니다.</div>
+    <label class="field"><span>급여 열쇠</span>
+      <input id="pkPass" type="password" placeholder="열쇠" autocomplete="off"
+        onkeydown="if(event.key==='Enter')doPayUnlock()"></label>
+    <button class="btn block" onclick="doPayUnlock()">열기</button>
+    <div class="tiny muted" style="margin-top:12px">열쇠를 잊으셨으면 최고관리자가 <b>설정 → 급여 열쇠</b> 에서 다시 정할 수 있어요(기존 급여 기록은 지워집니다).</div>`);
+  setTimeout(()=>{ const e=$('#pkPass'); if(e) e.focus(); },80);
+}
+async function doPayUnlock(){
+  const pass=($('#pkPass').value||''); if(!pass){ toast('열쇠를 넣어주세요'); return; }
+  const btn=$('#pkPass').parentElement.parentElement.querySelector('.btn');
+  if(btn){ btn.disabled=true; btn.textContent='여는 중…'; }
+  try{
+    const key=await payDerive(pass, DB.payLock.salt);
+    const chk=await payDec(key, DB.payLock.check);
+    if(!chk || chk.v!=='mediops'){ toast('열쇠가 맞지 않아요'); if(btn){btn.disabled=false;btn.textContent='열기';} return; }
+    payKeyCache=key; payKeyAt=Date.now();
+    closeModal();
+    const fn=payAfter; payAfter=null; if(fn) fn(key);
+  }catch(e){ toast('열지 못했어요'); if(btn){btn.disabled=false;btn.textContent='열기';} }
+}
+
+function openPayKeySetup(){
+  if(!isOwner()){ toast('급여 열쇠는 최고관리자가 정해요'); return; }
+  if(!cryptoOK()){ toast('https 주소로 열어야 급여 잠금을 쓸 수 있어요'); return; }
+  const has=!!DB.payLock;
+  modal(`<h3>🔐 급여 열쇠 ${has?'변경':'정하기'}</h3>
+    <div class="hint">급여와 근로계약서는 이 열쇠로 잠겨 저장돼요. <b>열쇠는 앱에도 서버에도 저장하지 않습니다</b> — 잊으면 아무도 못 엽니다. 종이에 적어 따로 보관하세요.</div>
+    ${has?`<label class="field"><span>지금 열쇠</span><input id="pkOld" type="password" autocomplete="off"></label>`:''}
+    <label class="field"><span>${has?'새 ':''}열쇠 (8자 이상)</span><input id="pkNew" type="password" autocomplete="off"></label>
+    <label class="field"><span>한 번 더</span><input id="pkNew2" type="password" autocomplete="off"></label>
+    <div class="tiny muted" style="margin:-4px 2px 12px">직원 로그인 PIN과 <b>다르게</b> 정하세요. PIN은 4자리라 열쇠로 쓰면 잠근 뜻이 없어집니다.</div>
+    <button class="btn block" onclick="doPayKeySave()">${has?'열쇠 바꾸고 다시 잠그기':'이 열쇠로 잠그기'}</button>
+    ${has?`<div class="divider"></div>
+      <button class="btn soft block" style="color:var(--danger)" onclick="doPayKeyReset()">열쇠를 잊었어요 — 다시 정하기</button>
+      <div class="tiny muted" style="margin-top:8px">누르면 <b>지금까지 저장된 급여명세서와 근로계약서 본문이 지워집니다.</b> 원본은 세무사·급여프로그램에 있으니 다시 올리시면 돼요.</div>`:''}`);
+}
+async function doPayKeySave(){
+  const has=!!DB.payLock;
+  const np=($('#pkNew').value||''), np2=($('#pkNew2').value||'');
+  if(np.length<8){ toast('열쇠는 8자 이상으로 정해주세요'); return; }
+  if(np!==np2){ toast('두 번 넣은 열쇠가 달라요'); return; }
+  const salt=b64e(crypto.getRandomValues(new Uint8Array(16)));
+  const newKey=await payDerive(np, salt);
+  let oldKey=null;
+  if(has){
+    const op=($('#pkOld').value||'');
+    if(!op){ toast('지금 열쇠를 넣어주세요'); return; }
+    oldKey=await payDerive(op, DB.payLock.salt);
+    const chk=await payDec(oldKey, DB.payLock.check);
+    if(!chk || chk.v!=='mediops'){ toast('지금 열쇠가 맞지 않아요'); return; }
+    // 잠긴 것을 모두 열어 새 열쇠로 다시 잠근다
+    const boxes=[...(DB.payslips||[]), ...(DB.contracts||[])];
+    for(const b of boxes){
+      if(!b.enc) continue;
+      const plain=await payDec(oldKey, b.enc);
+      if(plain===null){ toast('예전 기록 하나를 열지 못해 멈췄어요'); return; }
+      b.enc=await payEnc(newKey, plain);
+    }
+  }
+  DB.payLock={salt, check:await payEnc(newKey,{v:'mediops'}), at:now(), by:(currentUser()||{}).id||''};
+  payKeyCache=newKey; payKeyAt=Date.now();
+  hrLog('열쇠', has?'급여 열쇠 변경':'급여 열쇠 처음 설정');
+  saveDB(); closeModal(); toast(has?'열쇠를 바꾸고 다시 잠갔어요':'급여 열쇠를 정했어요');
+}
+async function doPayKeyReset(){
+  const n=(DB.payslips||[]).length+(DB.contracts||[]).length;
+  if(!confirm(`지금까지 저장된 급여명세서·근로계약서 ${n}건이 지워집니다.\n정말 열쇠를 다시 정할까요?`)) return;
+  DB.payslips=[]; DB.contracts=[]; DB.payLock=null; payRelock();
+  hrLog('열쇠', `열쇠 분실로 재설정 · 잠긴 기록 ${n}건 삭제`);
+  saveDB(); toast('열쇠를 지웠어요. 새로 정해주세요'); openPayKeySetup();
+}
+
+/* ---- 공지 · 읽음확인 ---------------------------------------------------
+   서버가 없어 문자·카톡은 못 보낸다. 대신 필독 공지는 확인을 누를 때까지
+   홈 맨 위에 붙어 있고, 관리자는 누가 안 읽었는지 이름으로 본다. */
+function activeStaff(){ return DB.staff.filter(s=>s.active!==false); }
+function noticeById(id){ return (DB.notices||[]).find(n=>n.id===id); }
+function noticeRead(n, sid){ return !!(n.reads && n.reads[sid]); }
+function noticeUnreadFor(sid){ return (DB.notices||[]).filter(n=>!noticeRead(n,sid)); }
+function noticeMustUnread(sid){ return noticeUnreadFor(sid).filter(n=>n.must); }
+
+function renderNoticeBanner(){
+  const box=$('#homeNotice'); if(!box) return;
+  const u=currentUser();
+  const list=u? noticeMustUnread(u.id) : [];
+  if(!list.length){ box.innerHTML=''; box.style.display='none'; return; }
+  box.style.display='';
+  box.innerHTML=list.map(n=>`<div class="card" style="background:var(--warn-soft);border:0;box-shadow:none;margin-bottom:8px;padding:13px 15px;cursor:pointer" onclick="openNoticeRead('${n.id}')">
+    <div class="row" style="gap:9px;align-items:flex-start">
+      <span style="font-size:20px;line-height:1.3">📌</span>
+      <div class="grow" style="min-width:0">
+        <div style="font-weight:900;color:var(--warn)">필독 · ${esc(n.title)}</div>
+        <div class="tiny muted" style="margin-top:2px">${esc(n.byName||'')} · ${fmtDateFull((n.at||'').slice(0,10))} — 눌러서 확인해 주세요</div>
+      </div></div></div>`).join('');
+}
+function openNoticeRead(id){
+  const n=noticeById(id); if(!n) return;
+  const u=currentUser();
+  const already=u&&noticeRead(n,u.id);
+  modal(`<h3>${n.must?'📌 필독 · ':'📢 '}${esc(n.title)}</h3>
+    <div class="tiny muted" style="margin:-6px 2px 12px">${esc(n.byName||'')} · ${fmtDateFull((n.at||'').slice(0,10))}</div>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:14px 15px;margin-bottom:14px;white-space:pre-wrap;line-height:1.7">${esc(n.body||'')}</div>
+    ${already
+      ? `<div class="tiny" style="text-align:center;color:var(--ok);font-weight:800;margin-bottom:10px">✓ ${fmtDateFull(String(n.reads[u.id]).slice(0,10))}에 확인하셨어요</div>
+         <button class="btn soft block" onclick="closeModal()">닫기</button>`
+      : `<button class="btn block" onclick="confirmNotice('${n.id}')">읽었습니다</button>`}`);
+}
+function confirmNotice(id){
+  const n=noticeById(id), u=currentUser(); if(!n||!u) return;
+  if(!n.reads) n.reads={};
+  n.reads[u.id]=now();
+  saveDB(); closeModal(); renderHome(); if(currentTab==='staff') renderStaff();
+  toast('확인했어요');
+}
+function openNoticeForm(id){
+  if(!isHR()){ toast('공지는 최고관리자와 인사담당자만 올릴 수 있어요'); return; }
+  const n=id?noticeById(id):null;
+  modal(`<h3>${n?'공지 수정':'📢 공지 올리기'}</h3>
+    <label class="field"><span>제목 *</span><input id="ncTitle" value="${n?esc(n.title):''}" placeholder="예: 8월 대체공휴일 근무 안내"></label>
+    <label class="field"><span>내용</span><textarea id="ncBody" rows="6" placeholder="직원들이 볼 내용을 적어주세요">${n?esc(n.body||''):''}</textarea></label>
+    <label class="field" style="display:flex;align-items:center;gap:8px;margin:-2px 2px 12px">
+      <input type="checkbox" id="ncMust" style="width:auto;margin:0" ${!n||n.must?'checked':''}>
+      <span class="tiny" style="margin:0;font-weight:700">필독 — 확인을 누를 때까지 홈 맨 위에 붙어 있어요</span></label>
+    <button class="btn block" onclick="saveNotice('${n?n.id:''}')">${n?'수정':'올리기'}</button>
+    ${n?`<button class="btn soft block" style="margin-top:8px;color:var(--danger)" onclick="delNotice('${n.id}')">삭제</button>`:''}`);
+}
+function saveNotice(id){
+  const title=($('#ncTitle').value||'').trim(); if(!title){ toast('제목을 적어주세요'); return; }
+  const body=($('#ncBody').value||'').trim(), must=$('#ncMust').checked;
+  const u=currentUser();
+  if(id){ const n=noticeById(id); if(!n) return;
+    Object.assign(n,{title,body,must});
+  } else {
+    if(!Array.isArray(DB.notices)) DB.notices=[];
+    DB.notices.unshift({id:uid(), title, body, must, by:u?u.id:'', byName:u?u.name:'', at:now(), reads:{}});
+  }
+  saveDB(); closeModal(); renderStaff(); renderHome(); toast(id?'수정했어요':'공지를 올렸어요');
+}
+function delNotice(id){
+  if(!isHR()) return;
+  if(!confirm('이 공지를 지울까요? 확인 기록도 함께 지워집니다.')) return;
+  DB.notices=(DB.notices||[]).filter(n=>n.id!==id);
+  saveDB(); closeModal(); renderStaff(); renderHome(); toast('지웠어요');
+}
+function openNoticeReaders(id){
+  const n=noticeById(id); if(!n) return;
+  const all=activeStaff();
+  const read=all.filter(s=>noticeRead(n,s.id)), miss=all.filter(s=>!noticeRead(n,s.id));
+  modal(`<h3>👀 ${esc(n.title)}</h3>
+    <div class="tiny muted" style="margin:-6px 2px 12px"><b>${read.length}/${all.length}명</b> 확인했어요</div>
+    ${miss.length?`<div class="card" style="box-shadow:none;background:var(--warn-soft);border:0;padding:12px 14px;margin-bottom:10px">
+      <div class="tiny" style="font-weight:900;color:var(--warn);margin-bottom:6px">아직 안 읽은 사람 ${miss.length}명</div>
+      ${miss.map(s=>`<div class="tiny" style="padding:2px 0">${esc(s.name)} · ${esc(s.dept||'부서 미지정')}</div>`).join('')}
+    </div>`:`<div class="card" style="box-shadow:none;background:var(--ok-soft);border:0;padding:12px 14px;margin-bottom:10px">
+      <div class="tiny" style="font-weight:900;color:var(--ok)">모두 확인했어요</div></div>`}
+    ${read.length?`<div class="card" style="box-shadow:none;background:var(--bg);padding:12px 14px">
+      <div class="tiny muted" style="font-weight:800;margin-bottom:6px">확인함</div>
+      ${read.map(s=>`<div class="spread" style="padding:2px 0"><span class="tiny">${esc(s.name)}</span>
+        <span class="tiny muted">${fmtDateFull(String(n.reads[s.id]).slice(0,10))} ${fmtTime(n.reads[s.id])}</span></div>`).join('')}
+    </div>`:''}`);
+}
+function hrNoticeView(){
+  const all=activeStaff().length;
+  const list=(DB.notices||[]);
+  return `<div class="spread" style="margin:0 2px 12px">
+      <div class="tiny muted">확인을 누른 사람만 셉니다. 필독은 확인 전까지 홈 맨 위에 붙어 있어요.</div>
+      <button class="btn sm" onclick="openNoticeForm()">＋ 공지</button>
+    </div>
+    ${list.length? list.map(n=>{
+      const cnt=activeStaff().filter(s=>noticeRead(n,s.id)).length;
+      const done=cnt>=all && all>0;
+      return `<div class="card" style="padding:13px 14px;margin-bottom:8px">
+        <div class="spread" style="align-items:flex-start;gap:10px">
+          <div class="grow" style="min-width:0;cursor:pointer" onclick="openNoticeRead('${n.id}')">
+            <div style="font-weight:800">${n.must?'<span class="pill warn">필독</span> ':''}${esc(n.title)}</div>
+            <div class="tiny muted" style="margin-top:3px">${esc(n.byName||'')} · ${fmtDateFull((n.at||'').slice(0,10))}</div>
+          </div>
+          <div style="text-align:right;flex:none">
+            <div style="font-weight:900;color:${done?'var(--ok)':'var(--warn)'}" class="tap" onclick="openNoticeReaders('${n.id}')">${cnt}/${all}</div>
+            <div class="tiny muted tap" onclick="openNoticeReaders('${n.id}')">확인 ›</div>
+          </div>
+        </div>
+        <div class="row" style="gap:6px;margin-top:9px">
+          <button class="btn soft xs" onclick="openNoticeReaders('${n.id}')">👀 누가 읽었나</button>
+          <button class="btn soft xs" onclick="openNoticeForm('${n.id}')">✏️ 수정</button>
+        </div></div>`;
+    }).join('') : emptyBox('📢','＋공지 버튼으로 첫 공지를 올려보세요')}`;
+}
+
+/* ---- 근로계약서 --------------------------------------------------------
+   근로기준법 §17 은 임금(구성항목·계산방법·지급방법)·소정근로시간·주휴일·
+   연차를 적은 서면을 근로자에게 '교부'하라고 한다. 작성만 하고 안 건네도
+   위반이라 §114 로 500만원 이하 벌금이다. 그래서 앱은 두 가지를 남긴다 —
+   본문(잠금)과 '직원이 언제 확인했는지'(평문).
+   임금이 들어가므로 본문은 급여 열쇠로 잠근다. */
+const CONTRACT_FIELDS=[
+  ['startDate','계약 시작일','date'], ['endDate','계약 종료일 (기간제만)','date'],
+  ['workPlace','근무 장소','text'], ['job','맡은 일','text'],
+  ['payKind','임금 형태','sel:월급|시급|일급|연봉'], ['payAmount','기본급 (원)','num'],
+  ['payParts','그 밖의 임금 구성항목','text'], ['payCalc','계산 방법','text'],
+  ['payDay','임금 지급일','text'], ['payMethod','지급 방법','sel:계좌이체|현금'],
+  ['workHours','소정근로시간','text'], ['workDays','근무일','text'],
+  ['restDay','주휴일','text'], ['annual','연차유급휴가','text'],
+];
+function contractOf(sid){ return (DB.contracts||[]).filter(c=>c.staffId===sid).sort((a,b)=>String(b.at).localeCompare(String(a.at)))[0]; }
+function openContract(sid){
+  withPayKey(async key=>{
+    const s=staffById(sid); if(!s) return;
+    const c=contractOf(sid);
+    const d=c? (await payDec(key, c.enc))||{} : {};
+    if(c && !Object.keys(d).length){ toast('예전 계약서를 열지 못했어요 — 열쇠를 확인해 주세요'); return; }
+    const f=(k,label,type)=>{
+      const v=d[k]==null?'':d[k];
+      if(type==='date') return `<label class="field"><span>${label}</span><input id="ct_${k}" type="date" value="${esc(v)}"></label>`;
+      if(type==='num')  return `<label class="field"><span>${label}</span><input id="ct_${k}" type="number" inputmode="numeric" value="${esc(v)}"></label>`;
+      if(type.startsWith('sel:')) return `<label class="field"><span>${label}</span><select id="ct_${k}">${type.slice(4).split('|').map(o=>`<option ${v===o?'selected':''}>${o}</option>`).join('')}</select></label>`;
+      return `<label class="field"><span>${label}</span><input id="ct_${k}" value="${esc(v)}"></label>`;
+    };
+    modal(`<h3>📝 근로계약서 · ${esc(s.name)}</h3>
+      <div class="hint">근로기준법 §17 — <b>임금·소정근로시간·주휴일·연차</b>를 적은 서면을 직원에게 건네야 합니다. 여기 적고 <b>인쇄해서 한 장 드리면</b> 교부가 됩니다.</div>
+      ${c?`<div class="tiny" style="margin:8px 2px 12px;font-weight:800;color:${c.agreedAt?'var(--ok)':'var(--warn)'}">
+        ${c.agreedAt? `✓ ${fmtDateFull(String(c.agreedAt).slice(0,10))} 직원 확인함` : '⏳ 아직 직원 확인 전'}</div>`:''}
+      ${CONTRACT_FIELDS.map(x=>f(x[0],x[1],x[2])).join('')}
+      <label class="field"><span>그 밖에 정한 것</span><textarea id="ct_note" rows="3">${esc(d.note||'')}</textarea></label>
+      <button class="btn block" onclick="saveContract('${sid}')">저장</button>
+      ${c?`<div class="row" style="margin-top:8px">
+        <button class="btn soft grow" onclick="printContract('${sid}')">🖨 인쇄해서 교부</button>
+        <button class="btn soft grow" onclick="openContractAgree('${sid}')">${c.agreedAt?'다시 확인받기':'직원 확인받기'}</button>
+      </div>`:''}`);
+  });
+}
+function saveContract(sid){
+  withPayKey(async key=>{
+    const d={}; CONTRACT_FIELDS.forEach(x=>{ const el=$('#ct_'+x[0]); if(el) d[x[0]]=el.value; });
+    const nt=$('#ct_note'); d.note=nt?nt.value:'';
+    if(!d.payAmount){ toast('기본급을 적어주세요'); return; }
+    if(!Array.isArray(DB.contracts)) DB.contracts=[];
+    const enc=await payEnc(key,d), u=currentUser();
+    const old=contractOf(sid);
+    if(old){ old.enc=enc; old.at=now(); old.by=u?u.id:''; old.agreedAt=null; old.agreedBy=null; }
+    else DB.contracts.push({id:uid(), staffId:sid, at:now(), by:u?u.id:'', byName:u?u.name:'', enc, agreedAt:null});
+    hrLog('계약서', `${(staffById(sid)||{}).name||''} 근로계약서 저장`);
+    saveDB(); closeModal(); renderStaff(); toast(old?'고쳤어요 · 직원 확인을 다시 받아주세요':'저장했어요 · 직원 확인을 받아주세요');
+  });
+}
+// 대면 확인 — 직원이 화면을 읽고 자기 PIN 을 눌러 확인한다
+function openContractAgree(sid){
+  withPayKey(async key=>{
+    const s=staffById(sid), c=contractOf(sid); if(!s||!c) return;
+    const d=(await payDec(key,c.enc))||{};
+    modal(`<h3>✍️ ${esc(s.name)} 님 확인</h3>
+      <div class="hint">직원 본인이 아래 내용을 읽고 <b>자기 PIN</b> 을 넣어주세요. 확인한 시각이 기록으로 남습니다.</div>
+      <div class="card" style="box-shadow:none;background:var(--bg);padding:13px 14px;margin:10px 0 14px;max-height:34vh;overflow:auto">
+        ${contractRows(d)}
+      </div>
+      <label class="field"><span>${esc(s.name)} 님 PIN</span>
+        <input id="ctPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+      <button class="btn block" onclick="doContractAgree('${sid}')">읽었고 동의합니다</button>`);
+  });
+}
+function contractRows(d){
+  const won0=v=>v?(+v||0).toLocaleString('ko-KR')+'원':'-';
+  const row=(k,v)=>`<div class="spread" style="padding:4px 0;gap:12px;align-items:flex-start">
+    <span class="tiny muted" style="flex:none">${k}</span><span class="tiny" style="text-align:right;font-weight:700">${esc(v||'-')}</span></div>`;
+  return row('계약 기간', (d.startDate||'-')+(d.endDate?' ~ '+d.endDate:' ~ 기간의 정함 없음'))
+    + row('근무 장소', d.workPlace) + row('맡은 일', d.job)
+    + row('임금', (d.payKind||'')+' '+won0(d.payAmount))
+    + row('그 밖의 구성항목', d.payParts) + row('계산 방법', d.payCalc)
+    + row('지급일', d.payDay) + row('지급 방법', d.payMethod)
+    + row('소정근로시간', d.workHours) + row('근무일', d.workDays)
+    + row('주휴일', d.restDay) + row('연차유급휴가', d.annual)
+    + (d.note?row('그 밖에 정한 것', d.note):'');
+}
+function doContractAgree(sid){
+  const s=staffById(sid), c=contractOf(sid); if(!s||!c) return;
+  const pin=($('#ctPin').value||'').trim();
+  if(String(s.pin||'')!==pin){ toast('PIN이 맞지 않아요'); return; }
+  c.agreedAt=now(); c.agreedBy=s.id;
+  hrLog('계약서', `${s.name} 근로계약서 확인(동의)`);
+  saveDB(); closeModal(); renderStaff(); toast('확인 기록을 남겼어요 · 인쇄해서 한 장 드리세요');
+}
+function printContract(sid){
+  withPayKey(async key=>{
+    const s=staffById(sid), c=contractOf(sid); if(!s||!c) return;
+    const d=(await payDec(key,c.enc))||{};
+    const won0=v=>v?(+v||0).toLocaleString('ko-KR')+'원':'';
+    const tr=(k,v)=>`<tr><th>${k}</th><td>${esc(v||'')}</td></tr>`;
+    printDoc(`근로계약서_${s.name}`, `
+      <h1>근로계약서</h1>
+      <p class="sub">${esc(DB.hospName||'')} (이하 "사업주")와 ${esc(s.name)} (이하 "근로자")는 다음과 같이 근로계약을 체결한다.</p>
+      <table>
+        ${tr('근로계약기간', (d.startDate||'')+(d.endDate?' ~ '+d.endDate:' ~ 기간의 정함 없음'))}
+        ${tr('근무 장소', d.workPlace)}${tr('업무의 내용', d.job)}
+        ${tr('소정근로시간', d.workHours)}${tr('근무일', d.workDays)}${tr('주휴일', d.restDay)}
+        ${tr('임금', (d.payKind||'')+' '+won0(d.payAmount))}
+        ${tr('임금의 구성항목', d.payParts)}${tr('임금의 계산방법', d.payCalc)}
+        ${tr('임금 지급일', d.payDay)}${tr('임금 지급방법', d.payMethod)}
+        ${tr('연차유급휴가', d.annual)}${d.note?tr('그 밖의 사항', d.note):''}
+      </table>
+      <p class="note">이 계약에 정함이 없는 사항은 근로기준법령에 따른다.</p>
+      <div class="sign">
+        <div>작성일 ${todayKey()}</div>
+        <div>사업주 ${esc(DB.hospName||'')} (서명)</div>
+        <div>근로자 ${esc(s.name)} (서명)</div>
+      </div>
+      <p class="foot">앱 확인 기록: ${c.agreedAt? fmtDateFull(String(c.agreedAt).slice(0,10))+' '+fmtTime(c.agreedAt)+' 본인 확인' : '미확인'}</p>`);
+  });
+}
+function hrContractView(){
+  const all=activeStaff();
+  const done=all.filter(s=>{const c=contractOf(s.id);return c&&c.agreedAt;}).length;
+  return `<div class="hint">근로계약서를 안 쓰거나 <b>안 건네면</b> 근로기준법 §114 로 500만원 이하 벌금입니다. 확인을 받고 인쇄해서 한 장 드리세요.</div>
+    <div class="spread" style="margin:12px 2px 10px">
+      <span class="tiny muted">확인 완료 <b>${done}/${all.length}명</b></span>
+      ${DB.payLock?'':'<span class="pill warn">급여 열쇠 먼저 정하세요</span>'}
+    </div>
+    ${all.map(s=>{ const c=contractOf(s.id);
+      const st = !c? ['없음','var(--danger)'] : (c.agreedAt? ['확인 '+fmtDateFull(String(c.agreedAt).slice(0,10)),'var(--ok)'] : ['확인 전','var(--warn)']);
+      return `<div class="trow" style="cursor:pointer" onclick="openContract('${s.id}')">
+        <div class="avatar">${esc(initials(s.name))}</div>
+        <div class="grow" style="min-width:0"><div style="font-weight:800">${esc(s.name)}</div>
+          <div class="tiny muted">${esc(s.dept||'부서 미지정')} · ${esc(ROLE_KO[s.role]||'직원')}</div></div>
+        <span class="tiny" style="font-weight:800;color:${st[1]}">${st[0]}</span>
+        <span class="tiny muted">›</span></div>`;
+    }).join('')}`;
+}
+
+/* ---- 급여명세서 --------------------------------------------------------
+   세무사·급여프로그램이 뽑은 엑셀 한 장을 올리면 직원별로 쪼갠다.
+   §48② 는 임금 총액·구성항목별 금액·계산방법·공제내역을 적어 교부하라고
+   한다(500만원 이하 과태료). 그래서 열을 그대로 다 보관하고, 빠진 게
+   있으면 경고한다.
+   금액은 화면에 '한 번에 한 사람'만 뜬다. 짝짓기 화면에는 금액이 없다. */
+const PAYCOL={
+  name:['성명','이름','근로자명','직원명','사원명','name'],
+  phone:['전화','전화번호','휴대폰','핸드폰','연락처','휴대전화','phone','hp'],
+  empno:['사번','사원번호','직원번호','사원코드','empno','사원no'],
+};
+const DEDUCT_RE=/공제|국민연금|건강보험|장기요양|고용보험|소득세|지방소득세|가불|상조/;
+const TOTAL_RE=/총액|합계|지급계|공제계|실지급|차인지급|실수령/;
+const CALC_RE=/연장|야간|휴일|초과|가산/;
+function digitsOnly(v){ return String(v==null?'':v).replace(/\D/g,''); }
+
+let payPending=null;     // {ym, cols, rows:[{cells,matchId,why}]}
+function openPayUpload(){
+  withPayKey(()=>{
+    const noXlsx = window.__noXLSX || typeof XLSX==='undefined';
+    modal(`<h3>💰 급여명세서 올리기</h3>
+      <div class="hint">세무사·급여프로그램이 준 <b>엑셀·CSV 한 장</b>을 그대로 올리면 직원별로 쪼개 드려요. 열 이름은 그대로 씁니다.</div>
+      <div class="tiny muted" style="margin:8px 2px 14px">직원을 붙일 때 <b>전화번호·사번</b>을 먼저 봅니다. 없으면 이름으로 붙이고, 같은 이름이 둘이면 그때만 물어봐요 — <b>금액은 보여주지 않습니다.</b></div>
+      <label class="field"><span>몇 월분인가요</span><input id="pyYm" type="month" value="${monthKey()}"></label>
+      <label class="btn block" style="cursor:pointer">📂 급여 파일 고르기
+        <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handlePayFile(event)"></label>
+      ${noXlsx?`<div class="tiny" style="color:var(--warn);margin-top:10px">⚠️ 지금은 CSV만 읽을 수 있어요(엑셀 라이브러리 미로딩).</div>`:''}`);
+  });
+}
+function handlePayFile(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  const ym=($('#pyYm')&&$('#pyYm').value)||monthKey();
+  const isCsv=/\.csv$/i.test(f.name), r=new FileReader();
+  r.onload=()=>{
+    try{
+      let rows;
+      if(!isCsv && typeof XLSX!=='undefined'){
+        const wb=XLSX.read(new Uint8Array(r.result),{type:'array'});
+        rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+      } else rows=parseCSV(typeof r.result==='string'?r.result:new TextDecoder('utf-8').decode(r.result));
+      const parsed=payParse(rows, ym);
+      if(!parsed){ toast('직원 이름 열을 찾지 못했어요'); return; }
+      if(!parsed.rows.length){ toast('읽을 수 있는 줄이 없어요'); return; }
+      payPending=parsed; payMatchStep();
+    }catch(e){ toast('파일을 읽지 못했어요. 양식을 확인해 주세요'); }
+  };
+  if(!isCsv && typeof XLSX!=='undefined') r.readAsArrayBuffer(f); else r.readAsText(f,'utf-8');
+}
+function payParse(rows, ym){
+  rows=(rows||[]).filter(r=>r&&r.some(c=>String(c).trim()!==''));
+  if(!rows.length) return null;
+  const norm=s=>String(s||'').replace(/\s|\(.*?\)/g,'').toLowerCase();
+  const header=rows[0].map(x=>String(x||'').trim());
+  const h=header.map(norm), idx={};
+  for(const k in PAYCOL) idx[k]=h.findIndex(x=>PAYCOL[k].some(y=>norm(y)===x||(x&&x.includes(norm(y)))));
+  if(idx.name<0) return null;
+  const out={ym, cols:header, nameCol:idx.name, phoneCol:idx.phone, empCol:idx.empno, rows:[]};
+  rows.slice(1).forEach((r,i)=>{
+    const nm=String(r[idx.name]||'').trim();
+    if(!nm || /합\s*계|소\s*계|총\s*계/.test(nm)) return;
+    const cells={}; header.forEach((c,j)=>{ if(c) cells[c]=r[j]==null?'':r[j]; });
+    out.rows.push({no:i+2, name:nm, cells,
+      phone: idx.phone>=0? digitsOnly(r[idx.phone]) : '',
+      empno: idx.empno>=0? String(r[idx.empno]||'').trim() : '',
+      staffId:null});
+  });
+  return out;
+}
+// 기억해 둔 짝 → 전화 → 사번 → 이름(하나뿐일 때). 나머지는 사람이 고른다.
+// 손으로 고른 줄은 건드리지 않는다. 한 사람이 두 줄을 가져가지도 않는다.
+function payAutoMatch(p){
+  const staff=activeStaff();
+  const taken=new Set(p.rows.map(r=>r.staffId).filter(Boolean));
+  p.rows.forEach(r=>{
+    if(r.staffId) return;                        // 이미 정해진 줄은 그대로 둔다
+    const free=x=>x && !taken.has(x.id);
+    let s = staff.find(x=>free(x) && x.payKey && (x.payKey===r.phone || x.payKey===r.empno));
+    if(!s && r.phone) s = staff.find(x=>free(x) && normPhone(x.phone)===r.phone);
+    if(!s && r.empno) s = staff.find(x=>free(x) && String(x.empno||'')===r.empno);
+    if(!s){ const same=staff.filter(x=>x.name===r.name); if(same.length===1 && free(same[0])) s=same[0]; }
+    r.staffId = s? s.id : null;
+    if(s) taken.add(s.id);
+  });
+}
+// 전화 뒷자리는 앱에서 유일하다(로그인 ID). 겹치면 자리수를 늘려 보여준다.
+function phoneTail(sid, cands){
+  const s=staffById(sid); if(!s) return '';
+  const ph=normPhone(s.phone);
+  for(const n of [4,6,8,11]){
+    const t=ph.slice(-n);
+    if(cands.filter(c=>normPhone((staffById(c)||{}).phone||'').slice(-n)===t).length===1)
+      return '⋯'+t;
+  }
+  return ph? '⋯'+ph.slice(-4) : '(번호 없음)';
+}
+function payMatchStep(){
+  const p=payPending; if(!p) return;
+  payAutoMatch(p);
+  const un=p.rows.filter(r=>!r.staffId);
+  if(!un.length){ payPreview(); return; }
+  const r=un[0];
+  const cands=activeStaff().filter(s=>s.name===r.name).map(s=>s.id);
+  const pool=cands.length? cands : activeStaff().map(s=>s.id);
+  modal(`<h3>⚠️ 어느 분인가요</h3>
+    <div class="tiny muted" style="margin:-6px 2px 12px">엑셀 <b>${r.no}번째 줄</b> · "${esc(r.name)}"${cands.length>1?` — 같은 이름이 ${cands.length}명이에요`:' — 직원을 못 찾았어요'}</div>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:6px 12px;margin-bottom:12px;max-height:38vh;overflow:auto">
+      ${pool.map(id=>{ const s=staffById(id);
+        return `<label class="trow" style="cursor:pointer;gap:9px">
+          <input type="radio" name="pyPick" value="${id}" style="width:auto;margin:0;flex:none">
+          <div class="grow" style="min-width:0"><div style="font-weight:800;font-size:14px">${esc(s.name)}</div>
+            <div class="tiny muted">${esc(s.dept||'부서 미지정')} · ${phoneTail(id,pool)} · ${s.joinDate||'입사일 없음'}</div></div>
+        </label>`; }).join('')}
+    </div>
+    <div class="tiny muted" style="margin:0 2px 10px">전화번호는 로그인 ID라 <b>겹칠 수 없어요.</b> 뒷자리·부서·입사일로 가려주세요.</div>
+    ${(r.phone||r.empno)?'':`<div class="tiny muted" style="margin:-4px 2px 10px">급여 엑셀에 <b>전화번호나 사번 열</b>을 넣으면 다음 달부터 안 물어봐요.</div>`}
+    <button class="btn block" onclick="payPickStaff()">이 사람이에요</button>
+    <div class="divider"></div>
+    <button class="btn soft block" style="color:var(--warn)" onclick="payRevealRow()">🔓 금액 보고 가르기</button>
+    <div class="tiny muted" style="margin-top:7px">엑셀에 이름 말고 아무 정보가 없을 때만 쓰세요. <b>누가 언제 눌렀는지 기록에 남습니다.</b></div>
+    <button class="btn soft block" style="margin-top:10px" onclick="paySkipRow()">이 줄은 건너뛰기</button>`);
+}
+function payPickStaff(){
+  const sel=document.querySelector('input[name=pyPick]:checked');
+  if(!sel){ toast('한 명을 골라주세요'); return; }
+  const p=payPending, r=p.rows.find(x=>!x.staffId); if(!r) return;
+  const s=staffById(sel.value);
+  r.staffId=sel.value;
+  // 전화·사번처럼 그 사람만의 값일 때만 기억한다.
+  // 이름으로 기억하면 동명이인 두 줄이 다음 달에 같은 사람으로 붙는다.
+  if(s && (r.phone||r.empno)) s.payKey = r.phone || r.empno;
+  saveDB(); payMatchStep();
+}
+function paySkipRow(){
+  const p=payPending; const i=p.rows.findIndex(x=>!x.staffId);
+  if(i>=0) p.rows.splice(i,1);
+  p.rows.length? payMatchStep() : (toast('넣을 줄이 없어요'), closeModal());
+}
+function payRevealRow(){
+  const p=payPending, r=p.rows.find(x=>!x.staffId); if(!r) return;
+  hrLog('금액열람', `급여 짝짓기에서 ${p.ym} ${r.no}번째 줄 금액 확인`);
+  saveDB();
+  const money=Object.keys(r.cells).filter(c=>c!==p.cols[p.nameCol] && String(r.cells[c]).replace(/[^\d]/g,''));
+  modal(`<h3>🔓 엑셀 ${r.no}번째 줄</h3>
+    <div class="tiny muted" style="margin:-6px 2px 12px">"${esc(r.name)}" 줄의 금액이에요. <b>확인한 기록이 남았습니다.</b></div>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:12px 14px;margin-bottom:14px;max-height:44vh;overflow:auto">
+      ${money.map(c=>`<div class="spread" style="padding:3px 0"><span class="tiny muted">${esc(c)}</span><b class="tiny">${esc(String(r.cells[c]))}</b></div>`).join('')}
+    </div>
+    <button class="btn block" onclick="payMatchStep()">알겠어요 — 사람 고르러 가기</button>`);
+}
+// §48② 가 요구하는 것이 빠졌는지 본다 — 빠뜨리고 교부해도 과태료 대상이다
+function payAudit(cols){
+  const w=[];
+  const money=cols.filter(c=>c && !PAYCOL.name.some(x=>c.replace(/\s/g,'')===x));
+  if(!money.some(c=>DEDUCT_RE.test(c))) w.push('공제 내역 열이 없어요 (4대보험·소득세 등)');
+  const pay=money.filter(c=>!DEDUCT_RE.test(c) && !TOTAL_RE.test(c));
+  if(pay.length<2) w.push('임금을 구성항목별로 나눈 열이 없어요 (기본급·수당 등)');
+  if(!money.some(c=>TOTAL_RE.test(c))) w.push('임금 총액 열이 없어요');
+  if(money.some(c=>CALC_RE.test(c)) && !money.some(c=>/시간|시급|단가|일수/.test(c)))
+    w.push('연장·야간·휴일 수당이 있는데 계산 근거(시간·단가) 열이 없어요');
+  return w;
+}
+function payPreview(){
+  const p=payPending; if(!p) return;
+  const warn=payAudit(p.cols);
+  const named=p.rows.filter(r=>r.staffId);
+  const ids=named.map(r=>r.staffId);
+  const twice=[...new Set(ids.filter((x,i)=>ids.indexOf(x)!==i))].map(id=>(staffById(id)||{}).name||'');
+  const dup=(DB.payslips||[]).filter(x=>x.ym===p.ym).length;
+  modal(`<h3>💰 ${p.ym} 이대로 교부할까요?</h3>
+    <div class="summary3" style="margin-bottom:12px">
+      <div class="stat"><div class="n">${named.length}</div><div class="l">직원</div></div>
+      <div class="stat"><div class="n">${p.cols.length}</div><div class="l">항목 열</div></div>
+      <div class="stat"><div class="n" style="color:${warn.length?'var(--warn)':'var(--ok)'}">${warn.length}</div><div class="l">확인할 것</div></div>
+    </div>
+    ${warn.length?`<div class="card" style="box-shadow:none;background:var(--warn-soft);border:0;padding:12px 14px;margin-bottom:12px">
+      <div class="tiny" style="font-weight:900;color:var(--warn);margin-bottom:6px">근로기준법 §48② — 이런 게 빠졌어요</div>
+      ${warn.map(x=>`<div class="tiny" style="padding:2px 0">· ${esc(x)}</div>`).join('')}
+      <div class="tiny muted" style="margin-top:6px">빠뜨리고 교부해도 과태료 대상이에요. 그래도 넣을 수는 있습니다.</div>
+    </div>`:''}
+    ${twice.length?`<div class="tiny" style="color:var(--danger);margin:0 2px 10px">⚠️ <b>${esc(twice.join(', '))}</b> 님에게 두 줄이 붙었어요. 뒤로 가서 다시 가려주세요.</div>`:''}
+    ${dup?`<div class="tiny" style="color:var(--warn);margin:0 2px 10px">이미 ${p.ym} 명세서가 ${dup}건 있어요. 넣으면 <b>덮어씁니다.</b></div>`:''}
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:6px 12px;margin-bottom:14px;max-height:30vh;overflow:auto">
+      ${named.map(r=>{const s=staffById(r.staffId);
+        return `<div class="spread" style="padding:4px 0"><span class="tiny">${esc(s?s.name:'')}</span>
+          <span class="tiny muted">${esc(s?(s.dept||''):'')} · 준비됨</span></div>`;}).join('')}
+    </div>
+    <div class="tiny muted" style="margin:-6px 2px 10px">금액은 여기 안 보여요. 넣은 뒤 <b>한 사람씩</b> 열어 인쇄하시면 됩니다.</div>
+    <button class="btn block" onclick="payCommit()">${named.length}명에게 교부 처리</button>`);
+}
+function payCommit(){
+  withPayKey(async key=>{
+    const p=payPending; if(!p) return;
+    if(!Array.isArray(DB.payslips)) DB.payslips=[];
+    const u=currentUser();
+    DB.payslips=DB.payslips.filter(x=>x.ym!==p.ym || !p.rows.some(r=>r.staffId===x.staffId));
+    for(const r of p.rows){
+      if(!r.staffId) continue;
+      DB.payslips.unshift({id:uid(), staffId:r.staffId, ym:p.ym, issuedAt:now(),
+        issuedBy:u?u.id:'', issuedByName:u?u.name:'', enc: await payEnc(key,{cols:p.cols, cells:r.cells})});
+    }
+    if(DB.payslips.length>800) DB.payslips=DB.payslips.slice(0,800);
+    const n=p.rows.filter(r=>r.staffId).length;
+    hrLog('급여', `${p.ym} 급여명세서 ${n}명 교부`);
+    payPending=null; saveDB(); closeModal(); renderStaff();
+    toast(`${n}명 교부 처리했어요 · 한 사람씩 열어 인쇄하세요`);
+  });
+}
+function payslipsOf(sid){ return (DB.payslips||[]).filter(x=>x.staffId===sid).sort((a,b)=>String(b.ym).localeCompare(String(a.ym))); }
+function openPayslip(id){
+  withPayKey(async key=>{
+    const ps=(DB.payslips||[]).find(x=>x.id===id); if(!ps) return;
+    const s=staffById(ps.staffId), d=await payDec(key, ps.enc);
+    if(!d){ toast('열지 못했어요 — 열쇠를 확인해 주세요'); return; }
+    hrLog('금액열람', `${s?s.name:''} ${ps.ym} 급여명세서 열람`);
+    saveDB();
+    const cols=d.cols.filter(c=>c && String(d.cells[c]).trim()!=='');
+    const grp=(t,f)=>{ const cs=cols.filter(f); return cs.length? `<div class="tiny muted" style="font-weight:800;margin:10px 0 4px">${t}</div>`+
+      cs.map(c=>`<div class="spread" style="padding:3px 0"><span class="tiny">${esc(c)}</span><b class="tiny">${esc(String(d.cells[c]))}</b></div>`).join('') : ''; };
+    modal(`<h3>💰 ${esc(s?s.name:'')} · ${ps.ym}</h3>
+      <div class="tiny muted" style="margin:-6px 2px 12px">${fmtDateFull(String(ps.issuedAt).slice(0,10))} 교부 · ${esc(ps.issuedByName||'')}</div>
+      <div class="card" style="box-shadow:none;background:var(--bg);padding:12px 14px;margin-bottom:14px;max-height:46vh;overflow:auto">
+        ${grp('지급', c=>!DEDUCT_RE.test(c)&&!TOTAL_RE.test(c)&&!PAYCOL.name.includes(c))}
+        ${grp('공제', c=>DEDUCT_RE.test(c))}
+        ${grp('합계', c=>TOTAL_RE.test(c))}
+      </div>
+      <button class="btn block" onclick="printPayslip('${id}')">🖨 인쇄해서 교부</button>
+      <div class="tiny muted" style="margin-top:10px">3분 뒤 다시 잠깁니다. 화면을 켠 채 자리를 비우지 마세요.</div>`);
+  });
+}
+function printPayslip(id){
+  withPayKey(async key=>{
+    const ps=(DB.payslips||[]).find(x=>x.id===id); if(!ps) return;
+    const s=staffById(ps.staffId), d=await payDec(key, ps.enc); if(!d) return;
+    const cols=d.cols.filter(c=>c && String(d.cells[c]).trim()!=='');
+    const tr=c=>`<tr><th>${esc(c)}</th><td>${esc(String(d.cells[c]))}</td></tr>`;
+    printDoc(`급여명세서_${s?s.name:''}_${ps.ym}`, `
+      <h1>임금명세서</h1>
+      <p class="sub">${esc(DB.hospName||'')} · ${esc(ps.ym)}분 · ${esc(s?s.name:'')}</p>
+      <table>${cols.map(tr).join('')}</table>
+      <p class="note">근로기준법 제48조제2항에 따른 임금명세서입니다.</p>
+      <p class="foot">교부일 ${String(ps.issuedAt).slice(0,10)}</p>`);
+  });
+}
+function payExportCsv(ym){
+  withPayKey(async key=>{
+    if(!confirm('내려받은 파일은 앱 밖으로 나갑니다.\n다운로드 폴더에 금액이 그대로 남고 앱이 더는 지키지 못해요.\n\n그래도 내려받을까요?')) return;
+    const list=(DB.payslips||[]).filter(x=>x.ym===ym);
+    if(!list.length){ toast('그 달 명세서가 없어요'); return; }
+    const rows=[]; let cols=[];
+    for(const ps of list){
+      const d=await payDec(key, ps.enc); if(!d) continue;
+      if(!cols.length) cols=d.cols;
+      rows.push({name:(staffById(ps.staffId)||{}).name||'', cells:d.cells});
+    }
+    const cell=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+    const csv='﻿'+['직원'].concat(cols).join(',')+'\n'
+      +rows.map(r=>[cell(r.name)].concat(cols.map(c=>cell(r.cells[c]))).join(',')).join('\n')+'\n';
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+    a.download=`급여명세서_${ym}_${todayKey()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    hrLog('내려받기', `${ym} 급여명세서 ${rows.length}명분 CSV 내려받음`);
+    saveDB(); toast('내려받았어요 · 파일 관리에 주의하세요');
+  });
+}
+function hrPayView(){
+  const yms=[...new Set((DB.payslips||[]).map(x=>x.ym))].sort().reverse();
+  const all=activeStaff();
+  return `<div class="hint">엑셀 한 장을 올리면 직원별로 쪼개 드려요. <b>금액은 한 사람씩 열었을 때만</b> 보입니다.</div>
+    <div class="spread" style="margin:12px 2px 10px">
+      <span class="tiny muted">${DB.payLock? (payUnlocked()?'🔓 지금 열려 있어요 (3분)':'🔐 잠겨 있어요'):'⚠️ 급여 열쇠를 먼저 정하세요'}</span>
+      <button class="btn sm" onclick="openPayUpload()">＋ 올리기</button>
+    </div>
+    ${yms.length? yms.map(ym=>{
+      const list=(DB.payslips||[]).filter(x=>x.ym===ym);
+      return `<div class="card" style="padding:12px 14px;margin-bottom:8px">
+        <div class="spread" style="margin-bottom:8px">
+          <div><div style="font-weight:900">${esc(ym)}</div>
+            <div class="tiny muted">${list.length}/${all.length}명 교부 · ${fmtDateFull(String(list[0].issuedAt).slice(0,10))}</div></div>
+          <button class="btn soft xs" onclick="payExportCsv('${ym}')">📄 내려받기</button>
+        </div>
+        ${list.map(ps=>{const s=staffById(ps.staffId);
+          return `<div class="spread" style="padding:4px 0;cursor:pointer" onclick="openPayslip('${ps.id}')">
+            <span class="tiny" style="font-weight:700">${esc(s?s.name:'(삭제된 직원)')}</span>
+            <span class="tiny muted">교부됨 ›</span></div>`;}).join('')}
+      </div>`;
+    }).join('') : emptyBox('💰','＋올리기 로 급여 엑셀을 넣어보세요')}`;
+}
+
+/* ---- 사직서 -----------------------------------------------------------
+   민법 §660②③ — 사용자가 수리하지 않아도 통고가 도달한 뒤 일정 기간이
+   지나면 효력이 생긴다. 그래서 중요한 건 '제출한 시각'이다.
+   월급제는 제출한 달(당기) 다음 1기가 지난 날 — 즉 다다음 달 1일이 된다. */
+function resignEffect(dateKey){
+  if(!dateKey) return '';
+  const [y,m]=dateKey.split('-').map(Number);
+  const d=new Date(y, m+1, 1);                 // 당기(그 달) 후 1기(다음 달)가 지난 날
+  return todayKey(d);
+}
+function resignOf(sid){ return (DB.resignations||[]).filter(r=>r.staffId===sid).sort((a,b)=>String(b.submittedAt).localeCompare(String(a.submittedAt)))[0]; }
+function openResignForm(){
+  const u=currentUser(); if(!u) return;
+  const prev=resignOf(u.id);
+  if(prev && prev.status==='제출'){ openResignView(prev.id); return; }
+  modal(`<h3>📄 사직서 쓰기</h3>
+    <div class="hint">여기서 제출하면 <b>정식으로 사직서를 낸 것</b>이 됩니다. 제출한 시각이 그대로 기록돼요.</div>
+    <label class="field"><span>마지막으로 일하고 싶은 날</span><input id="rgLast" type="date" value="${todayKey()}"></label>
+    <label class="field"><span>사직 사유 (안 적어도 돼요)</span><textarea id="rgWhy" rows="4" placeholder="개인 사정"></textarea></label>
+    <div class="tiny muted" style="margin:-4px 2px 12px">⚠️ 적은 내용은 <b>최고관리자와 인사담당자에게 보입니다.</b> 앱 구조상 완전히 가려지지는 않으니 꼭 필요한 말만 적어주세요.</div>
+    <div id="rgEffect" class="tiny muted" style="margin:0 2px 12px"></div>
+    <button class="btn block" onclick="submitResign()">사직서 제출</button>`);
+  const upd=()=>{ const e=$('#rgEffect'); if(e) e.innerHTML=`민법 §660③ — 병원이 수리하지 않아도 <b>${fmtDateFull(resignEffect(todayKey()))}</b>에 퇴직 효력이 생깁니다(월급제 기준).`; };
+  upd();
+}
+function submitResign(){
+  const u=currentUser(); if(!u) return;
+  const lastDay=$('#rgLast').value||todayKey(), reason=($('#rgWhy').value||'').trim();
+  if(!confirm('사직서를 제출할까요?\n제출한 시각이 기록으로 남습니다.')) return;
+  if(!Array.isArray(DB.resignations)) DB.resignations=[];
+  DB.resignations.unshift({id:uid(), staffId:u.id, submittedAt:now(), submitDay:todayKey(),
+    lastDay, reason, status:'제출', handledAt:null, handledBy:null});
+  saveDB(); closeModal(); renderStaff(); toast('사직서를 제출했어요');
+}
+function openResignView(id){
+  const r=(DB.resignations||[]).find(x=>x.id===id); if(!r) return;
+  const s=staffById(r.staffId), me=currentUser();
+  const mine=me&&me.id===r.staffId;
+  const eff=resignEffect(r.submitDay);
+  modal(`<h3>📄 사직서 · ${esc(s?s.name:'')}</h3>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:13px 14px;margin-bottom:14px">
+      <div class="spread" style="padding:3px 0"><span class="tiny muted">제출</span><b class="tiny">${fmtDateFull(String(r.submittedAt).slice(0,10))} ${fmtTime(r.submittedAt)}</b></div>
+      <div class="spread" style="padding:3px 0"><span class="tiny muted">희망 마지막 근무일</span><b class="tiny">${esc(r.lastDay||'-')}</b></div>
+      <div class="spread" style="padding:3px 0"><span class="tiny muted">수리 안 될 경우 효력일</span><b class="tiny">${fmtDateFull(eff)}</b></div>
+      <div class="spread" style="padding:3px 0"><span class="tiny muted">상태</span><b class="tiny" style="color:${r.status==='제출'?'var(--warn)':'var(--ok)'}">${esc(r.status)}</b></div>
+      ${(isHR()||mine)&&r.reason?`<div style="margin-top:8px"><div class="tiny muted">사유</div><div class="tiny" style="white-space:pre-wrap;margin-top:3px">${esc(r.reason)}</div></div>`:''}
+    </div>
+    <div class="tiny muted" style="margin:-6px 2px 12px">민법 §660③ — 병원이 수리하지 않아도 효력일이 되면 퇴직 효력이 생깁니다(월급제 기준).</div>
+    ${isHR()&&r.status==='제출'?`<button class="btn block" onclick="handleResign('${r.id}')">수리하고 퇴사 처리</button>
+      <div class="tiny muted" style="margin-top:8px">누르면 재직 상태가 <b>퇴사</b>로 바뀌어 로그인이 막힙니다. 남은 연차 ${s?annualRemain(s).remain:0}일을 먼저 정산하세요.</div>`:''}
+    ${mine&&r.status==='제출'?`<button class="btn soft block" style="margin-top:8px;color:var(--danger)" onclick="cancelResign('${r.id}')">사직서 철회</button>`:''}`);
+}
+function handleResign(id){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const r=(DB.resignations||[]).find(x=>x.id===id); if(!r) return;
+  const s=staffById(r.staffId);
+  if(s && s.role===ROLE_OWNER){
+    const others=DB.staff.filter(x=>x.id!==s.id && x.role===ROLE_OWNER && x.active!==false);
+    if(!others.length){ toast('마지막 최고관리자는 퇴사 처리할 수 없어요'); return; }
+  }
+  if(!confirm('수리하고 퇴사 처리할까요?\n로그인이 막히고 명단에서 퇴사로 표시됩니다.')) return;
+  const u=currentUser();
+  r.status='수리'; r.handledAt=now(); r.handledBy=u?u.id:'';
+  if(s) s.active=false;
+  hrLog('사직', `${s?s.name:''} 사직서 수리 · 퇴사 처리`);
+  saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('수리했어요');
+}
+function cancelResign(id){
+  const r=(DB.resignations||[]).find(x=>x.id===id), me=currentUser();
+  if(!r||!me||me.id!==r.staffId) return;
+  if(!confirm('사직서를 철회할까요?')) return;
+  DB.resignations=DB.resignations.filter(x=>x.id!==id);
+  saveDB(); closeModal(); renderStaff(); toast('철회했어요');
+}
+function hrResignView(){
+  const list=(DB.resignations||[]).slice().sort((a,b)=>String(b.submittedAt).localeCompare(String(a.submittedAt)));
+  return `<div class="hint">직원이 앱에서 낸 사직서예요. <b>제출한 시각</b>이 민법 §660 의 기산점입니다.</div>
+    <div style="margin-top:12px">
+    ${list.length? list.map(r=>{const s=staffById(r.staffId);
+      return `<div class="trow" style="cursor:pointer" onclick="openResignView('${r.id}')">
+        <div class="avatar">${esc(initials(s?s.name:'?'))}</div>
+        <div class="grow" style="min-width:0"><div style="font-weight:800">${esc(s?s.name:'(삭제된 직원)')}</div>
+          <div class="tiny muted">${fmtDateFull(String(r.submittedAt).slice(0,10))} 제출 · 마지막 ${esc(r.lastDay||'-')}</div></div>
+        <span class="pill ${r.status==='제출'?'warn':'ok'}">${esc(r.status)}</span>
+        <span class="tiny muted">›</span></div>`;}).join('') : emptyBox('📄','아직 낸 사직서가 없어요')}
+    </div>`;
+}
+
+/* ---- 인쇄 -------------------------------------------------------------- */
+function printDoc(title, body){
+  const f=document.createElement('iframe');
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+  document.body.appendChild(f);
+  const d=f.contentDocument;
+  d.open();
+  d.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    *{box-sizing:border-box} body{font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+      color:#12211f; padding:28px 26px; word-break:keep-all; line-height:1.7}
+    h1{font-size:22px; font-weight:800; letter-spacing:-.01em; line-height:1.35; margin:0 0 6px; text-align:center}
+    .sub{font-size:12.5px; color:#4b5f5c; text-align:center; margin:0 0 20px}
+    table{width:100%; border-collapse:collapse; font-size:12.5px}
+    th,td{border:1px solid #c9d6d3; padding:7px 10px; text-align:left; vertical-align:top}
+    th{background:#f2f7f6; width:34%; font-weight:700}
+    .note{font-size:11.5px; color:#4b5f5c; margin-top:14px}
+    .sign{margin-top:26px; font-size:12.5px; line-height:2.4}
+    .foot{font-size:11px; color:#6b7d7a; margin-top:18px}
+    @page{margin:14mm}
+  </style></head><body>${body}</body></html>`);
+  d.close();
+  setTimeout(()=>{ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ toast('인쇄 창을 열지 못했어요'); }
+                   setTimeout(()=>f.remove(), 1500); }, 260);
+}
+
+/* ---- 직원 탭 — 관리자는 노무, 직원은 자기 1페이지 ---------------------- */
+let hrView='list';
+function hrTab(v){ hrView=v; renderStaff(); }
+function renderStaff(){
+  const wrap=$('#staffWrap'); if(!wrap) return;
+  if(!isHR()){ wrap.innerHTML=myPageHtml(); return; }
+  const tabs=[['list','명단'],['notice','공지'],['contract','근로계약서'],['pay','급여명세서'],['resign','사직서']];
+  const pend=(DB.resignations||[]).filter(r=>r.status==='제출').length;
+  wrap.innerHTML=`<div class="spread" style="margin:4px 2px 12px">
+      <h2 class="sec" style="margin:0">👥 직원 · 노무</h2>
+      ${hrView==='list'?`<button class="btn sm" onclick="openStaffForm()">＋ 직원</button>`:''}
+    </div>
+    <div class="seg" style="margin-bottom:12px">
+      ${tabs.map(t=>`<button class="${t[0]===hrView?'on':''}" onclick="hrTab('${t[0]}')">${t[1]}${t[0]==='resign'&&pend?` <span class="pill warn" style="margin-left:3px">${pend}</span>`:''}</button>`).join('')}
+    </div>
+    <div>${
+      hrView==='notice'? hrNoticeView() :
+      hrView==='contract'? hrContractView() :
+      hrView==='pay'? hrPayView() :
+      hrView==='resign'? hrResignView() : hrListHtml()}</div>`;
+}
+function hrListHtml(){
+  if(!DB.staff.length) return `<div class="card">${emptyBox('👥','＋직원 버튼으로 직원을 추가하세요')}</div>`;
+  return `<div class="hint">직원 <b>이름을 누르면</b> 정보·연차를 바로 수정할 수 있어요.</div><div style="margin-top:10px">`
+    + DB.staff.map(s=>{
+    const r=annualRemain(s), c=contractOf(s.id), ps=payslipsOf(s.id)[0], rg=resignOf(s.id);
+    const flags=[];
+    if(!c) flags.push('<span class="pill danger">계약서 없음</span>');
+    else if(!c.agreedAt) flags.push('<span class="pill warn">계약서 확인 전</span>');
+    if(rg && rg.status==='제출') flags.push('<span class="pill warn">사직서</span>');
+    if(s.active===false) flags.push('<span class="pill grey">퇴사</span>');
+    return `<div class="card" style="padding:13px 14px;margin-bottom:8px">
+      <div class="spread" style="cursor:pointer" onclick="openStaffForm('${s.id}')">
+        <div class="row" style="gap:11px"><div class="avatar">${esc(initials(s.name))}</div>
+          <div><div class="t" style="font-weight:800">${esc(s.name)} <span class="tiny muted" style="font-weight:600">${esc(s.position||'')}</span>
+            ${s.role!==ROLE_STAFF?`<span class="pill info">${esc(ROLE_KO[s.role]||'')}</span>`:''}</div>
+            <div class="d tiny muted">${esc(s.dept||'부서 미지정')}${s.joinDate?' · 입사 '+s.joinDate+(serviceNth(s.joinDate)?' · '+serviceNth(s.joinDate)+'년차':''):''}</div></div></div>
+        <div style="text-align:right"><div style="font-weight:800;color:var(--brand)">연차 ${r.remain}일</div>
+          <div class="tiny muted">/ 총 ${r.total}일${s.annualAuto===false?' (수동)':''}</div></div></div>
+      ${flags.length?`<div class="row" style="gap:5px;margin-top:8px;flex-wrap:wrap">${flags.join('')}</div>`:''}
+      <div class="row" style="gap:6px;margin-top:9px">
+        <button class="btn soft xs" onclick="openContract('${s.id}')">📝 계약서</button>
+        ${ps?`<button class="btn soft xs" onclick="openPayslip('${ps.id}')">💰 ${esc(ps.ym)}</button>`:''}
+        ${rg?`<button class="btn soft xs" onclick="openResignView('${rg.id}')">📄 사직서</button>`:''}
+      </div></div>`;
+  }).join('') + '</div>';
+}
+// 직원이 보는 내 1페이지 — 자기 것만 보인다
+function myPageHtml(){
+  const u=currentUser(); if(!u) return '';
+  const r=annualRemain(u);
+  const ym=monthKey();
+  const mine=DB.attendance.filter(a=>a.staffId===u.id && String(a.date||'').startsWith(ym));
+  const hrs=mine.reduce((s,a)=>s+hoursBetween(a.inAt,a.outAt),0);
+  const unread=noticeUnreadFor(u.id);
+  const c=contractOf(u.id), ps=payslipsOf(u.id), rg=resignOf(u.id);
+  return `<div class="spread" style="margin:4px 2px 12px">
+      <h2 class="sec" style="margin:0">🙋 ${esc(u.name)} 님</h2>
+      <span class="tiny muted">${esc(u.dept||'')} ${esc(u.position||'')}</span>
+    </div>
+    <div class="summary3" style="margin-bottom:14px">
+      <div class="stat"><div class="n" style="color:var(--brand)">${r.remain}</div><div class="l">남은 연차</div></div>
+      <div class="stat"><div class="n">${mine.length}</div><div class="l">이번 달 출근</div></div>
+      <div class="stat"><div class="n">${Math.round(hrs)}</div><div class="l">이번 달 시간</div></div>
+    </div>
+
+    <h2 class="sec">📢 공지</h2>
+    <div class="card" style="padding:8px 14px">
+      ${(DB.notices||[]).length? (DB.notices||[]).slice(0,8).map(n=>{
+        const read=noticeRead(n,u.id);
+        return `<div class="spread" style="padding:7px 0;cursor:pointer;border-bottom:1px solid var(--line)" onclick="openNoticeRead('${n.id}')">
+          <div class="grow" style="min-width:0"><div class="tiny" style="font-weight:${read?'600':'900'}">${n.must?'📌 ':''}${esc(n.title)}</div>
+            <div class="tiny muted">${fmtDateFull((n.at||'').slice(0,10))}</div></div>
+          <span class="pill ${read?'grey':'warn'}">${read?'확인함':'안 읽음'}</span></div>`;}).join('')
+        : emptyBox('📢','올라온 공지가 없어요')}
+      ${unread.length?`<div class="tiny muted" style="padding:8px 0">안 읽은 공지 ${unread.length}건</div>`:''}
+    </div>
+
+    <h2 class="sec">📝 근로계약서</h2>
+    <div class="card" style="padding:13px 14px">
+      ${c? `<div class="spread"><span class="tiny">${c.agreedAt?'확인 완료':'아직 확인 전'}</span>
+        <b class="tiny" style="color:${c.agreedAt?'var(--ok)':'var(--warn)'}">${c.agreedAt?fmtDateFull(String(c.agreedAt).slice(0,10)):'—'}</b></div>
+        <div class="tiny muted" style="margin-top:6px">내용은 병원 관리자와 함께 볼 수 있어요. 종이로 한 장 받으셨는지 확인하세요.</div>`
+        : `<div class="tiny muted">아직 등록된 근로계약서가 없어요. 관리자에게 요청하세요.</div>`}
+    </div>
+
+    <h2 class="sec">💰 급여명세서</h2>
+    <div class="card" style="padding:13px 14px">
+      ${ps.length? ps.slice(0,12).map(x=>`<div class="spread" style="padding:4px 0">
+          <span class="tiny">${esc(x.ym)}분</span>
+          <span class="tiny muted">${fmtDateFull(String(x.issuedAt).slice(0,10))} 교부됨</span></div>`).join('')
+        : `<div class="tiny muted">아직 교부된 명세서가 없어요.</div>`}
+      <div class="tiny muted" style="margin-top:8px">금액은 이 앱에 잠겨 있어 여기서는 안 보여요. 받으신 종이나 파일로 확인하세요.</div>
+    </div>
+
+    <h2 class="sec">📄 사직서</h2>
+    <div class="card" style="padding:13px 14px">
+      ${rg? `<div class="spread" style="cursor:pointer" onclick="openResignView('${rg.id}')">
+          <span class="tiny">${fmtDateFull(String(rg.submittedAt).slice(0,10))} 제출</span>
+          <span class="pill ${rg.status==='제출'?'warn':'ok'}">${esc(rg.status)}</span></div>`
+        : `<button class="btn soft block" onclick="openResignForm()">사직서 쓰기</button>
+           <div class="tiny muted" style="margin-top:8px">여기서 제출하면 정식 제출로 기록됩니다.</div>`}
+    </div>
+
+    <h2 class="sec">🔒 내 계정</h2>
+    <div class="card" style="padding:13px 14px">
+      <button class="btn soft block" onclick="changeMyPin()">내 PIN 변경</button>
+    </div>`;
 }
 
 /* ========================================================================
@@ -2533,7 +3437,7 @@ function openStaffMenu(){
       <span class="tiny">${u?esc(u.name)+' 님':'직원'} · 재고·출퇴근·연월차 신청 사용</span></div></div>
     <button class="btn soft block" onclick="changeMyPin()">🔒 내 PIN 변경</button>
     <button class="btn soft block" style="margin-top:8px" onclick="logout()">로그아웃</button>
-    <div class="tiny muted" style="margin:10px 2px 0">연월차 관리·설정·직원 관리는 관리자만 볼 수 있어요.</div>
+    <div class="tiny muted" style="margin:10px 2px 0">연월차 관리·설정·직원 관리는 최고관리자와 인사담당자만 볼 수 있어요.</div>
     <div class="tiny muted" style="text-align:center;margin-top:16px">병원 관리 앱 · v1</div>`);
 }
 function openMenu(){
@@ -2561,6 +3465,12 @@ function openMenu(){
       <button class="btn soft" onclick="logout()">로그아웃</button>
     </div>
     <div class="tiny muted" style="margin:8px 2px 0">직원 계정(전화번호·PIN·권한)은 <b>직원 탭</b>에서 추가/수정하세요. 직원은 <b>본인 전화번호+PIN</b>으로 로그인해 재고·출퇴근·연월차 신청을 씁니다.</div>
+    <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🔐 급여 열쇠</div>
+    <div class="tiny muted" style="margin:0 2px 8px">급여명세서와 근로계약서 본문은 이 열쇠로 잠겨 저장돼요. ${DB.payLock? `<b style="color:var(--ok)">잠금 설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
+    <button class="btn soft block owner-only" onclick="openPayKeySetup()">${DB.payLock?'열쇠 바꾸기':'급여 열쇠 정하기'}</button>
+    ${payUnlocked()?`<button class="btn soft block" style="margin-top:8px" onclick="payRelock(); closeModal(); toast('급여를 다시 잠갔어요')">지금 바로 잠그기</button>`:''}
+    <div class="tiny muted" style="margin:8px 2px 0">열쇠는 앱에도 서버에도 저장하지 않습니다 — <b>잊으면 아무도 못 엽니다.</b> 최고관리자만 정할 수 있어요.</div>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🖥️ 공용 기기 출근 체크</div>
     <button class="btn soft block" onclick="closeModal(); enterKiosk()">이 기기를 ‘출근 체크 화면’으로 열기</button>
@@ -2747,20 +3657,27 @@ function normPhone(s){ return String(s||'').replace(/\D/g,''); }
 function sessionId(){ return localStorage.getItem('hosp_uid')||''; }
 function setSession(id){ id? localStorage.setItem('hosp_uid',id) : localStorage.removeItem('hosp_uid'); }
 function currentUser(){ const id=sessionId(); return id? DB.staff.find(s=>s.id===id && s.active!==false) : null; }
-function hasAdmin(){ return DB.staff.some(s=>s.role==='관리자' && s.active!==false); }
-function isAdmin(){ const u=currentUser(); return !!u && u.role==='관리자'; }
+// 권한 3단계 — 오너(최고관리자) · 인사담당자 · 직원
+// 예전 데이터의 '관리자'가 곧 오너다. 값을 그대로 둬서 로그인이 끊기지 않는다.
+const ROLE_OWNER='관리자', ROLE_HR='인사담당자', ROLE_STAFF='직원';
+const ROLE_KO={[ROLE_OWNER]:'최고관리자', [ROLE_HR]:'인사담당자', [ROLE_STAFF]:'직원'};
+function hasAdmin(){ return DB.staff.some(s=>s.role===ROLE_OWNER && s.active!==false); }
+function isOwner(){ const u=currentUser(); return !!u && u.role===ROLE_OWNER; }
+// 인사담당자는 직원·출퇴근·연월차·노무를 본다. 재고 삭제나 권한 변경은 오너만.
+function isHR(){ const u=currentUser(); return !!u && (u.role===ROLE_OWNER || u.role===ROLE_HR); }
+function isAdmin(){ return isHR(); }
 let gateState=null;
 function applyRole(){
   ensureSchema();
   const u=currentUser();
   if(!u){ document.body.setAttribute('data-role','staff'); setGate(hasAdmin()?'login':'setup'); return; }
-  const admin = u.role==='관리자';
-  document.body.setAttribute('data-role', admin?'admin':'staff');
-  const rt=$('#roleTag'); if(rt){ rt.textContent = admin?'👑 관리자':'👤 직원';
-    rt.style.background = admin?'rgba(245,197,66,.32)':'rgba(255,255,255,.20)'; rt.title = u.name; }
+  const owner = u.role===ROLE_OWNER, admin = owner || u.role===ROLE_HR;
+  document.body.setAttribute('data-role', owner?'owner':(admin?'hr':'staff'));
+  const rt=$('#roleTag'); if(rt){ rt.textContent = owner?'👑 최고관리자':(admin?'📋 인사담당자':'👤 직원');
+    rt.style.background = owner?'rgba(245,197,66,.32)':(admin?'rgba(120,200,255,.30)':'rgba(255,255,255,.20)'); rt.title = u.name; }
   $('#adminBanner').classList.remove('show');
   setGate(null);
-  if(!admin){ if(currentTab==='staff') go('home'); if(currentTab==='leave') leaveTab('new'); }
+  if(!admin){ if(currentTab==='leave') leaveTab('new'); }
   refreshBell();
 }
 function setGate(state){
