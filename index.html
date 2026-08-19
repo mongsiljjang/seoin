@@ -184,6 +184,13 @@
     max-height:92vh; overflow:auto; animation:slideup .22s cubic-bezier(.2,.8,.2,1)}
   @keyframes slideup{from{transform:translateY(100%)}to{transform:none}}
   .modal h3{margin:0 0 14px; font-size:17px; font-weight:900}
+  .dchip{display:inline-flex; align-items:center; gap:5px; background:#eef4f5; border:1px solid var(--line);
+    border-radius:999px; padding:5px 11px 5px 8px; font-size:12.5px; font-weight:700; color:var(--sub); cursor:pointer}
+  .dchip input{width:auto; margin:0; flex:none}
+  .dchip:has(input:checked){background:var(--brand-soft); border-color:var(--brand); color:var(--brand)}
+  .mback{display:inline-flex; align-items:center; border:0; background:#eaf1f3; color:var(--sub);
+    font-size:12.5px; font-weight:800; padding:6px 12px 6px 9px; border-radius:999px; cursor:pointer; margin-bottom:11px}
+  .mback:active{background:#dde8ea}
   .modal .close{position:absolute}
   .grabber{width:38px; height:4px; border-radius:9px; background:#d5e0e4; margin:0 auto 14px}
 
@@ -471,6 +478,8 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(!Array.isArray(DB.payslips)) DB.payslips=[];
   if(!Array.isArray(DB.resignations)) DB.resignations=[];
   if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
+  if(!Array.isArray(DB.duties)) DB.duties=[];        // 담당 분야 — 병원이 직접 만든다
+  if(!Array.isArray(DB.vendors)) DB.vendors=[];      // 거래처 · 영업사원 연락처
   if(DB.payLock && typeof DB.payLock!=='object') DB.payLock=null;
   if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
   if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
@@ -1649,6 +1658,7 @@ function openPurchase(){
     <label class="btn block" style="cursor:pointer">📂 명세서 파일 고르기
       <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handlePurchase(event)"></label>
     ${noXlsx?`<div class="tiny" style="color:var(--warn);margin-top:10px">⚠️ 지금은 CSV만 읽을 수 있어요(엑셀 라이브러리 미로딩).</div>`:''}
+    <button class="btn soft block" style="margin-top:10px" onclick="openVendors(openPurchase)">🏢 거래처 · 영업사원 연락처</button>
     <div class="divider"></div>
     <div class="tiny muted">📷 종이 명세서는 <b>사진을 찍어 Claude 대화창에 보내주세요.</b> 올릴 수 있는 파일로 만들어 드려요.</div>`);
 }
@@ -1717,7 +1727,7 @@ function previewPurchase(lines){
         </div>
         <b style="white-space:nowrap">＋${l.qty}</b></div>`).join('')}
     </div>
-    <button class="btn block" onclick="applyPurchase()">재료 목록에 넣고 입고 처리</button>`);
+    <button class="btn block" onclick="applyPurchase()">재료 목록에 넣고 입고 처리</button>`, openPurchase);
 }
 function applyPurchase(){
   if(!pPending) return;
@@ -2020,6 +2030,7 @@ function renderLedger(){
   const head=`<div class="spread" style="margin:4px 2px 12px">
       <h2 class="sec" style="margin:0">📋 임플란트 대장</h2>
       <div class="row" style="gap:6px">
+        <button class="btn sm soft" onclick="openVendors()">🏢 거래처</button>
         <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
         <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
       </div>
@@ -2450,14 +2461,28 @@ function openStaffForm(edit){
     <label class="field" style="display:flex;align-items:center;gap:8px;margin:-4px 2px 8px">
       <input type="checkbox" id="sAnnualAuto" style="width:auto;margin:0" ${(!s||s.annualAuto!==false)?'checked':''} onchange="staffAnnualSync()">
       <span id="sAnnualHint" class="tiny muted" style="margin:0;font-weight:600"></span></label>
-    ${s?`<label class="field"><span>재직 상태</span><select id="sActive">
-      <option value="1" ${s.active!==false?'selected':''}>재직</option>
-      <option value="0" ${s.active===false?'selected':''}>퇴사 (로그인 차단)</option></select></label>`:''}
+    <div class="field"><span>담당 분야</span>
+      <div id="sDuties" class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:6px">
+        ${(DB.duties||[]).length? (DB.duties||[]).map(d=>`<label class="dchip">
+          <input type="checkbox" value="${d.id}" ${s&&(s.duties||[]).includes(d.id)?'checked':''}>
+          <span>${esc(d.name)}</span></label>`).join('') : `<span class="tiny muted">아직 만든 담당이 없어요</span>`}
+      </div>
+      <button class="btn soft sm block" onclick="openDuties(()=>openStaffForm('${s?s.id:''}'))">🧰 담당 분야 만들기·지우기</button>
+    </div>
+    ${s?`<div class="field"><span>재직 상태</span>
+      ${s.active!==false
+        ? `<div class="row" style="gap:8px;align-items:center"><span class="pill ok">재직중</span>
+             <button class="btn soft sm grow" onclick="retireStaff('${s.id}')">🚪 퇴사 처리</button></div>`
+        : `<div class="row" style="gap:8px;align-items:center"><span class="pill grey">퇴사${s.retiredAt?' · '+esc(s.retiredAt):''}</span>
+             <button class="btn soft sm grow" onclick="unretireStaff('${s.id}')">↩︎ 복직 처리</button></div>`}
+      ${s.retireNote?`<div class="tiny muted" style="margin-top:6px">${esc(s.retireNote)}</div>`:''}
+    </div>`:''}
     <div class="row">
       <button class="btn block" onclick="saveStaff('${s?s.id:''}')">${s?'저장':'추가'}</button>
       ${s&&isOwner()?`<button class="btn danger" onclick="delStaff('${s.id}')">삭제</button>`:''}
     </div>
-    <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 권장(기록 보존).</div>`);
+    <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 같은 번호를 여럿이 써도 되지만 <b>PIN은 서로 달라야</b> 합니다. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 하세요 — 근로기준법 §42 는 서류를 퇴직일부터 3년 보존하라고 합니다.</div>`,
+    isHR()? (()=>{ hrTab('list'); closeModal(); }) : null);
   staffAnnualSync();
 }
 function staffAnnualSync(){   // 체크박스 토글 / 입사일 변경 시
@@ -2482,7 +2507,10 @@ function staffAnnualUseAuto(){      // 다시 입사일 자동으로
 function saveStaff(id){
   const name=$('#sName').value.trim(); if(!name){ toast('이름을 입력하세요'); return; }
   const phone=normPhone($('#sPhone').value); if(!phone){ toast('전화번호(로그인 ID)를 입력해야 저장돼요'); return; }
-  if(DB.staff.some(x=>x.id!==id && normPhone(x.phone)===phone)){ toast('이미 등록된 전화번호예요'); return; }
+  // 같은 번호를 쓰는 사람이 있어도 막지 않는다(집 전화를 같이 쓰거나 번호를
+  // 바꾸는 중일 수 있다). 대신 로그인은 번호+PIN 으로 찾으므로 PIN 이 겹치면
+  // 누구인지 가릴 수가 없다 — 그때만 막는다.
+  const sameNum=DB.staff.filter(x=>x.id!==id && normPhone(x.phone)===phone);
   const sEdit=id?staffById(id):null;
   // 권한 변경과 PIN 재설정은 오너만 — 인사담당자가 오너 계정을 건드리지 못하게
   const roleSel=$('#sRole');
@@ -2493,19 +2521,24 @@ function saveStaff(id){
   const jd=$('#sJoin').value;
   const annualTotal = annualAuto ? (annualByService(jd) ?? Math.max(0,parseInt($('#sAnnual').value,10)||0))
                                  : Math.max(0,parseInt($('#sAnnual').value,10)||0);
+  const duties=[...document.querySelectorAll('#sDuties input:checked')].map(x=>x.value);
   const base={ name, dept:$('#sDept').value.trim(), position:$('#sPos').value.trim(),
-    joinDate:jd, annualAuto, annualTotal, phone, role };
+    joinDate:jd, annualAuto, annualTotal, phone, role, duties };
   if(id){
     const s=staffById(id);
     if(pinIn){ if(!/^\d{4,8}$/.test(pinIn)){ toast('PIN은 숫자 4~8자리'); return; } base.pin=pinIn; }
-    const act=$('#sActive'); if(act) base.active = act.value==='1';
-    if(s.role===ROLE_OWNER && (role!==ROLE_OWNER || base.active===false)){
+    const myPin=String(base.pin!=null?base.pin:(s.pin||''));
+    if(sameNum.some(x=>String(x.pin||'')===myPin)){
+      toast('같은 번호를 쓰는 분과 PIN이 같아요 — PIN을 다르게 정해주세요'); return; }
+    if(s.role===ROLE_OWNER && role!==ROLE_OWNER){
       const others=DB.staff.filter(x=>x.id!==id && x.role===ROLE_OWNER && x.active!==false);
       if(!others.length){ toast('최소 1명의 최고관리자가 필요해요'); return; }
     }
     Object.assign(s, base);
   } else {
     if(!/^\d{4,8}$/.test(pinIn)){ toast('개인 PIN을 숫자 4~8자리로 정하세요'); return; }
+    if(sameNum.some(x=>String(x.pin||'')===pinIn)){
+      toast('같은 번호를 쓰는 분과 PIN이 같아요 — PIN을 다르게 정해주세요'); return; }
     DB.staff.push({id:uid(), ...base, pin:pinIn, active:true, createdAt:now()});
   }
   saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('저장되었습니다');
@@ -2747,7 +2780,7 @@ function openNoticeReaders(id){
       <div class="tiny muted" style="font-weight:800;margin-bottom:6px">확인함</div>
       ${read.map(s=>`<div class="spread" style="padding:2px 0"><span class="tiny">${esc(s.name)}</span>
         <span class="tiny muted">${fmtDateFull(String(n.reads[s.id]).slice(0,10))} ${fmtTime(n.reads[s.id])}</span></div>`).join('')}
-    </div>`:''}`);
+    </div>`:''}`, ()=>openNoticeRead(id));
 }
 function hrNoticeView(){
   const all=activeStaff().length;
@@ -2845,7 +2878,8 @@ function openContractAgree(sid){
       </div>
       <label class="field"><span>${esc(s.name)} 님 PIN</span>
         <input id="ctPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
-      <button class="btn block" onclick="doContractAgree('${sid}')">읽었고 동의합니다</button>`);
+      <button class="btn block" onclick="doContractAgree('${sid}')">읽었고 동의합니다</button>`,
+      ()=>openContract(sid));
   });
 }
 function contractRows(d){
@@ -2946,6 +2980,7 @@ function openPayUpload(){
 }
 function handlePayFile(ev){
   const f=ev.target.files[0]; if(!f) return;
+  payPicks=[];
   const ym=($('#pyYm')&&$('#pyYm').value)||monthKey();
   const isCsv=/\.csv$/i.test(f.name), r=new FileReader();
   r.onload=()=>{
@@ -2991,10 +3026,13 @@ function payAutoMatch(p){
   p.rows.forEach(r=>{
     if(r.staffId) return;                        // 이미 정해진 줄은 그대로 둔다
     const free=x=>x && !taken.has(x.id);
-    let s = staff.find(x=>free(x) && x.payKey && (x.payKey===r.phone || x.payKey===r.empno));
-    if(!s && r.phone) s = staff.find(x=>free(x) && normPhone(x.phone)===r.phone);
-    if(!s && r.empno) s = staff.find(x=>free(x) && String(x.empno||'')===r.empno);
-    if(!s){ const same=staff.filter(x=>x.name===r.name); if(same.length===1 && free(same[0])) s=same[0]; }
+    // 같은 값을 가진 사람이 둘이면 자동으로 붙이지 않는다 — 누구인지 못 가린다
+    const only=(f)=>{ const hit=staff.filter(f); return hit.length===1 && free(hit[0])? hit[0] : null; };
+    let s = r.phone? only(x=>x.payKey===r.phone) : null;
+    if(!s && r.empno) s = only(x=>x.payKey===r.empno);
+    if(!s && r.phone) s = only(x=>normPhone(x.phone)===r.phone);
+    if(!s && r.empno) s = only(x=>String(x.empno||'')===r.empno);
+    if(!s) s = only(x=>x.name===r.name);
     r.staffId = s? s.id : null;
     if(s) taken.add(s.id);
   });
@@ -3009,6 +3047,15 @@ function phoneTail(sid, cands){
       return '⋯'+t;
   }
   return ph? '⋯'+ph.slice(-4) : '(번호 없음)';
+}
+let payPicks=[];                     // 손으로 고른 순서 — ‹ 이전 으로 하나씩 되돌린다
+function payUndo(){
+  const p=payPending; if(!p) return;
+  const last=payPicks.pop();
+  if(!last){ openPayUpload(); return; }
+  const r=p.rows.find(x=>x.no===last.no); if(r) r.staffId=null;
+  const s=staffById(last.staffId); if(s && last.hadKey===undefined) delete s.payKey; else if(s) s.payKey=last.hadKey;
+  saveDB(); payMatchStep();
 }
 function payMatchStep(){
   const p=payPending; if(!p) return;
@@ -3034,13 +3081,15 @@ function payMatchStep(){
     <div class="divider"></div>
     <button class="btn soft block" style="color:var(--warn)" onclick="payRevealRow()">🔓 금액 보고 가르기</button>
     <div class="tiny muted" style="margin-top:7px">엑셀에 이름 말고 아무 정보가 없을 때만 쓰세요. <b>누가 언제 눌렀는지 기록에 남습니다.</b></div>
-    <button class="btn soft block" style="margin-top:10px" onclick="paySkipRow()">이 줄은 건너뛰기</button>`);
+    <button class="btn soft block" style="margin-top:10px" onclick="paySkipRow()">이 줄은 건너뛰기</button>`,
+    payPicks.length? payUndo : openPayUpload);
 }
 function payPickStaff(){
   const sel=document.querySelector('input[name=pyPick]:checked');
   if(!sel){ toast('한 명을 골라주세요'); return; }
   const p=payPending, r=p.rows.find(x=>!x.staffId); if(!r) return;
   const s=staffById(sel.value);
+  payPicks.push({no:r.no, staffId:sel.value, hadKey:s?s.payKey:undefined});
   r.staffId=sel.value;
   // 전화·사번처럼 그 사람만의 값일 때만 기억한다.
   // 이름으로 기억하면 동명이인 두 줄이 다음 달에 같은 사람으로 붙는다.
@@ -3062,7 +3111,7 @@ function payRevealRow(){
     <div class="card" style="box-shadow:none;background:var(--bg);padding:12px 14px;margin-bottom:14px;max-height:44vh;overflow:auto">
       ${money.map(c=>`<div class="spread" style="padding:3px 0"><span class="tiny muted">${esc(c)}</span><b class="tiny">${esc(String(r.cells[c]))}</b></div>`).join('')}
     </div>
-    <button class="btn block" onclick="payMatchStep()">알겠어요 — 사람 고르러 가기</button>`);
+    <button class="btn block" onclick="payMatchStep()">알겠어요 — 사람 고르러 가기</button>`, payMatchStep);
 }
 // §48② 가 요구하는 것이 빠졌는지 본다 — 빠뜨리고 교부해도 과태료 대상이다
 function payAudit(cols){
@@ -3102,7 +3151,8 @@ function payPreview(){
           <span class="tiny muted">${esc(s?(s.dept||''):'')} · 준비됨</span></div>`;}).join('')}
     </div>
     <div class="tiny muted" style="margin:-6px 2px 10px">금액은 여기 안 보여요. 넣은 뒤 <b>한 사람씩</b> 열어 인쇄하시면 됩니다.</div>
-    <button class="btn block" onclick="payCommit()">${named.length}명에게 교부 처리</button>`);
+    <button class="btn block" onclick="payCommit()">${named.length}명에게 교부 처리</button>`,
+    ()=>{ payPicks.length? payUndo() : openPayUpload(); });
 }
 function payCommit(){
   withPayKey(async key=>{
@@ -3291,6 +3341,148 @@ function hrResignView(){
     </div>`;
 }
 
+
+/* ---- 담당 분야 --------------------------------------------------------
+   권한(볼 수 있는 범위)은 세 단계로 두고, '누가 무엇을 맡는지'는 병원이
+   직접 만든다. 임플란트 담당·물품 약품 담당·수술방 담당처럼 병원마다
+   부르는 이름이 달라서 미리 정해둘 수가 없다. */
+const DUTY_SEED=['임플란트 담당','물품·약품 담당','수술방 담당','보험청구 담당'];
+function dutyById(id){ return (DB.duties||[]).find(d=>d.id===id); }
+function dutyName(id){ const d=dutyById(id); return d? d.name : ''; }
+function dutiesOf(s){ return (s.duties||[]).map(dutyName).filter(Boolean); }
+function staffByDuty(id){ return activeStaff().filter(s=>(s.duties||[]).includes(id)); }
+function openDuties(back){
+  const list=(DB.duties||[]);
+  modal(`<h3>🧰 담당 분야</h3>
+    <div class="hint">누가 무엇을 맡는지 적어두는 칸이에요. <b>볼 수 있는 범위(권한)는 안 바뀝니다</b> — 권한은 최고관리자·인사담당자·직원 세 단계 그대로예요.</div>
+    <div style="max-height:34vh;overflow:auto;margin:12px 0">
+      ${list.length? list.map(d=>{
+        const n=staffByDuty(d.id).length;
+        return `<div class="trow" style="gap:6px">
+          <div class="grow" style="min-width:0"><div style="font-weight:700;font-size:14px">${esc(d.name)}</div>
+            <div class="tiny muted">${n? staffByDuty(d.id).map(s=>esc(s.name)).join(', ') : '맡은 사람 없음'}</div></div>
+          <button class="btn soft xs" onclick="renameDuty('${d.id}')">✏️</button>
+          <button class="btn soft xs" style="color:var(--danger)" onclick="delDuty('${d.id}')">✕</button>
+        </div>`; }).join('') : emptyBox('🧰','아래에서 담당 분야를 추가하세요')}
+    </div>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:11px 12px;margin-bottom:10px">
+      <div class="tiny muted" style="margin-bottom:7px">새 담당 추가</div>
+      <input id="dtName" placeholder="예: 수술방 담당" style="margin-bottom:6px" list="dutySeed"
+        onkeydown="if(event.key==='Enter')addDuty()">
+      <datalist id="dutySeed">${DUTY_SEED.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+      <button class="btn sm block" onclick="addDuty()">추가</button>
+    </div>
+    <div class="tiny muted">직원 카드를 열면 담당 분야를 골라 달 수 있어요.</div>`, back||null);
+}
+function addDuty(){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const name=($('#dtName').value||'').trim(); if(!name){ toast('담당 이름을 적어주세요'); return; }
+  if(!Array.isArray(DB.duties)) DB.duties=[];
+  if(DB.duties.some(d=>d.name===name)){ toast('이미 있는 담당이에요'); return; }
+  DB.duties.push({id:uid(), name, at:now()});
+  saveDB(); openDuties(); toast('추가했어요');
+}
+function renameDuty(id){
+  const d=dutyById(id); if(!d) return;
+  const v=prompt('담당 이름', d.name); if(v==null) return;
+  const name=v.trim(); if(!name) return;
+  d.name=name; saveDB(); openDuties(); toast('바꿨어요');
+}
+function delDuty(id){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const d=dutyById(id); if(!d) return;
+  const n=staffByDuty(id).length;
+  if(!confirm(`"${d.name}" 담당을 지울까요?${n?`\n${n}명에게 달려 있던 표시도 같이 없어집니다.`:''}`)) return;
+  DB.duties=DB.duties.filter(x=>x.id!==id);
+  DB.staff.forEach(s=>{ if(s.duties) s.duties=s.duties.filter(x=>x!==id); });
+  saveDB(); openDuties(); toast('지웠어요');
+}
+
+/* ---- 거래처 -----------------------------------------------------------
+   영업사원 연락처를 폰에만 두면 그 사람이 그만둘 때 같이 사라진다.
+   이름·연락처·비고만 받고 나머지는 안 정한다 — 병원마다 적는 게 다르다. */
+function vendorById(id){ return (DB.vendors||[]).find(v=>v.id===id); }
+function openVendors(back){
+  const list=(DB.vendors||[]);
+  modal(`<h3>🏢 거래처</h3>
+    <div class="hint">거래처와 영업사원 연락처를 적어두는 곳이에요. 사람이 바뀌어도 병원에 남습니다.</div>
+    <div style="max-height:38vh;overflow:auto;margin:12px 0">
+      ${list.length? list.map(v=>`<div class="trow" style="gap:6px">
+        <div class="avatar" style="background:var(--brand-soft);color:var(--brand)">🏢</div>
+        <div class="grow" style="min-width:0">
+          <div style="font-weight:700;font-size:14px">${esc(v.name)}</div>
+          <div class="tiny muted">${v.contact? esc(v.contact) : '연락처 없음'}${v.note?' · '+esc(v.note):''}</div></div>
+        ${v.contact&&/[\d]/.test(v.contact)?`<a class="btn soft xs" href="tel:${esc(String(v.contact).replace(/[^\d+]/g,''))}">📞</a>`:''}
+        <button class="btn soft xs" onclick="openVendorForm('${v.id}')">✏️</button>
+      </div>`).join('') : emptyBox('🏢','아래에서 거래처를 추가하세요')}
+    </div>
+    <button class="btn block" onclick="openVendorForm('')">＋ 거래처 추가</button>`, back||null);
+}
+function openVendorForm(id){
+  const v=id?vendorById(id):null;
+  modal(`<h3>${v?'거래처 수정':'🏢 거래처 추가'}</h3>
+    <label class="field"><span>이름 *</span><input id="vdName" value="${v?esc(v.name):''}" placeholder="예: 오스템임플란트 · 김영업"></label>
+    <label class="field"><span>연락처</span><input id="vdContact" value="${v?esc(v.contact||''):''}" placeholder="010-0000-0000 · 담당자 이름"></label>
+    <label class="field"><span>비고</span><textarea id="vdNote" rows="4" placeholder="예: 픽스처·힐링 담당 · 금요일 방문 · 패키지 1,000만원">${v?esc(v.note||''):''}</textarea></label>
+    <button class="btn block" onclick="saveVendor('${v?v.id:''}')">${v?'수정':'추가'}</button>
+    ${v?`<button class="btn soft block" style="margin-top:8px;color:var(--danger)" onclick="delVendor('${v.id}')">삭제</button>`:''}`,
+    ()=>openVendors());
+}
+function saveVendor(id){
+  const name=($('#vdName').value||'').trim(); if(!name){ toast('이름을 적어주세요'); return; }
+  const contact=($('#vdContact').value||'').trim(), note=($('#vdNote').value||'').trim();
+  if(!Array.isArray(DB.vendors)) DB.vendors=[];
+  if(id){ const v=vendorById(id); if(v) Object.assign(v,{name,contact,note}); }
+  else DB.vendors.push({id:uid(), name, contact, note, at:now()});
+  saveDB(); openVendors(); toast(id?'수정했어요':'추가했어요');
+}
+function delVendor(id){
+  if(!isOwner()){ toast('삭제는 최고관리자만 할 수 있어요'); return; }
+  if(!confirm('이 거래처를 지울까요?')) return;
+  DB.vendors=(DB.vendors||[]).filter(v=>v.id!==id);
+  saveDB(); openVendors(); toast('지웠어요');
+}
+
+/* ---- 퇴사 처리 --------------------------------------------------------
+   근로기준법 §42 는 근로계약 서류를 퇴직일부터 3년 보존하라고 한다.
+   그래서 삭제가 아니라 '퇴사'로 남긴다 — 로그인만 막고 기록은 지키자. */
+function retireStaff(id){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const s=staffById(id); if(!s) return;
+  if(s.role===ROLE_OWNER){
+    const others=DB.staff.filter(x=>x.id!==id && x.role===ROLE_OWNER && x.active!==false);
+    if(!others.length){ toast('마지막 최고관리자는 퇴사 처리할 수 없어요'); return; }
+  }
+  const rem=annualRemain(s).remain;
+  modal(`<h3>🚪 ${esc(s.name)} 님 퇴사 처리</h3>
+    <div class="hint">로그인만 막고 <b>기록은 그대로 둡니다.</b> 근로기준법 §42 는 근로계약 서류를 퇴직일부터 3년 보존하라고 해서, 지우지 않고 퇴사로 남깁니다.</div>
+    <label class="field" style="margin-top:12px"><span>마지막 근무일</span><input id="rtDay" type="date" value="${todayKey()}"></label>
+    ${rem>0?`<div class="tiny" style="color:var(--warn);margin:-4px 2px 12px">남은 연차 <b>${rem}일</b> — 정산하셨는지 확인하세요.</div>`:''}
+    <label class="field"><span>메모 (안 적어도 돼요)</span><input id="rtNote" placeholder="예: 개인 사정 · 이직"></label>
+    <button class="btn block" onclick="doRetire('${id}')">퇴사 처리</button>
+    <div class="tiny muted" style="margin-top:10px">잘못 눌러도 직원 카드에서 <b>복직</b>으로 되돌릴 수 있어요.</div>`,
+    ()=>openStaffForm(id));
+}
+function doRetire(id){
+  const s=staffById(id); if(!s) return;
+  s.active=false;
+  s.retiredAt=$('#rtDay').value||todayKey();
+  s.retireNote=($('#rtNote').value||'').trim();
+  const rg=resignOf(id);
+  if(rg && rg.status==='제출'){ rg.status='수리'; rg.handledAt=now(); rg.handledBy=(currentUser()||{}).id||''; }
+  hrLog('퇴사', `${s.name} 퇴사 처리 · 마지막 근무일 ${s.retiredAt}`);
+  saveDB(); closeModal(); renderStaff(); renderHome(); applyRole();
+  toast(`${s.name} 님을 퇴사 처리했어요`);
+}
+function unretireStaff(id){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const s=staffById(id); if(!s) return;
+  if(!confirm(`${s.name} 님을 다시 재직으로 되돌릴까요?\n로그인이 다시 열립니다.`)) return;
+  s.active=true; delete s.retiredAt; delete s.retireNote;
+  hrLog('퇴사', `${s.name} 복직 처리`);
+  saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('복직 처리했어요');
+}
+
 /* ---- 인쇄 -------------------------------------------------------------- */
 function printDoc(title, body){
   const f=document.createElement('iframe');
@@ -3337,16 +3529,29 @@ function renderStaff(){
       hrView==='pay'? hrPayView() :
       hrView==='resign'? hrResignView() : hrListHtml()}</div>`;
 }
+let staffShowGone=false;
+function toggleGone(){ staffShowGone=!staffShowGone; renderStaff(); }
 function hrListHtml(){
   if(!DB.staff.length) return `<div class="card">${emptyBox('👥','＋직원 버튼으로 직원을 추가하세요')}</div>`;
-  return `<div class="hint">직원 <b>이름을 누르면</b> 정보·연차를 바로 수정할 수 있어요.</div><div style="margin-top:10px">`
-    + DB.staff.map(s=>{
+  const gone=DB.staff.filter(s=>s.active===false);
+  const list=staffShowGone? gone : DB.staff.filter(s=>s.active!==false);
+  return `<div class="hint">직원 <b>이름을 누르면</b> 정보·연차·담당을 바로 고칠 수 있어요.</div>
+    <div class="row" style="gap:6px;margin:10px 2px">
+      <button class="btn ${staffShowGone?'soft':''} sm" onclick="if(staffShowGone)toggleGone()">재직 ${DB.staff.length-gone.length}</button>
+      <button class="btn ${staffShowGone?'':'soft'} sm" onclick="if(!staffShowGone)toggleGone()">퇴사 ${gone.length}</button>
+      <span class="grow"></span>
+      <button class="btn soft sm" onclick="openDuties()">🧰 담당</button>
+      <button class="btn soft sm" onclick="openVendors()">🏢 거래처</button>
+    </div>
+    <div>`
+    + (list.length? list.map(s=>{
     const r=annualRemain(s), c=contractOf(s.id), ps=payslipsOf(s.id)[0], rg=resignOf(s.id);
     const flags=[];
     if(!c) flags.push('<span class="pill danger">계약서 없음</span>');
     else if(!c.agreedAt) flags.push('<span class="pill warn">계약서 확인 전</span>');
     if(rg && rg.status==='제출') flags.push('<span class="pill warn">사직서</span>');
-    if(s.active===false) flags.push('<span class="pill grey">퇴사</span>');
+    if(s.active===false) flags.push(`<span class="pill grey">퇴사${s.retiredAt?' · '+esc(s.retiredAt):''}</span>`);
+    dutiesOf(s).forEach(d=>flags.push(`<span class="pill info">${esc(d)}</span>`));
     return `<div class="card" style="padding:13px 14px;margin-bottom:8px">
       <div class="spread" style="cursor:pointer" onclick="openStaffForm('${s.id}')">
         <div class="row" style="gap:11px"><div class="avatar">${esc(initials(s.name))}</div>
@@ -3356,12 +3561,16 @@ function hrListHtml(){
         <div style="text-align:right"><div style="font-weight:800;color:var(--brand)">연차 ${r.remain}일</div>
           <div class="tiny muted">/ 총 ${r.total}일${s.annualAuto===false?' (수동)':''}</div></div></div>
       ${flags.length?`<div class="row" style="gap:5px;margin-top:8px;flex-wrap:wrap">${flags.join('')}</div>`:''}
-      <div class="row" style="gap:6px;margin-top:9px">
+      <div class="row" style="gap:6px;margin-top:9px;flex-wrap:wrap">
         <button class="btn soft xs" onclick="openContract('${s.id}')">📝 계약서</button>
         ${ps?`<button class="btn soft xs" onclick="openPayslip('${ps.id}')">💰 ${esc(ps.ym)}</button>`:''}
         ${rg?`<button class="btn soft xs" onclick="openResignView('${rg.id}')">📄 사직서</button>`:''}
+        ${s.active!==false
+          ? `<button class="btn soft xs" onclick="retireStaff('${s.id}')">🚪 퇴사 처리</button>`
+          : `<button class="btn soft xs" onclick="unretireStaff('${s.id}')">↩︎ 복직</button>`}
       </div></div>`;
-  }).join('') + '</div>';
+  }).join('') : emptyBox('👥', staffShowGone?'퇴사한 직원이 없어요':'재직중인 직원이 없어요'))
+    + '</div>';
 }
 // 직원이 보는 내 1페이지 — 자기 것만 보인다
 function myPageHtml(){
@@ -3577,8 +3786,17 @@ function wipeData(){
 /* ========================================================================
    공통 (모달 / 토스트 / 유틸)
    ======================================================================== */
-function modal(html){ $('#modalBody').innerHTML=html; $('#modalBg').classList.add('open'); document.body.style.overflow='hidden'; }
-function closeModal(){ $('#modalBg').classList.remove('open'); document.body.style.overflow=''; }
+/* 여러 단계를 지나는 화면(급여 짝짓기·명세서 미리보기 등)에서 되돌아갈 수 있게.
+   두 번째 인자로 '이전 화면을 다시 그리는 함수'를 주면 위에 ‹ 이전 이 붙는다. */
+let mBackFn=null;
+function modal(html, back){
+  mBackFn = back || null;
+  $('#modalBody').innerHTML = (mBackFn? `<button class="mback" onclick="modalBack()">‹ 이전</button>` : '') + html;
+  $('#modalBg').classList.add('open'); document.body.style.overflow='hidden';
+  $('#modal').scrollTop=0;
+}
+function modalBack(){ const f=mBackFn; mBackFn=null; if(f) f(); }
+function closeModal(){ mBackFn=null; $('#modalBg').classList.remove('open'); document.body.style.overflow=''; }
 let toastT;
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
