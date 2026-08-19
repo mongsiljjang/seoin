@@ -482,6 +482,9 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(!Array.isArray(DB.duties)) DB.duties=[];        // 담당 분야 — 병원이 직접 만든다
   if(!Array.isArray(DB.vendors)) DB.vendors=[];      // 거래처 · 영업사원 연락처
   if(!DB.hosp || typeof DB.hosp!=='object') DB.hosp={headcount:null};   // 상시 근로자 수
+  if(!Array.isArray(DB.docTypes)) DB.docTypes=[];    // 신청 유형 — 병원이 직접 늘린다
+  if(!Array.isArray(DB.docForms)) DB.docForms=[];    // 양식 보관함
+  if(!Array.isArray(DB.docReqs)) DB.docReqs=[];      // 낸 신청서
   if(DB.payLock && typeof DB.payLock!=='object') DB.payLock=null;
   if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
   if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
@@ -729,6 +732,8 @@ function computeAlerts(){
       a.push({level:'info',icon:'🌴',title:`연월차 승인 대기 · ${s?s.name:'(직원)'}`,sub:`${fmtDate(l.startDate)}${l.startDate!==l.endDate?'~'+fmtDate(l.endDate):''} · ${l.days}일`,tab:'leave'}); });
     (DB.resignations||[]).filter(r=>r.status==='제출').forEach(r=>{ const s=staffById(r.staffId);
       a.push({level:'warn',icon:'📄',title:`사직서 · ${s?s.name:'(직원)'}`,sub:`${fmtDate(String(r.submittedAt).slice(0,10))} 제출 · 마지막 ${r.lastDay||'-'}`,tab:'staff'}); });
+    (DB.docReqs||[]).filter(r=>r.status==='제출').forEach(r=>{ const s=staffById(r.staffId);
+      a.push({level:'warn',icon:'📋',title:`${docTypeName(r.typeId)} · ${s?s.name:'(직원)'}`,sub:`${fmtDate(String(r.at).slice(0,10))} 신청 · ${r.from}${r.to?'~'+r.to:''}`,tab:'staff'}); });
   }
   const me=currentUser();
   if(me) noticeMustUnread(me.id).forEach(n=>
@@ -3535,6 +3540,7 @@ function openResignView(id){
       ${(isHR()||mine)&&r.reason?`<div style="margin-top:8px"><div class="tiny muted">사유</div><div class="tiny" style="white-space:pre-wrap;margin-top:3px">${esc(r.reason)}</div></div>`:''}
     </div>
     <div class="tiny muted" style="margin:-6px 2px 12px">병원이 사직서를 안 받아줘도 효력일이 되면 퇴직 효력이 생깁니다(월급으로 받는 경우).<br><span class="lawcite">근거 · 민법 제660조제3항</span></div>
+    ${r.onBehalf?`<div class="tiny muted" style="margin:-6px 2px 12px">${esc(r.byName||'')}가 대신 등록했어요.</div>`:''}
     ${isHR()&&r.status==='제출'?`<button class="btn block" onclick="handleResign('${r.id}')">수리하고 퇴사 처리</button>
       <div class="tiny muted" style="margin-top:8px">누르면 재직 상태가 <b>퇴사</b>로 바뀌어 로그인이 막힙니다. 남은 ${leaveWord()} ${s?annualRemain(s).remain:0}일을 먼저 정산하세요.</div>`:''}
     ${mine&&r.status==='제출'?`<button class="btn soft block" style="margin-top:8px;color:var(--danger)" onclick="cancelResign('${r.id}')">사직서 철회</button>`:''}`);
@@ -3768,7 +3774,7 @@ function hrCheckView(){
         </div></div></div>`;
   };
 
-  const bad=[noContract.length,notAgreed.length,gaps.length,noPay.length,pendResign.length].filter(Boolean).length + (noKey?1:0);
+  const bad=[noContract.length,notAgreed.length,gaps.length,noPay.length,pendResign.length,docPending().length].filter(Boolean).length + (noKey?1:0);
 
   return `<div class="card" style="box-shadow:none;background:${bad?'var(--warn-soft)':'var(--ok-soft)'};border:0;padding:14px 15px;margin-bottom:12px">
       <div style="font-weight:900;color:var(--${bad?'warn':'ok'});font-size:15px">${bad? `지금 챙길 것이 ${bad}가지 있어요` : '지금 챙길 것은 없어요'}</div>
@@ -3802,9 +3808,13 @@ function hrCheckView(){
       '급여를 줄 때마다 명세서를 한 장씩 드려야 합니다. 빠뜨리거나 항목이 빠진 채로 드려도 과태료 대상이에요. (아직 급여일 전이면 괜찮습니다)',
       noPay, '근로기준법 제48조제2항', "hrTab('pay')")}
 
+    ${item(docPending().length,'📋','아직 처리 안 한 신청서',
+      '직원이 낸 육아휴직·병가 같은 신청서예요. 승인이든 반려든 답을 줘야 직원이 계획을 세울 수 있습니다.',
+      docPending().map(r=>staffLabel(r.staffId)+' ('+docTypeName(r.typeId)+')'), null, "hrTab('docs')")}
+
     ${item(pendResign.length,'📄','아직 처리 안 한 사직서',
       '사직서는 받은 날부터 날짜를 셉니다. 처리를 미루면 퇴직일이 뒤로 밀려요.',
-      pendResign.map(r=>staffLabel(r.staffId)), '민법 제660조', "hrTab('resign')")}
+      pendResign.map(r=>staffLabel(r.staffId)), '민법 제660조', "hrTab('docs')")}
 
     ${oldGone.length? `<div class="card" style="padding:13px 14px;margin-bottom:8px">
       <div style="font-weight:800">🗂️ 보관 기간이 지난 퇴사자 ${oldGone.length}명</div>
@@ -3833,6 +3843,299 @@ function hrCheckView(){
 }
 function runContractScan(){
   withPayKey(async()=>{ await scanContracts(); renderStaff(); toast('계약서를 살펴봤어요'); });
+}
+
+
+/* ---- 서류 · 신청서 -----------------------------------------------------
+   노무 신청서는 종류가 많다 — 육아휴직·출산전후휴가·가족돌봄·병가·무급휴가…
+   병원마다 쓰는 것도 부르는 이름도 달라서 목록으로 두고 직접 늘리게 한다.
+
+   흐름: 관리자가 양식을 올려두면 → 직원이 내려받아 작성하고 → 올린다 →
+   관리자가 확인하고 승인한다.
+   지금은 파일을 올릴 곳(Firebase Storage)이 없어서 신청·승인·기록까지만
+   된다. 첨부 자리(files)는 미리 비워 두었으니 Storage 를 켜면 그대로 붙는다. */
+const DOCTYPE_SEED=[
+  {name:'육아휴직', note:'만 8세 이하 또는 초등학교 2학년 이하 자녀'},
+  {name:'출산전후휴가', note:''},
+  {name:'배우자 출산휴가', note:''},
+  {name:'가족돌봄휴가', note:''},
+  {name:'병가', note:'진단서는 종이로 받아 병원이 보관하세요'},
+  {name:'무급휴가', note:''},
+  {name:'경조사휴가', note:''},
+];
+const DOC_STATES={제출:'warn', 승인:'ok', 반려:'grey'};
+function ensureDocTypes(){
+  if(!Array.isArray(DB.docTypes)) DB.docTypes=[];
+  if(!DB.docTypes.length) DB.docTypes=DOCTYPE_SEED.map(x=>({id:uid(), name:x.name, note:x.note, at:now()}));
+}
+function docTypeById(id){ return (DB.docTypes||[]).find(t=>t.id===id); }
+function docTypeName(id){ const t=docTypeById(id); return t? t.name : '기타'; }
+function docReqsOf(sid){ return (DB.docReqs||[]).filter(r=>r.staffId===sid).sort((a,b)=>String(b.at).localeCompare(String(a.at))); }
+function docPending(){ return (DB.docReqs||[]).filter(r=>r.status==='제출'); }
+
+/* 신청서 쓰기 — 관리자는 직원을 골라 대신 올릴 수 있다.
+   권고사직처럼 병원이 먼저 얘기를 꺼내는 경우와, 로그인이 막힌 퇴사자 때문이다. */
+function openDocForm(sid){
+  ensureDocTypes();
+  const me=currentUser(); if(!me) return;
+  const forSelf=!isHR();
+  const target=forSelf? me.id : (sid||me.id);
+  const types=DB.docTypes||[];
+  if(!types.length){ toast('먼저 신청 유형을 만들어 주세요'); openDocTypes(); return; }
+  modal(`<h3>📋 신청서 내기</h3>
+    ${forSelf? `<div class="hint">낸 시각이 그대로 기록돼요. 관리자가 확인하고 승인합니다.</div>`
+             : `<div class="hint">직원 <b>대신</b> 올리는 화면이에요. 누가 대신 올렸는지 기록에 남습니다.</div>`}
+    ${forSelf? '' : `<label class="field"><span>누구 것인가요</span><select id="dqStaff">
+      ${DB.staff.map(s=>`<option value="${s.id}" ${s.id===target?'selected':''}>${esc(s.name)}${s.active===false?' (퇴사)':''}${esc(s.dept?' · '+s.dept:'')}</option>`).join('')}
+    </select></label>`}
+    <label class="field"><span>무엇을 신청하나요</span><select id="dqType" onchange="docTypeHint()">
+      ${types.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+    </select></label>
+    <div id="dqHint" class="tiny muted" style="margin:-6px 2px 10px"></div>
+    <div class="two">
+      <label class="field"><span>시작일</span><input id="dqFrom" type="date" value="${todayKey()}"></label>
+      <label class="field"><span>종료일 (모르면 비워두세요)</span><input id="dqTo" type="date"></label>
+    </div>
+    <label class="field"><span>사유 · 하고 싶은 말</span><textarea id="dqWhy" rows="3" placeholder="안 적어도 돼요"></textarea></label>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:11px 13px;margin-bottom:12px">
+      <div class="tiny muted">📎 <b>서류 파일 올리기는 아직 준비 중</b>이에요. 지금은 종이로 내시고, 관리자가 받았다고 표시합니다.</div>
+    </div>
+    <button class="btn block" onclick="saveDocReq()">신청서 내기</button>`,
+    isHR()? (()=>{ hrTab('docs'); closeModal(); }) : null);
+  docTypeHint();
+}
+function docTypeHint(){
+  const el=$('#dqHint'), sel=$('#dqType'); if(!el||!sel) return;
+  const t=docTypeById(sel.value);
+  el.innerHTML = t&&t.note? esc(t.note) : '';
+}
+function saveDocReq(){
+  const me=currentUser(); if(!me) return;
+  const forSelf=!isHR();
+  const sid = forSelf? me.id : (($('#dqStaff')||{}).value||me.id);
+  const typeId=$('#dqType').value;
+  const from=$('#dqFrom').value||todayKey(), to=$('#dqTo').value||'';
+  if(to && to<from){ toast('종료일이 시작일보다 빨라요'); return; }
+  if(!Array.isArray(DB.docReqs)) DB.docReqs=[];
+  DB.docReqs.unshift({id:uid(), staffId:sid, typeId, from, to,
+    reason:($('#dqWhy').value||'').trim(), status:'제출',
+    at:now(), by:me.id, byName:me.name, onBehalf:!forSelf,
+    handledAt:null, handledBy:null, handleNote:'',
+    paperGot:false, paperNote:'', files:[]});          // files 는 Storage 켜면 채운다
+  if(!forSelf) hrLog('신청서', `${(staffById(sid)||{}).name||''} ${docTypeName(typeId)} 대신 등록`);
+  saveDB(); closeModal(); renderStaff(); renderHome();
+  toast(forSelf? '신청서를 냈어요' : '대신 등록했어요');
+}
+function openDocReq(id){
+  const r=(DB.docReqs||[]).find(x=>x.id===id); if(!r) return;
+  const s=staffById(r.staffId), me=currentUser();
+  const mine=me&&me.id===r.staffId;
+  const t=docTypeById(r.typeId);
+  modal(`<h3>📋 ${esc(docTypeName(r.typeId))} · ${esc(staffLabel(r.staffId))}</h3>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:13px 14px;margin-bottom:14px">
+      <div class="spread" style="padding:3px 0"><span class="tiny muted">낸 날</span>
+        <b class="tiny">${fmtDateFull(String(r.at).slice(0,10))} ${fmtTime(r.at)}${r.onBehalf?` · ${esc(r.byName||'')}가 대신`:''}</b></div>
+      <div class="spread" style="padding:3px 0"><span class="tiny muted">기간</span>
+        <b class="tiny">${esc(r.from)}${r.to?' ~ '+esc(r.to):' ~ (미정)'}</b></div>
+      <div class="spread" style="padding:3px 0"><span class="tiny muted">상태</span>
+        <b class="tiny"><span class="pill ${DOC_STATES[r.status]||'grey'}">${esc(r.status)}</span></b></div>
+      ${r.handledAt?`<div class="spread" style="padding:3px 0"><span class="tiny muted">처리</span>
+        <b class="tiny">${fmtDateFull(String(r.handledAt).slice(0,10))} · ${esc((staffById(r.handledBy)||{}).name||'')}</b></div>`:''}
+      ${r.reason?`<div style="margin-top:8px"><div class="tiny muted">사유</div>
+        <div class="tiny" style="white-space:pre-wrap;margin-top:3px">${esc(r.reason)}</div></div>`:''}
+      ${r.handleNote?`<div style="margin-top:8px"><div class="tiny muted">처리 메모</div>
+        <div class="tiny" style="white-space:pre-wrap;margin-top:3px">${esc(r.handleNote)}</div></div>`:''}
+    </div>
+    ${t&&t.note?`<div class="tiny muted" style="margin:-6px 2px 12px">${esc(t.note)}</div>`:''}
+
+    ${isHR()? `<div class="card" style="box-shadow:none;background:var(--bg);padding:12px 14px;margin-bottom:12px">
+      <label class="trow" style="cursor:pointer;gap:8px;padding:2px 0;border:0">
+        <input type="checkbox" id="dqPaper" ${r.paperGot?'checked':''} style="width:auto;margin:0;flex:none">
+        <span class="tiny grow"><b>서류를 종이로 받았어요</b> — 원본은 병원이 보관합니다</span></label>
+      <input id="dqPaperNote" value="${esc(r.paperNote||'')}" placeholder="예: 진단서 1부 · 8/19 접수" style="margin-top:8px">
+      <div class="tiny muted" style="margin-top:6px">진단서 같은 건강 관련 서류는 앱에 올리지 않고 여기에 표시만 해두세요.</div>
+      <button class="btn soft sm block" style="margin-top:8px" onclick="saveDocPaper('${r.id}')">표시 저장</button>
+    </div>` : (r.paperGot?`<div class="tiny" style="color:var(--ok);font-weight:700;margin:0 2px 12px">✓ 서류 접수됨</div>`:'')}
+
+    ${isHR()&&r.status==='제출'? `<label class="field"><span>처리 메모 (안 적어도 돼요)</span><input id="dqNote" placeholder="예: 8/25부터 시작하기로 함"></label>
+      <div class="row">
+        <button class="btn grow" onclick="handleDocReq('${r.id}','승인')">승인</button>
+        <button class="btn soft grow" style="color:var(--danger)" onclick="handleDocReq('${r.id}','반려')">반려</button>
+      </div>`:''}
+    ${mine&&r.status==='제출'?`<button class="btn soft block" style="margin-top:8px;color:var(--danger)" onclick="delDocReq('${r.id}')">신청 취소</button>`:''}
+    ${isHR()&&r.status!=='제출'?`<button class="btn soft block" onclick="handleDocReq('${r.id}','제출')">처리 되돌리기</button>`:''}`,
+    isHR()? (()=>{ hrTab('docs'); closeModal(); }) : null);
+}
+function saveDocPaper(id){
+  const r=(DB.docReqs||[]).find(x=>x.id===id); if(!r||!isHR()) return;
+  r.paperGot=$('#dqPaper').checked; r.paperNote=($('#dqPaperNote').value||'').trim();
+  saveDB(); toast(r.paperGot?'서류 받은 것으로 표시했어요':'표시를 지웠어요');
+  openDocReq(id);
+}
+function handleDocReq(id, st){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const r=(DB.docReqs||[]).find(x=>x.id===id); if(!r) return;
+  const me=currentUser();
+  const note=($('#dqNote')||{}).value;
+  r.status=st;
+  if(st==='제출'){ r.handledAt=null; r.handledBy=null; }
+  else { r.handledAt=now(); r.handledBy=me?me.id:''; if(note!=null) r.handleNote=String(note).trim(); }
+  hrLog('신청서', `${staffLabel(r.staffId)} ${docTypeName(r.typeId)} ${st}`);
+  saveDB(); closeModal(); renderStaff(); renderHome();
+  toast(st==='제출'? '되돌렸어요' : st+'했어요');
+}
+function delDocReq(id){
+  const r=(DB.docReqs||[]).find(x=>x.id===id), me=currentUser();
+  if(!r||!me||me.id!==r.staffId) return;
+  if(!confirm('낸 신청서를 취소할까요?')) return;
+  DB.docReqs=DB.docReqs.filter(x=>x.id!==id);
+  saveDB(); closeModal(); renderStaff(); toast('취소했어요');
+}
+
+/* 신청 유형 — 병원이 직접 늘리고 줄인다 */
+function openDocTypes(back){
+  ensureDocTypes();
+  modal(`<h3>🗂️ 신청 유형</h3>
+    <div class="hint">병원에서 쓰는 신청서 종류를 적어두는 곳이에요. 여기 없는 건 직접 추가하시면 됩니다.</div>
+    <div style="max-height:34vh;overflow:auto;margin:12px 0">
+      ${(DB.docTypes||[]).map(t=>{
+        const n=(DB.docReqs||[]).filter(r=>r.typeId===t.id).length;
+        return `<div class="trow" style="gap:6px">
+          <div class="grow" style="min-width:0"><div style="font-weight:700;font-size:14px">${esc(t.name)}</div>
+            <div class="tiny muted">${t.note?esc(t.note):'—'}${n?` · 신청 ${n}건`:''}</div></div>
+          <button class="btn soft xs" onclick="editDocType('${t.id}')">✏️</button>
+          <button class="btn soft xs" style="color:var(--danger)" onclick="delDocType('${t.id}')">✕</button>
+        </div>`; }).join('')}
+    </div>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:11px 12px">
+      <div class="tiny muted" style="margin-bottom:7px">새 유형 추가</div>
+      <input id="dtN" placeholder="예: 배우자 출산휴가" style="margin-bottom:5px">
+      <input id="dtNote" placeholder="설명 (안 적어도 돼요)" style="margin-bottom:6px">
+      <button class="btn sm block" onclick="addDocType()">추가</button>
+    </div>`, back||null);
+}
+function addDocType(){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const name=($('#dtN').value||'').trim(); if(!name){ toast('이름을 적어주세요'); return; }
+  if((DB.docTypes||[]).some(t=>t.name===name)){ toast('이미 있는 유형이에요'); return; }
+  DB.docTypes.push({id:uid(), name, note:($('#dtNote').value||'').trim(), at:now()});
+  saveDB(); openDocTypes(); toast('추가했어요');
+}
+function editDocType(id){
+  const t=docTypeById(id); if(!t) return;
+  const n=prompt('유형 이름', t.name); if(n==null) return;
+  if(!n.trim()) return;
+  const note=prompt('설명 (없으면 비워두세요)', t.note||'');
+  t.name=n.trim(); if(note!=null) t.note=note.trim();
+  saveDB(); openDocTypes(); toast('바꿨어요');
+}
+function delDocType(id){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const n=(DB.docReqs||[]).filter(r=>r.typeId===id).length;
+  if(n){ toast(`이미 낸 신청서 ${n}건이 있어 지울 수 없어요`); return; }
+  DB.docTypes=(DB.docTypes||[]).filter(t=>t.id!==id);
+  saveDB(); openDocTypes(); toast('지웠어요');
+}
+
+/* 양식 보관함 — 관리자가 양식을 올려두면 직원이 내려받아 쓴다.
+   파일은 Storage 를 켜야 올릴 수 있어서, 지금은 어떤 양식이 있는지와
+   어디서 받는지만 적어둔다. */
+function openDocForms(back){
+  ensureDocTypes();
+  const list=(DB.docForms||[]);
+  modal(`<h3>📁 양식 보관함</h3>
+    <div class="hint">직원이 받아서 쓸 양식을 모아두는 곳이에요.</div>
+    <div class="card" style="box-shadow:none;background:var(--warn-soft);border:0;padding:12px 14px;margin:12px 0">
+      <div class="tiny" style="font-weight:900;color:var(--warn);margin-bottom:4px">📎 파일 올리기는 아직 준비 중이에요</div>
+      <div class="tiny muted">파일을 넣어둘 곳(Firebase Storage)을 켜야 합니다. 그때까지는 양식 이름과 <b>어디서 받는지</b>만 적어두세요 — 직원이 보고 찾아갈 수 있게요.</div>
+    </div>
+    <div style="max-height:32vh;overflow:auto;margin-bottom:12px">
+      ${list.length? list.map(f=>`<div class="trow" style="gap:6px">
+        <div class="avatar" style="background:var(--brand-soft);color:var(--brand)">📄</div>
+        <div class="grow" style="min-width:0"><div style="font-weight:700;font-size:14px">${esc(f.name)}</div>
+          <div class="tiny muted">${f.where?esc(f.where):'받는 곳 안 적음'}</div></div>
+        ${isHR()?`<button class="btn soft xs" onclick="delDocForm('${f.id}')" style="color:var(--danger)">✕</button>`:''}
+      </div>`).join('') : emptyBox('📁','아직 등록한 양식이 없어요')}
+    </div>
+    ${isHR()?`<div class="card" style="box-shadow:none;background:var(--bg);padding:11px 12px">
+      <div class="tiny muted" style="margin-bottom:7px">양식 추가</div>
+      <input id="dfName" placeholder="예: 육아휴직 신청서" style="margin-bottom:5px">
+      <input id="dfWhere" placeholder="어디서 받나요 (예: 고용노동부 누리집 서식자료실)" style="margin-bottom:6px">
+      <button class="btn sm block" onclick="addDocForm()">추가</button>
+    </div>`:''}`, back||null);
+}
+function addDocForm(){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const name=($('#dfName').value||'').trim(); if(!name){ toast('양식 이름을 적어주세요'); return; }
+  if(!Array.isArray(DB.docForms)) DB.docForms=[];
+  DB.docForms.push({id:uid(), name, where:($('#dfWhere').value||'').trim(), at:now(), file:null});
+  saveDB(); openDocForms(); toast('추가했어요');
+}
+function delDocForm(id){
+  if(!isHR()) return;
+  if(!confirm('이 양식을 지울까요?')) return;
+  DB.docForms=(DB.docForms||[]).filter(f=>f.id!==id);
+  saveDB(); openDocForms(); toast('지웠어요');
+}
+
+/* 서류 탭 — 신청서와 사직서를 한자리에서 본다 */
+function hrDocsView(){
+  ensureDocTypes();
+  const reqs=(DB.docReqs||[]).slice().sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  const resigns=(DB.resignations||[]).slice().sort((a,b)=>String(b.submittedAt).localeCompare(String(a.submittedAt)));
+  const pend=reqs.filter(r=>r.status==='제출').length + resigns.filter(r=>r.status==='제출').length;
+  const row=(icon,title,sub,pill,pillCls,go)=>`<div class="trow" style="cursor:pointer" onclick="${go}">
+      <div class="avatar" style="background:var(--brand-soft);color:var(--brand)">${icon}</div>
+      <div class="grow" style="min-width:0"><div style="font-weight:800">${title}</div>
+        <div class="tiny muted">${sub}</div></div>
+      <span class="pill ${pillCls}">${pill}</span><span class="tiny muted">›</span></div>`;
+  return `<div class="hint">직원이 낸 신청서와 사직서를 여기서 확인하고 승인해요. 직원 대신 올려드릴 수도 있습니다.</div>
+    <div class="row" style="gap:6px;margin:12px 2px">
+      <button class="btn sm" onclick="openDocForm()">＋ 신청서</button>
+      <button class="btn soft sm" onclick="openResignFormFor()">＋ 사직서</button>
+      <span class="grow"></span>
+      <button class="btn soft sm" onclick="openDocForms()">📁 양식</button>
+      <button class="btn soft sm" onclick="openDocTypes()">🗂️ 유형</button>
+    </div>
+    ${pend? `<div class="card" style="box-shadow:none;background:var(--warn-soft);border:0;padding:11px 14px;margin-bottom:10px">
+      <div class="tiny" style="font-weight:900;color:var(--warn)">처리를 기다리는 서류 ${pend}건</div></div>`:''}
+    ${(reqs.length||resigns.length)? `<div>
+      ${resigns.map(r=>row('📄', `사직서 · ${esc(staffLabel(r.staffId))}`,
+          `${fmtDateFull(String(r.submittedAt).slice(0,10))} 냄 · 마지막 ${esc(r.lastDay||'-')}`,
+          esc(r.status), r.status==='제출'?'warn':'ok', `openResignView('${r.id}')`)).join('')}
+      ${reqs.map(r=>row('📋', `${esc(docTypeName(r.typeId))} · ${esc(staffLabel(r.staffId))}`,
+          `${fmtDateFull(String(r.at).slice(0,10))} 냄 · ${esc(r.from)}${r.to?' ~ '+esc(r.to):''}${r.onBehalf?' · 대신 등록':''}${r.paperGot?' · 서류 받음':''}`,
+          esc(r.status), DOC_STATES[r.status]||'grey', `openDocReq('${r.id}')`)).join('')}
+    </div>` : emptyBox('🗂️','아직 낸 서류가 없어요')}`;
+}
+
+/* 사직서 — 관리자가 직원 대신 올릴 수 있게. 권고사직이나, 로그인이 막힌
+   퇴사자를 대신 등록할 때 필요하다. */
+function openResignFormFor(sid){
+  if(!isHR()) return openResignForm();
+  modal(`<h3>📄 사직서 대신 등록</h3>
+    <div class="hint">직원 <b>대신</b> 올리는 화면이에요. 권고사직이거나 이미 퇴사 처리돼 로그인이 막힌 분을 등록할 때 씁니다. 누가 대신 올렸는지 기록에 남습니다.</div>
+    <label class="field"><span>누구 것인가요</span><select id="rgStaff">
+      ${DB.staff.map(s=>`<option value="${s.id}" ${s.id===sid?'selected':''}>${esc(s.name)}${s.active===false?' (퇴사)':''}${esc(s.dept?' · '+s.dept:'')}</option>`).join('')}
+    </select></label>
+    <label class="field"><span>낸 날 (종이로 받은 날을 적으세요)</span><input id="rgOn" type="date" value="${todayKey()}"></label>
+    <label class="field"><span>마지막 근무일</span><input id="rgLast" type="date" value="${todayKey()}"></label>
+    <label class="field"><span>사유 · 메모</span><textarea id="rgWhy" rows="3" placeholder="예: 권고사직 · 본인 동의"></textarea></label>
+    <div class="tiny muted" style="margin:-4px 2px 12px">종이 사직서 원본은 병원이 보관하세요. 근로계약 서류는 퇴직일부터 <b>3년</b> 보관해야 합니다.<br><span class="lawcite">근거 · 근로기준법 제42조</span></div>
+    <button class="btn block" onclick="saveResignFor()">대신 등록</button>`,
+    ()=>{ hrTab('docs'); closeModal(); });
+}
+function saveResignFor(){
+  if(!isHR()) return;
+  const me=currentUser();
+  const sid=$('#rgStaff').value, on=$('#rgOn').value||todayKey();
+  const lastDay=$('#rgLast').value||todayKey(), reason=($('#rgWhy').value||'').trim();
+  if(!Array.isArray(DB.resignations)) DB.resignations=[];
+  DB.resignations.unshift({id:uid(), staffId:sid, submittedAt:on+'T09:00:00.000Z', submitDay:on,
+    lastDay, reason, status:'제출', handledAt:null, handledBy:null,
+    onBehalf:true, by:me?me.id:'', byName:me?me.name:''});
+  hrLog('사직', `${staffLabel(sid)} 사직서 대신 등록 (낸 날 ${on})`);
+  saveDB(); closeModal(); renderStaff(); renderHome(); toast('대신 등록했어요');
 }
 
 /* ---- 인쇄 -------------------------------------------------------------- */
@@ -3866,21 +4169,23 @@ function hrTab(v){ hrView=v; renderStaff(); }
 function renderStaff(){
   const wrap=$('#staffWrap'); if(!wrap) return;
   if(!isHR()){ wrap.innerHTML=myPageHtml(); return; }
-  const tabs=[['check','점검'],['list','명단'],['notice','공지'],['contract','근로계약서'],['pay','급여명세서'],['resign','사직서']];
-  const pend=(DB.resignations||[]).filter(r=>r.status==='제출').length;
+  const tabs=[['check','점검'],['list','명단'],['notice','공지'],['contract','근로계약서'],['pay','급여명세서'],['docs','서류']];
+  const pend=(DB.resignations||[]).filter(r=>r.status==='제출').length
+            +(DB.docReqs||[]).filter(r=>r.status==='제출').length;
   wrap.innerHTML=`<div class="spread" style="margin:4px 2px 12px">
       <h2 class="sec" style="margin:0">👥 직원 · 노무</h2>
       ${hrView==='list'?`<button class="btn sm" onclick="openStaffForm()">＋ 직원</button>`:''}
     </div>
     <div class="seg" style="margin-bottom:12px">
-      ${tabs.map(t=>`<button class="${t[0]===hrView?'on':''}" onclick="hrTab('${t[0]}')">${t[1]}${t[0]==='resign'&&pend?` <span class="pill warn" style="margin-left:3px">${pend}</span>`:''}</button>`).join('')}
+      ${tabs.map(t=>`<button class="${t[0]===hrView?'on':''}" onclick="hrTab('${t[0]}')">${t[1]}${t[0]==='docs'&&pend?` <span class="pill warn" style="margin-left:3px">${pend}</span>`:''}</button>`).join('')}
     </div>
     <div>${
       hrView==='check'? hrCheckView() :
       hrView==='notice'? hrNoticeView() :
       hrView==='contract'? hrContractView() :
       hrView==='pay'? hrPayView() :
-      hrView==='resign'? hrResignView() : hrListHtml()}</div>`;
+      hrView==='docs'? hrDocsView() :
+      hrView==='resign'? hrDocsView() : hrListHtml()}</div>`;
 }
 let staffShowGone=false;
 function toggleGone(){ staffShowGone=!staffShowGone; renderStaff(); }
@@ -3971,6 +4276,18 @@ function myPageHtml(){
           <span class="tiny muted">${fmtDateFull(String(x.issuedAt).slice(0,10))} 교부됨</span></div>`).join('')
         : `<div class="tiny muted">아직 교부된 명세서가 없어요.</div>`}
       <div class="tiny muted" style="margin-top:8px">금액은 이 앱에 잠겨 있어 여기서는 안 보여요. 받으신 종이나 파일로 확인하세요.</div>
+    </div>
+
+    <h2 class="sec">📋 내 신청서</h2>
+    <div class="card" style="padding:13px 14px">
+      ${docReqsOf(u.id).length? docReqsOf(u.id).slice(0,8).map(r=>`<div class="spread" style="padding:5px 0;cursor:pointer" onclick="openDocReq('${r.id}')">
+          <div class="grow" style="min-width:0"><div class="tiny" style="font-weight:700">${esc(docTypeName(r.typeId))}</div>
+            <div class="tiny muted">${esc(r.from)}${r.to?' ~ '+esc(r.to):''} · ${fmtDateFull(String(r.at).slice(0,10))} 냄</div></div>
+          <span class="pill ${DOC_STATES[r.status]||'grey'}">${esc(r.status)}</span></div>`).join('')
+        : `<div class="tiny muted">아직 낸 신청서가 없어요.</div>`}
+      <button class="btn soft block" style="margin-top:10px" onclick="openDocForm()">＋ 신청서 내기</button>
+      <button class="btn soft block" style="margin-top:6px" onclick="openDocForms()">📁 양식 보관함 보기</button>
+      <div class="tiny muted" style="margin-top:8px">육아휴직·출산휴가·병가·가족돌봄·무급휴가 같은 걸 여기서 냅니다.</div>
     </div>
 
     <h2 class="sec">📄 사직서</h2>
