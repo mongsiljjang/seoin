@@ -4359,6 +4359,10 @@ function openMenu(){
     ${payUnlocked()?`<button class="btn soft block" style="margin-top:8px" onclick="payRelock(); closeModal(); toast('급여를 다시 잠갔어요')">지금 바로 잠그기</button>`:''}
     <div class="tiny muted" style="margin:8px 2px 0">열쇠는 앱에도 서버에도 저장하지 않습니다 — <b>잊으면 아무도 못 엽니다.</b> 최고관리자만 정할 수 있어요.</div>
     <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📱 기기 승인</div>
+    <div class="tiny muted" style="margin:0 2px 8px">직원 폰마다 한 번씩 승인해야 데이터가 내려갑니다. 승인 안 한 기기는 아무것도 못 봅니다.</div>
+    <button class="btn soft block" onclick="openDeviceClaims()">기기 승인 관리${pendingClaims.length?` <span class="pill pend">${pendingClaims.length}</span>`:''}</button>
+    <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🖥️ 공용 기기 출근 체크</div>
     <button class="btn soft block" onclick="closeModal(); enterKiosk()">이 기기를 ‘출근 체크 화면’으로 열기</button>
     <div class="tiny muted" style="margin:8px 2px 0">데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면, 직원이 <b>이름+개인 PIN</b>으로 출근/퇴근을 찍어요(개인폰 로그인 불필요). 주소 뒤에 <b>#kiosk</b>를 붙여 북마크하면 바로 열립니다. 나갈 땐 관리자 PIN.</div>
@@ -4537,71 +4541,294 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;'
 function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 
 /* ========================================================================
-   공유 동기화 (Firebase Firestore) — 설정 없으면 자동으로 '이 기기' 모드
+   공유 동기화 — 데이터를 "누가 보느냐"로 나눠 담는다
+   ------------------------------------------------------------------------
+   예전에는 전부를 문서 하나에 넣고 로그인한 사람에게 통째로 내려줬다.
+   화면에서 가려도 데이터는 이미 그 사람 폰에 가 있었다. 그래서 나눈다.
+
+     shared/main      재고·출퇴근·연월차·공지·거래처   승인된 직원 모두
+     roster/main      직원 명단 (PIN 은 여기 없다)      승인된 직원 모두
+     secrets/main     PIN·인사기록                      최고관리자·인사담당자
+     people/{직원}    계약서·급여·신청서·사직서         본인 + 관리자
+     claims/{기기}    이 기기가 누구 것인지             본인(신청) · 관리자(승인)
+
+   막는 것은 화면이 아니라 보안규칙이다(firestore.rules). 규칙은 사람을
+   request.auth.uid 로 알아보고, uid 가 누구인지는 claims 문서가 말해준다.
    ======================================================================== */
-let cloudDoc=null, cloudReady=false, applyingRemote=false, pushTimer=null;
+let fdb=null, cloudReady=false, applyingRemote=false, pushTimer=null;
+let myUid='', myClaim=null;
+let unsubs=[];                 // 열어둔 구독들 — 로그인 상태가 바뀌면 닫고 다시 연다
+let pinMap={};                 // 관리자만 채워진다. 직원 기기에서는 비어 있다
+let got={shared:false, roster:false, secrets:false, people:false};   // 받아본 적 있는 문서만 되쓴다
+let mine={shared:0, roster:0, secrets:0, people:0};                  // 내가 마지막으로 쓴 시각
+// 내가 방금 쓴 것보다 오래된 문서가 도착하면 버린다.
+// 안 그러면 계정을 만든 직후 그 전에 저장된 빈 명단이 도착해 계정을 지운다 — 실제로 그랬다.
+function stale(kind, d){ return !!(d && d.updatedAt && mine[kind] && d.updatedAt < mine[kind]); }
+let booting=false;             // 최초 이전 중에만 전부 쓸 수 있다
+let legacyDoc=null;            // 옛 단일 문서 — 옮기고 나면 읽기만 한다
+
+const WS = ()=> window.WORKSPACE_ID || 'clinic';
+const B_SHARED = ['version','hospName','inventory','invLogs','purchases','attendance','leaves',
+  'implants','implantLogs','implantCases','masters','notices','duties','vendors','hosp',
+  'docTypes','docForms','geo','members','prefs','payLock','lastBackupAt'];
+const B_PERSON = ['contracts','payslips','resignations','docReqs'];
+
 function cloudConfigured(){
   const c=window.FIREBASE_CONFIG;
   return !!(c && c.apiKey && c.projectId && !window.__noFB && typeof firebase!=='undefined');
 }
+function wsRef(){ return fdb.collection('hospapp').doc(WS()); }
+function refShared(){ return wsRef().collection('shared').doc('main'); }
+function refRoster(){ return wsRef().collection('roster').doc('main'); }
+function refSecrets(){ return wsRef().collection('secrets').doc('main'); }
+function refPeople(sid){ return wsRef().collection('people').doc(sid); }
+function refClaims(){ return wsRef().collection('claims'); }
+
 function updateSyncBadge(state){
   const b=$('#syncBadge'); if(!b) return;
   const map={
     local:['이 기기','rgba(255,255,255,.2)','#fff'],
     connecting:['연결 중…','rgba(255,255,255,.2)','#fff'],
+    waiting:['승인 대기','#fdeede','#7a2e0c'],
     online:['☁︎ 공유중','#e3f6ee','#0f9d6b'],
     offline:['⚠ 오프라인','#fdeede','#7a2e0c'],
   };
   const [t,bg,fg]=map[state]||map.local; b.textContent=t; b.style.background=bg; b.style.color=fg;
   b.dataset.state=state;
 }
+
+/* ---------- 나눠 담기 / 합치기 ---------- */
+function pickShared(){ const o={}; B_SHARED.forEach(k=>{ if(DB[k]!==undefined) o[k]=DB[k]; }); return o; }
+function pickRoster(){
+  // PIN 은 빼고 내보낸다. 명단에 PIN 이 섞여 나가면 나눈 의미가 없다.
+  return { staff:(DB.staff||[]).map(s=>{ const c=Object.assign({},s); delete c.pin; return c; }) };
+}
+function pickSecrets(){
+  const pins={}; (DB.staff||[]).forEach(s=>{ if(s.pin!=null && s.pin!=='') pins[s.id]=String(s.pin); });
+  return { pins, adminPin: DB.adminPin||'', hrLogs: DB.hrLogs||[] };
+}
+function pickPerson(sid){ const o={}; B_PERSON.forEach(k=>{ o[k]=(DB[k]||[]).filter(x=>x && x.staffId===sid); }); return o; }
+function personIds(){
+  const set=new Set((DB.staff||[]).map(s=>s.id));
+  B_PERSON.forEach(k=>(DB[k]||[]).forEach(x=>{ if(x && x.staffId) set.add(x.staffId); }));
+  return [...set];
+}
+function applyLocal(fn){            // 원격에서 받은 걸 넣는 동안은 되쏘지 않는다
+  applyingRemote=true; try{ fn(); } finally { applyingRemote=false; }
+  localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+  $('#hospName').textContent = DB.hospName || '우리병원 관리';
+  applyRole();
+  if(kioskOn && kSel===null) renderKiosk();
+  if(!$('#modalBg').classList.contains('open')) rerenderCurrent();
+}
+function mergeStaff(){              // 명단 + (관리자면) PIN
+  (DB.staff||[]).forEach(s=>{ if(pinMap[s.id]!==undefined) s.pin=pinMap[s.id]; });
+}
+
+/* ---------- 시작 ---------- */
 function cloudInit(){
   if(!cloudConfigured()){ updateSyncBadge('local'); return; }
   try{
     if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
-    const fdb=firebase.firestore();
-    cloudDoc=fdb.collection('hospapp').doc(window.WORKSPACE_ID||'clinic');
+    fdb=firebase.firestore();
+    legacyDoc=fdb.collection('hospapp').doc(WS());
     updateSyncBadge('connecting');
     firebase.auth().signInAnonymously().catch(()=>{});
-    firebase.auth().onAuthStateChanged(u=>{ if(u) cloudSubscribe(); });
+    firebase.auth().onAuthStateChanged(u=>{ if(u){ myUid=u.uid; watchClaim(); } });
   }catch(e){ updateSyncBadge('offline'); }
 }
-function cloudSubscribe(){
-  if(!cloudDoc) return;
-  cloudDoc.onSnapshot(snap=>{
-    cloudReady=true; updateSyncBadge('online');
-    const data=snap.data();
-    if(data && data.db){
-      let remote; try{ remote=JSON.parse(data.db); }catch(e){ return; }
-      if(!remote || !remote.version) return;
-      applyingRemote=true;
-      DB=remote; ensureSchema();
-      localStorage.setItem(STORE_KEY, JSON.stringify(DB));
-      applyingRemote=false;
-      $('#hospName').textContent = DB.hospName || '우리병원 관리';
-      applyRole();
-      if(kioskOn && kSel===null) renderKiosk();   // 키오스크 명단 실시간 갱신(입력 중이 아닐 때만)
-      if(!$('#modalBg').classList.contains('open')) rerenderCurrent();
+
+/* ---------- 이 기기가 누구 것인가 ---------- */
+function watchClaim(){
+  if(!myUid) return;
+  unsubs.push(refClaims().doc(myUid).onSnapshot(snap=>{
+    myClaim = snap.exists ? snap.data() : null;
+    if(myClaim && myClaim.approved && myClaim.staffId){
+      if(sessionId()!==myClaim.staffId) setSession(myClaim.staffId);
+      openData();
     }else{
-      cloudPush(true);  // 원격이 비어있으면 이 기기 데이터로 시작
+      closeData();
+      updateSyncBadge(myClaim ? 'waiting' : 'connecting');
+      // 아직 승인 전이라도 옛 데이터는 옮겨야 하니 최초 이전만 시도한다
+      migrateIfNeeded();
+      applyRole();
     }
-  }, err=>{ updateSyncBadge('offline'); });
+  }, ()=>updateSyncBadge('offline')));
+}
+function myRole(){ return (myClaim && myClaim.role) || ''; }
+function claimIsAdmin(){ return myRole()===ROLE_OWNER || myRole()===ROLE_HR; }
+
+/* ---------- 내가 볼 수 있는 것만 구독한다 ---------- */
+let dataOpen=false;
+function openData(){
+  if(dataOpen) return; dataOpen=true;
+  const sid=myClaim.staffId;
+
+  unsubs.push(refShared().onSnapshot(s=>{
+    cloudReady=true; updateSyncBadge('online');
+    const d=s.data(); if(!d) { migrateIfNeeded(); return; }
+    if(stale('shared',d)) return;
+    got.shared=true;
+    applyLocal(()=>{ B_SHARED.forEach(k=>{ if(d[k]!==undefined) DB[k]=d[k]; }); ensureSchema(); });
+  }, ()=>updateSyncBadge('offline')));
+
+  unsubs.push(refRoster().onSnapshot(s=>{
+    const d=s.data(); if(!d||!Array.isArray(d.staff)) return;
+    if(stale('roster',d)) return;
+    got.roster=true;
+    applyLocal(()=>{ DB.staff=d.staff; mergeStaff(); ensureSchema(); });
+  }, ()=>{}));
+
+  if(claimIsAdmin()){
+    watchPendingClaims();
+    unsubs.push(refSecrets().onSnapshot(s=>{
+      const d=s.data()||{}; if(stale('secrets',d)) return; got.secrets=true;
+      pinMap = d.pins || {};
+      applyLocal(()=>{ DB.adminPin=d.adminPin||''; DB.hrLogs=Array.isArray(d.hrLogs)?d.hrLogs:[]; mergeStaff(); });
+    }, ()=>{}));
+    unsubs.push(wsRef().collection('people').onSnapshot(qs=>{
+      got.people=true;
+      applyLocal(()=>{
+        B_PERSON.forEach(k=>DB[k]=[]);
+        qs.forEach(doc=>{ const d=doc.data()||{};
+          B_PERSON.forEach(k=>{ if(Array.isArray(d[k])) DB[k]=DB[k].concat(d[k]); }); });
+        ensureSchema();
+      });
+    }, ()=>{}));
+  }else{
+    // 직원 기기는 자기 문서 하나만 본다. 남의 급여는 아예 내려오지 않는다.
+    unsubs.push(refPeople(sid).onSnapshot(s=>{
+      const d=s.data()||{}; if(stale('people',d)) return; got.people=true;
+      applyLocal(()=>{ B_PERSON.forEach(k=>{ DB[k]=Array.isArray(d[k])?d[k]:[]; }); ensureSchema(); });
+    }, ()=>{}));
+  }
+}
+/* ---------- 기기 승인 (관리자) ---------- */
+let pendingClaims=[];
+function watchPendingClaims(){
+  unsubs.push(refClaims().onSnapshot(qs=>{
+    pendingClaims=[];
+    qs.forEach(d=>{ const c=d.data()||{}; if(!c.approved) pendingClaims.push(Object.assign({uid:d.id}, c)); });
+    pendingClaims.sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+    const dot=$('#claimDot'); if(dot) dot.style.display = pendingClaims.length? '' : 'none';
+    if($('#claimList')) renderClaimList();
+  }, ()=>{}));
+}
+function openDeviceClaims(){
+  modal(`<h3>📱 기기 승인</h3>
+    <div class="tiny muted" style="margin:0 2px 10px">직원이 자기 폰으로 처음 들어오면 여기에 뜹니다. <b>본인이 맞는지 확인하고</b> 승인하세요. 승인한 기기만 데이터를 받습니다.</div>
+    <div id="claimList"></div>
+    <div class="tiny muted" style="margin:12px 2px 0">기기를 잃어버렸으면 아래 <b>쓰던 기기</b>에서 그 기기를 지우세요. 지우면 그 폰은 바로 못 들어옵니다.</div>
+    <div id="claimActive" style="margin-top:8px"></div>`, openMenu);
+  renderClaimList(); renderActiveClaims();
+}
+function renderClaimList(){
+  const el=$('#claimList'); if(!el) return;
+  if(!pendingClaims.length){ el.innerHTML=`<div class="card" style="padding:14px;text-align:center"><span class="tiny muted">기다리는 기기가 없어요</span></div>`; return; }
+  el.innerHTML = pendingClaims.map(c=>{
+    const s=(DB.staff||[]).find(x=>normPhone(x.phone)===normPhone(c.phone||'') && x.active!==false);
+    const who = c.name || (s?s.name:'') || '(명단에 없는 번호)';
+    return `<div class="card" style="padding:12px 13px;margin-bottom:8px">
+      <div class="row" style="justify-content:space-between;gap:8px">
+        <div><b>${esc(who)}</b> <span class="tiny muted">${esc(c.phone||'')}</span></div>
+        <span class="pill pend">대기</span></div>
+      <div class="tiny muted" style="margin-top:4px">${esc(String(c.device||'').slice(0,60))}</div>
+      <div class="two" style="gap:8px;margin-top:9px">
+        <button class="btn ok xs" onclick="approveClaim('${c.uid}')">승인</button>
+        <button class="btn danger xs" onclick="rejectClaim('${c.uid}')">거절</button>
+      </div></div>`;
+  }).join('');
+}
+function renderActiveClaims(){
+  const el=$('#claimActive'); if(!el||!fdb) return;
+  refClaims().get().then(qs=>{
+    const rows=[]; qs.forEach(d=>{ const c=d.data()||{}; if(c.approved) rows.push(Object.assign({uid:d.id},c)); });
+    if(!rows.length){ el.innerHTML=''; return; }
+    el.innerHTML = `<div class="tiny muted" style="font-weight:800;margin:0 2px 6px">쓰던 기기</div>` +
+      rows.map(c=>`<div class="row" style="justify-content:space-between;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line)">
+        <span class="tiny"><b>${esc(c.name||'')}</b> ${esc(c.phone||'')}${c.uid===myUid?' · <b>지금 이 기기</b>':''}</span>
+        ${c.uid===myUid?'':`<button class="btn danger xs" onclick="rejectClaim('${c.uid}')">지우기</button>`}
+      </div>`).join('');
+  }).catch(()=>{});
+}
+async function approveClaim(uid){
+  const c=pendingClaims.find(x=>x.uid===uid); if(!c) return;
+  const st=(DB.staff||[]).find(x=>normPhone(x.phone)===normPhone(c.phone||'') && x.active!==false);
+  if(!st){ toast('그 번호로 등록된 직원이 없어요'); return; }
+  if(c.pinHash){                                  // 직원이 넣은 PIN 이 맞는지 여기서 대조한다
+    const h=await sha256Hex(String(st.pin||'')+'|'+normPhone(st.phone));
+    if(h!==c.pinHash){ toast('PIN이 맞지 않아요 — 승인하지 않았어요'); return; }
+  }
+  try{
+    await refClaims().doc(uid).set({ staffId:st.id, name:st.name, phone:normPhone(st.phone),
+      role:st.role||ROLE_STAFF, approved:true, approvedAt:now(), approvedBy:(currentUser()||{}).name||'' }, {merge:true});
+    toast(`${st.name}님 기기를 승인했어요`);
+  }catch(e){ toast('승인하지 못했어요'); }
+}
+function rejectClaim(uid){
+  if(uid===myUid){ toast('지금 쓰는 기기는 지울 수 없어요'); return; }
+  if(!confirm('이 기기를 지울까요?\n그 기기는 바로 들어올 수 없게 됩니다.')) return;
+  refClaims().doc(uid).delete().then(()=>{ toast('지웠어요'); renderActiveClaims(); }).catch(()=>toast('지우지 못했어요'));
+}
+
+function closeData(){
+  if(!dataOpen) return; dataOpen=false;
+  // claim 구독(첫 개)은 남기고 데이터 구독만 닫는다
+  const keep=unsubs.slice(0,1); unsubs.slice(1).forEach(f=>{ try{f();}catch(e){} }); unsubs=keep;
+  cloudReady=false; pinMap={}; pendingClaims=[];
+  got={shared:false, roster:false, secrets:false, people:false};
+}
+
+/* ---------- 옛 단일 문서 → 새 구조로 한 번만 옮긴다 ---------- */
+let migrating=false;
+function migrateIfNeeded(){
+  if(migrating || !legacyDoc) return;
+  migrating=true;
+  refShared().get().then(sh=>{
+    if(sh.exists){ migrating=false; return; }             // 이미 옮겼다
+    booting=true;
+    return legacyDoc.get().then(old=>{
+      const raw=old.exists && old.data() && old.data().db;
+      if(raw){ try{ const o=JSON.parse(raw); if(o && o.version){ applyLocal(()=>{ DB=o; ensureSchema(); }); } }catch(e){} }
+      return writeAll();
+    }).then(()=>{ booting=false; migrating=false; });
+  }).catch(()=>{ migrating=false; });
+}
+
+/* ---------- 내보내기 ---------- */
+// 한 번도 받아본 적 없는 문서는 덮어쓰지 않는다.
+// 아직 못 받은 기기가 저장을 하면 자기 빈 데이터로 남의 것을 지워버린다 — 실제로 명단이 날아갔다.
+function writeAll(){
+  if(!fdb) return Promise.resolve();
+  const jobs=[], t=Date.now(), stamp={ updatedAt: t };
+  const admin = booting || claimIsAdmin();
+
+  if(booting || got.shared){ mine.shared=t; jobs.push(refShared().set(Object.assign(pickShared(), stamp))); }
+  if(booting || (admin && got.roster)){  mine.roster=t;  jobs.push(refRoster().set(Object.assign(pickRoster(), stamp))); }
+  if(booting || (admin && got.secrets)){ mine.secrets=t; jobs.push(refSecrets().set(Object.assign(pickSecrets(), stamp))); }
+
+  if(admin){
+    if(booting || got.people){ mine.people=t; personIds().forEach(sid=>
+      jobs.push(refPeople(sid).set(Object.assign(pickPerson(sid), stamp)))); }
+  }else if(myClaim && myClaim.staffId && got.people){
+    mine.people=t;
+    jobs.push(refPeople(myClaim.staffId).set(Object.assign(pickPerson(myClaim.staffId), stamp)));
+  }
+  if(!jobs.length) return Promise.resolve();
+  return Promise.all(jobs).catch(()=>updateSyncBadge('offline'));
 }
 function cloudPushNow(){
-  if(!cloudDoc) return;
+  if(!fdb || applyingRemote) return;
   clearTimeout(pushTimer);
-  try{ cloudDoc.set({ db: JSON.stringify(DB), updatedAt: Date.now() }); }
-  catch(e){ updateSyncBadge('offline'); }
+  writeAll();
 }
 function cloudPush(force){
-  if(applyingRemote || !cloudDoc) return;
+  if(applyingRemote || !fdb) return;
   if(!cloudReady && !force) return;
   clearTimeout(pushTimer);
   pushTimer=setTimeout(()=>{
-    try{
-      if(DB.invLogs.length>800) DB.invLogs=DB.invLogs.slice(0,800);
-      cloudDoc.set({ db: JSON.stringify(DB), updatedAt: Date.now() });
-    }catch(e){ updateSyncBadge('offline'); }
+    if(DB.invLogs && DB.invLogs.length>800) DB.invLogs=DB.invLogs.slice(0,800);
+    writeAll();
   }, 450);
 }
 
@@ -4628,7 +4855,12 @@ let gateState=null;
 function applyRole(){
   ensureSchema();
   const u=currentUser();
-  if(!u){ document.body.setAttribute('data-role','staff'); setGate(hasAdmin()?'login':'setup'); return; }
+  if(!u){
+    document.body.setAttribute('data-role','staff');
+    // 승인을 기다리는 중이면 로그인 화면으로 되돌리지 않는다
+    if(myClaim && !myClaim.approved){ setGate('waiting'); return; }
+    setGate(hasAdmin()?'login':'setup'); return;
+  }
   const owner = u.role===ROLE_OWNER, admin = owner || u.role===ROLE_HR;
   document.body.setAttribute('data-role', owner?'owner':(admin?'hr':'staff'));
   const rt=$('#roleTag'); if(rt){ rt.textContent = owner?'👑 최고관리자':(admin?'📋 인사담당자':'👤 직원');
@@ -4643,7 +4875,7 @@ function setGate(state){
   gateState=state;
   const g=$('#gate'), b=$('#gateBody');
   if(!state){ g.classList.remove('show'); document.body.style.overflow=''; return; }
-  b.innerHTML = state==='setup'? gateSetupHtml() : gateLoginHtml();
+  b.innerHTML = state==='setup'? gateSetupHtml() : state==='waiting'? gateWaitHtml() : gateLoginHtml();
   g.classList.add('show'); document.body.style.overflow='hidden';
 }
 function gateLoginHtml(){
@@ -4657,6 +4889,19 @@ function gateLoginHtml(){
     </div>
     <div class="tiny muted" style="margin-top:16px">번호·PIN을 모르면 관리자에게 문의하세요.</div>`;
 }
+function gateWaitHtml(){
+  const c=myClaim||{};
+  return `<div class="gate-ic">⏳</div>
+    <div class="gate-h">승인을 기다리는 중</div>
+    <div class="gate-p">이 기기를 쓰려면 관리자 승인이 필요해요. 관리자가 승인하면 자동으로 열립니다.</div>
+    <div class="gate-card">
+      <div class="tiny muted" style="text-align:left;line-height:1.7">
+        신청한 번호 <b>${esc(c.phone||'')}</b><br>
+        관리자에게 <b>승인해 달라</b>고 말씀해 주세요. 관리자는 <b>설정 → 기기 승인</b>에서 처리합니다.
+      </div>
+    </div>
+    <button class="btn soft block" style="margin-top:10px" onclick="cancelClaim()">다른 번호로 다시 하기</button>`;
+}
 function gateSetupHtml(){
   return `<div class="gate-ic">👑</div>
     <div class="gate-h">최초 관리자 등록</div>
@@ -4668,12 +4913,47 @@ function gateSetupHtml(){
       <button class="btn block" onclick="doSetupAdmin()">관리자 만들기</button>
     </div>`;
 }
-function doLogin(){
+async function sha256Hex(str){
+  const b=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+// 이 기기가 누구 것인지 문서로 못 박는다. 관리자는 스스로 열고, 직원은 승인을 받는다.
+function claimDevice(u, approved){
+  if(!fdb || !myUid) return Promise.resolve();
+  return refClaims().doc(myUid).set({
+    staffId:u.id, name:u.name, phone:normPhone(u.phone), role:u.role||ROLE_STAFF,
+    approved:!!approved, at:now(), device:(navigator.userAgent||'').slice(0,120)
+  }).catch(()=>{});
+}
+async function doLogin(){
   const ph=normPhone($('#lgPhone').value), pin=($('#lgPin').value||'').trim();
   if(!ph||!pin){ toast('전화번호와 PIN을 입력하세요'); return; }
-  const u=DB.staff.find(s=>normPhone(s.phone)===ph && String(s.pin||'')===pin && s.active!==false);
-  if(!u){ toast('전화번호 또는 PIN이 맞지 않아요'); return; }
-  setSession(u.id); applyRole(); go('home'); toast(`${u.name}님 환영합니다`);
+
+  // 이 기기가 명단을 볼 수 있으면(관리자이거나 아직 규칙 전이면) 바로 확인한다
+  const u=(DB.staff||[]).find(s=>normPhone(s.phone)===ph && String(s.pin||'')===pin && s.active!==false);
+  if(u){
+    const admin = u.role===ROLE_OWNER || u.role===ROLE_HR;
+    setSession(u.id);
+    await claimDevice(u, admin);              // 관리자 기기는 스스로 열린다
+    if(!admin && fdb){ setGate('waiting'); toast('사용 요청을 보냈어요 — 관리자 승인을 기다려주세요'); return; }
+    applyRole(); go('home'); toast(`${u.name}님 환영합니다`);
+    return;
+  }
+  if(!fdb){ toast('전화번호 또는 PIN이 맞지 않아요'); return; }
+
+  // 명단이 안 보이는 기기 — 맞는지 여기서 알 수 없으니 신청만 남기고 관리자가 대조한다
+  if(!myUid){ toast('연결 중이에요. 잠시 뒤 다시 눌러주세요'); return; }
+  const h=await sha256Hex(pin+'|'+ph);
+  try{
+    await refClaims().doc(myUid).set({ phone:ph, pinHash:h, approved:false, at:now(),
+      device:(navigator.userAgent||'').slice(0,120) });
+    setGate('waiting'); toast('사용 요청을 보냈어요 — 관리자 승인을 기다려주세요');
+  }catch(e){ toast('요청을 보내지 못했어요. 잠시 뒤 다시 해주세요'); }
+}
+function cancelClaim(){
+  if(!fdb||!myUid) return;
+  refClaims().doc(myUid).delete().catch(()=>{});
+  setSession(''); myClaim=null; gateState=null; setGate('login');
 }
 function doSetupAdmin(){
   const name=($('#suName').value||'').trim(), ph=normPhone($('#suPhone').value), pin=($('#suPin').value||'').trim();
@@ -4681,7 +4961,9 @@ function doSetupAdmin(){
   if(!/^\d{4,8}$/.test(pin)){ toast('PIN은 숫자 4~8자리로 정하세요'); return; }
   if(DB.staff.some(s=>normPhone(s.phone)===ph)){ toast('이미 등록된 번호예요'); return; }
   const u={id:uid(), name, dept:'', position:'관리자', phone:ph, pin, role:'관리자', active:true, annualTotal:15, joinDate:'', createdAt:now()};
-  DB.staff.push(u); setSession(u.id); saveDB(); applyRole(); go('home'); toast('관리자 계정을 만들었어요');
+  DB.staff.push(u); setSession(u.id); saveDB();
+  claimDevice(u, true).then(()=>{ booting=true; return writeAll(); }).then(()=>{ booting=false; });
+  applyRole(); go('home'); toast('관리자 계정을 만들었어요');
 }
 function logout(){ if(!confirm('로그아웃할까요?')) return; setSession(''); closeModal(); applyRole(); toast('로그아웃되었습니다'); }
 function changeMyPin(){
