@@ -2,6 +2,8 @@
 
 Claude Code 판(`../SKILL.md`)과 **같은 원리, 다른 작동 방식**이다.
 
+> ⚠️ **이 폴더의 파일은 Claude 스킬이 아니다.** `SKILL.md` 가 없어서 Claude 의 스킬 업로드 창에 넣으면 "유효하지 않은 스킬" 로 거부된다. 여기 것은 ChatGPT 에 **붙여넣고 업로드하는** 재료다. Claude 계정 스킬로 올릴 것은 `dist/baton-skill.zip` 이다(저장소 루트에서 `scripts/package.sh baton`).
+
 ## 왜 그대로 못 옮기나
 
 Claude Code 판의 심장은 2단계 **실측**이다. 에이전트가 직접 `git status` 를 돌리고 검증을 다시 실행해, 기억이 아니라 실제 상태로 핸드오프를 쓴다.
