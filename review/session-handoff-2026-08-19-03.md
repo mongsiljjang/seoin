@@ -24,10 +24,11 @@
 
 ## 3. 산출물
 
-- `.claude/skills/baton/SKILL.md` — 4단계 절차(읽고→맞춰보고→남기고→넘긴다)와 아홉 가지 질문
-- `.claude/skills/baton/references/PRINCIPLES.md` — 원리 8개. 각 규칙이 어떤 실패에서 나왔는지
-- `.claude/skills/baton/references/TEMPLATE.md` — 관습 없는 프로젝트용 서식 + 자주 나오는 실수 표
-- `.claude/skills/baton/scripts/repo_snapshot.{sh,ps1}` — `-02` 에서 고친 판 그대로
+- **원본: https://github.com/mongsiljjang/skills** (`baton/`, 커밋 `1364476`) · 사본: `seoin/.claude/skills/baton/`
+- `SKILL.md` — 4단계 절차(읽고→맞춰보고→남기고→넘긴다)와 아홉 가지 질문
+- `references/PRINCIPLES.md` — 원리 8개. 각 규칙이 어떤 실패에서 나왔는지
+- `references/TEMPLATE.md` — 관습 없는 프로젝트용 서식 + 자주 나오는 실수 표
+- `scripts/repo_snapshot.{sh,ps1}` — `-02` 에서 고친 판 그대로
 
 ## 4. 검증 (실행 결과)
 
@@ -48,6 +49,7 @@
 | `mongsiljjang/seoin` | `claude/mediops-auth-migration-610ec1` (작업) | `d1d3982` | clean · pushed · 원격 일치 |
 | `mongsiljjang/seoin` | `claude/hospital-inventory-hr-app-fw7a9g` (백업본) | `042caae` | **미반영** |
 | `mongsiljjang/mediops-pilot` | `main` (정식·배포) | `d26faab` | **미반영** · clean |
+| `mongsiljjang/skills` | `main` | `1364476` | 세션 중 신설 · `baton` 원본 · pushed |
 
 **두 저장소 `index.html` 이 여전히 갈라져 있다** — `fcae510…`(작업) vs `b081577…`(정식). `-02` 와 같은 상태이고, 원인도 같다: **사고가 아니라 컨펌 대기.** 컨펌 나는 즉시 양쪽에 밀어 맞춰야 한다.
 
@@ -57,16 +59,18 @@
 
 - **[막고 있음 · 사용자] 실제 백업을 아직 안 받았다.** 로그인 교체 1단계의 본체. 앱 → 설정 → 💾 전체 백업(JSON) → 앱 밖 안전한 곳. **파일에 직원 PIN이 평문으로 들어 있으니 공용 PC 다운로드 폴더는 안 된다**
 - **[막고 있음 · 사용자] 백업 보강을 배포본에 반영할지 컨펌 안 남.** 데이터 구조는 안 건드리고 백업·복구 동작만 바뀐다
-- **[막고 있음 · 사용자] `mongsiljjang/skills` 저장소가 없다.** 빈 저장소만 만들어주면 `baton` 원본을 옮기고 seoin 은 사본으로 둔다. 세션 권한으로는 저장소 생성이 안 된다
+- ~~[막고 있음] `mongsiljjang/skills` 저장소가 없다~~ → **세션 중에 해결됐다.** 사용자가 만들었고 `baton` 원본을 올렸다(`1364476`). seoin 쪽은 사본. **고칠 때는 `mongsiljjang/skills` 가 원본이다** — 프로젝트 안 사본을 고치면 다음에 가져다 쓸 때 사라진다
+- **`wrap` 을 skills 저장소로 옮길지 안 정했다.** 오늘 결함 5건을 고쳐뒀지만(`-02` 1장) 지금은 seoin 안에만 있다
 - **`baton` 은 코드 프로젝트에서만 검증됐다.** 4장 참고. 글·디자인 프로젝트에서 처음 쓸 때 어색한 곳이 나오면 그게 고칠 지점이다
 - **`wrap` 과 `baton` 이 둘 다 살아 있다.** 지금은 의도한 상태(비교용)지만, 방치하면 다음 세션이 뭘 써야 할지 헷갈린다. `baton` 을 몇 번 써보고 하나로 정리할 것
+- **`baton` 이 두 곳에 있다** — `mongsiljjang/skills`(원본)와 `seoin/.claude/skills/`(사본). 지금은 내용이 같지만, 한쪽만 고치면 갈린다
 - **`-02` 6장의 위험은 전부 그대로 살아 있다** — 직원 PIN 평문(2~6단계가 해결) · 급여 열쇠 분실 시 복구 불가 · 퇴사자/신입 동명이인 · Storage 카드 보류 · 연차 차감이 병가까지 합산 · 사용자 실사용 확인 미완 · deslop-ko 잔여 3건 · 앱 안 외부 링크 2개 미확인
 
 ## 7. 다음 작업 (우선순위)
 
 1. **로그인 교체 1단계 마무리** — 사용자가 백업 받고 확인 → 배포 반영 컨펌 → `mediops-pilot@main` 과 `seoin@claude/hospital-inventory-hr-app-fw7a9g` 에 푸시해 `index.html` 다시 일치시키기
 2. **2단계** — `claims` 컬렉션과 기기 승인 화면만 올린다. 기존 동작은 그대로 두고 병행 (`docs/AUTH_MIGRATION.md`)
-3. `mongsiljjang/skills` 생기면 `baton` 원본 이전
+3. `wrap` 도 `mongsiljjang/skills` 로 옮길지 정하기 (`baton` 은 이미 옮김)
 4. 3~8단계 — 승인 확인 → 읽기 이전 → 쓰기 이전 → 보안규칙(**에뮬레이터나 테스트 workspace 로 먼저**) → 옛 문서 정리 → Storage
 5. `-02` 7장의 나머지 (실사용 피드백 → 재료 3분류 → 거래대장 → 사용 대조표 → 힐링 분실 통계)
 
