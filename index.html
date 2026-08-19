@@ -184,6 +184,7 @@
     max-height:92vh; overflow:auto; animation:slideup .22s cubic-bezier(.2,.8,.2,1)}
   @keyframes slideup{from{transform:translateY(100%)}to{transform:none}}
   .modal h3{margin:0 0 14px; font-size:17px; font-weight:900}
+  .lawcite{display:inline-block; margin-top:4px; font-size:11.5px; font-weight:700; color:var(--sub); opacity:.9}
   .dchip{display:inline-flex; align-items:center; gap:5px; background:#eef4f5; border:1px solid var(--line);
     border-radius:999px; padding:5px 11px 5px 8px; font-size:12.5px; font-weight:700; color:var(--sub); cursor:pointer}
   .dchip input{width:auto; margin:0; flex:none}
@@ -480,6 +481,7 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
   if(!Array.isArray(DB.duties)) DB.duties=[];        // 담당 분야 — 병원이 직접 만든다
   if(!Array.isArray(DB.vendors)) DB.vendors=[];      // 거래처 · 영업사원 연락처
+  if(!DB.hosp || typeof DB.hosp!=='object') DB.hosp={headcount:null};   // 상시 근로자 수
   if(DB.payLock && typeof DB.payLock!=='object') DB.payLock=null;
   if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
   if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
@@ -538,6 +540,22 @@ function leaveUsed(staffId, type, year){
     .reduce((s,l)=>s+(+l.days||0),0);
 }
 /* 입사일 기준 연차 자동 계산: 1년차 11 · 2~3년차 15 · 4년차부터 16(2년마다 +1, 최대 25) */
+/* 상시 근로자 수 — 이 숫자 하나로 적용되는 법이 갈린다.
+   4명 이하면 연차와 연장·야간·휴일 가산수당이 법정 의무가 아니다.
+   근로계약서·급여명세서·주휴수당·최저임금·퇴직금은 사람 수와 무관하게 적용된다. */
+function staffCount(){
+  const n=DB.hosp && +DB.hosp.headcount;
+  return n>0? n : DB.staff.filter(s=>s.active!==false).length;
+}
+function isSmallBiz(){ return staffCount()<5; }
+// 5인 미만이면 연차가 법으로 정해진 게 아니라 병원이 정한 휴가다
+function leaveWord(){ return isSmallBiz()? '휴가' : '연차'; }
+function leaveNote(){
+  return isSmallBiz()
+    ? `직원이 <b>${staffCount()}명</b>이라 연차는 법으로 정해진 게 아니에요. 아래 날수는 <b>병원이 정한 휴가</b>이고, 한 번 정해 직원과 약속했으면 지켜야 합니다.<br><span class="lawcite">근거 · 근로기준법 제60조는 상시 5명 이상인 곳에만 적용</span>`
+    : `직원이 <b>${staffCount()}명</b>이라 연차가 법으로 정해져 있어요. 아래 날수는 입사일 기준 법정 일수입니다.<br><span class="lawcite">근거 · 근로기준법 제60조</span>`;
+}
+
 function annualByService(joinDate, ref){
   if(!joinDate) return null;
   const j=new Date(joinDate+'T00:00:00'); if(isNaN(j)) return null;
@@ -2353,7 +2371,8 @@ function renderLeaveStatus(){
   const box=$('#leaveStatus');
   if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👤','직원을 먼저 등록하세요')}</div>`; return; }
   const y=new Date().getFullYear();
-  box.innerHTML = `<h2 class="sec">${y}년 연차 잔여</h2>` + DB.staff.map(s=>{
+  box.innerHTML = `<div class="hint" style="margin-bottom:12px">${leaveNote()}</div>
+    <h2 class="sec">${y}년 ${leaveWord()} 잔여</h2>` + DB.staff.filter(s=>s.active!==false).map(s=>{
     const r=annualRemain(s); const ratio = r.total? Math.min(100,Math.round(r.used/r.total*100)):0;
     return `<div class="card" style="padding:13px 14px">
       <div class="spread"><div class="row" style="gap:10px"><div class="avatar">${esc(initials(s.name))}</div>
@@ -2459,7 +2478,7 @@ function openStaffForm(edit){
     ${(!s || isOwner())? `<label class="field"><span>${s?'PIN 재설정 (비우면 기존 유지)':'개인 PIN * (숫자 4자리 이상)'}</span><input id="sPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>` : ''}
     <div class="two">
       <label class="field"><span>입사일</span><input id="sJoin" type="date" value="${s?esc(s.joinDate||''):''}" onchange="staffAnnualSync()"></label>
-      <label class="field"><span>연간 연차(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?annualTotalOf(s):15}" oninput="staffAnnualManualEdit()"></label>
+      <label class="field"><span>연간 ${leaveWord()}(일)</span><input id="sAnnual" type="number" inputmode="numeric" value="${s?annualTotalOf(s):15}" oninput="staffAnnualManualEdit()"></label>
     </div>
     <label class="field" style="display:flex;align-items:center;gap:8px;margin:-4px 2px 8px">
       <input type="checkbox" id="sAnnualAuto" style="width:auto;margin:0" ${(!s||s.annualAuto!==false)?'checked':''} onchange="staffAnnualSync()">
@@ -2484,7 +2503,7 @@ function openStaffForm(edit){
       <button class="btn block" onclick="saveStaff('${s?s.id:''}')">${s?'저장':'추가'}</button>
       ${s&&isOwner()?`<button class="btn danger" onclick="delStaff('${s.id}')">삭제</button>`:''}
     </div>
-    <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 같은 번호를 여럿이 써도 되지만 <b>PIN은 서로 달라야</b> 합니다. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 하세요 — 근로기준법 §42 는 서류를 퇴직일부터 3년 보존하라고 합니다.</div>`,
+    <div class="tiny muted" style="margin-top:10px">직원은 <b>전화번호 + 개인 PIN</b>으로 로그인해요. 같은 번호를 여럿이 써도 되지만 <b>PIN은 서로 달라야</b> 합니다. 퇴사자는 삭제보다 <b>퇴사 처리</b>를 하세요 — <b>근로기준법 제42조</b>는 근로계약 서류를 퇴직일부터 3년 보관하라고 합니다.</div>`,
     isHR()? (()=>{ hrTab('list'); closeModal(); }) : null);
   staffAnnualSync();
 }
@@ -2835,7 +2854,7 @@ const CONTRACT_FIELDS=[
   ['payParts','그 밖의 임금 구성항목','text'], ['payCalc','계산 방법','text'],
   ['payDay','임금 지급일','text'], ['payMethod','지급 방법','sel:계좌이체|현금'],
   ['workHours','소정근로시간','text'], ['workDays','근무일','text'],
-  ['restDay','주휴일','text'], ['annual','연차유급휴가','text'],
+  ['restDay','주휴일 (주에 하루 유급으로 쉬는 날)','text'], ['annual','휴가','text'],
 ];
 function contractOf(sid){ return (DB.contracts||[]).filter(c=>c.staffId===sid).sort((a,b)=>String(b.at).localeCompare(String(a.at)))[0]; }
 function openContract(sid){
@@ -2852,7 +2871,11 @@ function openContract(sid){
       return `<label class="field"><span>${label}</span><input id="ct_${k}" value="${esc(v)}"></label>`;
     };
     modal(`<h3>📝 근로계약서 · ${esc(s.name)}</h3>
-      <div class="hint">근로기준법 §17 — <b>임금·소정근로시간·주휴일·연차</b>를 적은 서면을 직원에게 건네야 합니다. 여기 적고 <b>인쇄해서 한 장 드리면</b> 교부가 됩니다.</div>
+      <div class="hint"><b>임금·근무시간·쉬는 날·휴가</b>를 적은 종이를 직원에게 한 장 드려야 합니다. 여기 채우고 <b>인쇄해서 건네시면</b> 됩니다.<br>
+        <span class="lawcite">근거 · 근로기준법 제17조 (근로조건의 명시)</span></div>
+      <div class="tiny muted" style="margin:8px 2px 12px">${isSmallBiz()
+        ? '직원이 <b>'+staffCount()+'명</b>이라 연차는 법으로 정해진 게 아니에요. <b>휴가</b> 칸에는 병원이 주기로 한 내용을 그대로 적으시면 됩니다 — 적어서 드린 건 지켜야 합니다.'
+        : '직원이 <b>'+staffCount()+'명</b>이라 연차가 법으로 정해져 있어요. <b>휴가</b> 칸에 "근로기준법 제60조에 따름"이라고 적으셔도 됩니다.'}</div>
       ${c?`<div class="tiny" style="margin:8px 2px 12px;font-weight:800;color:${c.agreedAt?'var(--ok)':'var(--warn)'}">
         ${c.agreedAt? `✓ ${fmtDateFull(String(c.agreedAt).slice(0,10))} 직원 확인함` : '⏳ 아직 직원 확인 전'}</div>`:''}
       ${CONTRACT_FIELDS.map(x=>f(x[0],x[1],x[2])).join('')}
@@ -2869,6 +2892,9 @@ function saveContract(sid){
     const d={}; CONTRACT_FIELDS.forEach(x=>{ const el=$('#ct_'+x[0]); if(el) d[x[0]]=el.value; });
     const nt=$('#ct_note'); d.note=nt?nt.value:'';
     if(!d.payAmount){ toast('기본급을 적어주세요'); return; }
+    // 꼭 적어야 하는 칸이 비면 알려준다. 막지는 않는다 — 나중에 채울 수도 있다.
+    const miss=CONTRACT_MUST.filter(f=>!String(d[f[0]]||'').trim()).map(f=>f[1]);
+    if(miss.length && !confirm(`아직 안 적은 칸이 있어요\n\n${miss.join(' · ')}\n\n이 칸들은 근로계약서에 꼭 들어가야 합니다(근로기준법 제17조).\n그래도 지금 저장할까요?`)) return;
     if(!Array.isArray(DB.contracts)) DB.contracts=[];
     const enc=await payEnc(key,d), u=currentUser();
     const old=contractOf(sid);
@@ -2919,6 +2945,8 @@ function printContract(sid){
   withPayKey(async key=>{
     const s=staffById(sid), c=contractOf(sid); if(!s||!c) return;
     const d=(await payDec(key,c.enc))||{};
+    const miss=CONTRACT_MUST.filter(f=>!String(d[f[0]]||'').trim()).map(f=>f[1]);
+    if(miss.length && !confirm(`빈칸이 있는 채로 인쇄됩니다\n\n${miss.join(' · ')}\n\n이대로 직원에게 드리면 근로계약서 요건을 못 채웁니다.\n그래도 인쇄할까요?`)) return;
     const won0=v=>v?(+v||0).toLocaleString('ko-KR')+'원':'';
     const tr=(k,v)=>`<tr><th>${k}</th><td>${esc(v||'')}</td></tr>`;
     printDoc(`근로계약서_${s.name}`, `
@@ -2945,7 +2973,8 @@ function printContract(sid){
 function hrContractView(){
   const all=activeStaff();
   const done=all.filter(s=>{const c=contractOf(s.id);return c&&c.agreedAt;}).length;
-  return `<div class="hint">근로계약서를 안 쓰거나 <b>안 건네면</b> 근로기준법 §114 로 500만원 이하 벌금입니다. 확인을 받고 인쇄해서 한 장 드리세요.</div>
+  return `<div class="hint">근로계약서는 <b>써서 직원에게 건네야</b> 합니다. 써놓고 안 건네도 위반이라 <b>500만원 이하 벌금</b>을 물 수 있어요(과태료가 아니라 형사처벌입니다).<br>
+    <span class="lawcite">근거 · 근로기준법 제17조 · 제114조</span></div>
     <div class="spread" style="margin:12px 2px 10px">
       <span class="tiny muted">확인 완료 <b>${done}/${all.length}명</b></span>
       ${DB.payLock?'':'<span class="pill warn">급여 열쇠 먼저 정하세요</span>'}
@@ -3217,7 +3246,8 @@ function payPreview(){
 
       ${missing.length? box('danger','재직 중인데 이 파일에 없는 사람',
         `<div class="tiny">${missing.map(x=>esc(staffLabel(x.id))).join(', ')} — <b>${missing.length}명</b><br>
-         근로기준법 §48② 는 임금을 줄 때마다 명세서를 교부하라고 합니다. 빠진 게 맞는지 확인하세요.</div>`):''}
+         급여를 줄 때마다 명세서를 한 장씩 드려야 합니다. 빠진 게 맞는지 확인하세요.<br>
+         <span class="lawcite">근거 · 근로기준법 제48조제2항</span></div>`):''}
 
       ${swaps.length? box('danger','⚠️ 두 사람이 뒤바뀐 것 같아요',
         swaps.map(w=>`<div class="tiny" style="padding:2px 0"><b>${esc(w.me)}</b> 님 금액이 <b>${esc(w.other)}</b> 님의 ${esc(w.ym)} 금액과 똑같아요</div>`).join('')
@@ -3225,7 +3255,7 @@ function payPreview(){
 
       ${offBase.length? box('warn','근로계약서의 기본급과 다른 사람',
         offBase.map(o=>`<div class="tiny" style="padding:2px 0">${esc(o.name)} · 계약서 대비 <b>${o.pct>0?'+':''}${o.pct}%</b></div>`).join('')
-        +`<div class="tiny muted" style="margin-top:6px">줄이 잘못 붙었거나, 급여를 올려주고 <b>계약서를 안 고쳤을 때</b> 나옵니다. 임금이 바뀌면 §17 에 따라 계약서를 다시 써서 교부해야 해요.</div>`):''}
+        +`<div class="tiny muted" style="margin-top:6px">줄이 잘못 붙었거나, 급여를 올려주고 <b>계약서를 안 고쳤을 때</b> 나옵니다. 임금이 바뀌면 계약서를 다시 써서 한 장 드려야 해요.<br><span class="lawcite">근거 · 근로기준법 제17조</span></div>`):''}
 
       ${jumps.length? box('warn','지난달과 많이 달라진 사람',
         jumps.map(j=>`<div class="tiny" style="padding:2px 0">${esc(j.name)} · ${esc(j.prev)} 대비 <b>${j.pct>0?'+':''}${j.pct}%</b></div>`).join('')
@@ -3246,9 +3276,9 @@ function payPreview(){
       ${(p.skipped||[]).length? box('warn','건너뛴 줄',
         `<div class="tiny">${(p.skipped||[]).map(esc).join(', ')}</div>`):''}
 
-      ${warn.length? box('warn','근로기준법 §48② — 이런 게 빠졌어요',
+      ${warn.length? box('warn','명세서에 꼭 들어가야 하는데 빠진 것',
         warn.map(x=>`<div class="tiny" style="padding:2px 0">· ${esc(x)}</div>`).join('')
-        +`<div class="tiny muted" style="margin-top:6px">빠뜨리고 교부해도 과태료 대상이에요.</div>`):''}
+        +`<div class="tiny muted" style="margin-top:6px">빠뜨린 채로 드려도 과태료 대상이에요. <span class="lawcite">근거 · 근로기준법 제48조제2항</span></div>`):''}
 
       ${dup?`<div class="tiny" style="color:var(--warn);margin:0 2px 10px">이미 ${p.ym} 명세서가 ${dup}건 있어요. 넣으면 <b>덮어씁니다.</b></div>`:''}
 
@@ -3296,6 +3326,15 @@ function openEmpNoHelp(){
     <button class="btn soft block" style="margin-top:8px" onclick="exportRoster()">📄 명단 내려받기 (세무사 전달용)</button>
     <div class="tiny muted" style="margin-top:10px">이미 사번이 있는 분은 건드리지 않아요. 직원 카드에서 손으로 고칠 수도 있습니다.</div>`,
     payPending? payPreview : null);
+}
+function setHeadcount(v){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
+  const n=Math.max(0,parseInt(v,10)||0);
+  if(!DB.hosp||typeof DB.hosp!=='object') DB.hosp={};
+  DB.hosp.headcount = n||null;
+  saveDB(); renderHome(); if(currentTab==='leave') renderLeave(); if(currentTab==='staff') renderStaff();
+  closeModal(); openMenu();
+  toast(isSmallBiz()? `${staffCount()}명 · 5인 미만으로 봅니다` : `${staffCount()}명 · 5인 이상으로 봅니다`);
 }
 function assignEmpNos(){
   if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
@@ -3470,7 +3509,7 @@ function openResignForm(){
     <div class="tiny muted" style="margin:-4px 2px 12px">⚠️ 적은 내용은 <b>최고관리자와 인사담당자에게 보입니다.</b> 앱 구조상 완전히 가려지지는 않으니 꼭 필요한 말만 적어주세요.</div>
     <div id="rgEffect" class="tiny muted" style="margin:0 2px 12px"></div>
     <button class="btn block" onclick="submitResign()">사직서 제출</button>`);
-  const upd=()=>{ const e=$('#rgEffect'); if(e) e.innerHTML=`민법 §660③ — 병원이 수리하지 않아도 <b>${fmtDateFull(resignEffect(todayKey()))}</b>에 퇴직 효력이 생깁니다(월급제 기준).`; };
+  const upd=()=>{ const e=$('#rgEffect'); if(e) e.innerHTML=`병원이 사직서를 안 받아줘도 <b>${fmtDateFull(resignEffect(todayKey()))}</b>이 되면 퇴직 효력이 생깁니다(월급으로 받는 경우).<br><span class="lawcite">근거 · 민법 제660조제3항</span>`; };
   upd();
 }
 function submitResign(){
@@ -3495,9 +3534,9 @@ function openResignView(id){
       <div class="spread" style="padding:3px 0"><span class="tiny muted">상태</span><b class="tiny" style="color:${r.status==='제출'?'var(--warn)':'var(--ok)'}">${esc(r.status)}</b></div>
       ${(isHR()||mine)&&r.reason?`<div style="margin-top:8px"><div class="tiny muted">사유</div><div class="tiny" style="white-space:pre-wrap;margin-top:3px">${esc(r.reason)}</div></div>`:''}
     </div>
-    <div class="tiny muted" style="margin:-6px 2px 12px">민법 §660③ — 병원이 수리하지 않아도 효력일이 되면 퇴직 효력이 생깁니다(월급제 기준).</div>
+    <div class="tiny muted" style="margin:-6px 2px 12px">병원이 사직서를 안 받아줘도 효력일이 되면 퇴직 효력이 생깁니다(월급으로 받는 경우).<br><span class="lawcite">근거 · 민법 제660조제3항</span></div>
     ${isHR()&&r.status==='제출'?`<button class="btn block" onclick="handleResign('${r.id}')">수리하고 퇴사 처리</button>
-      <div class="tiny muted" style="margin-top:8px">누르면 재직 상태가 <b>퇴사</b>로 바뀌어 로그인이 막힙니다. 남은 연차 ${s?annualRemain(s).remain:0}일을 먼저 정산하세요.</div>`:''}
+      <div class="tiny muted" style="margin-top:8px">누르면 재직 상태가 <b>퇴사</b>로 바뀌어 로그인이 막힙니다. 남은 ${leaveWord()} ${s?annualRemain(s).remain:0}일을 먼저 정산하세요.</div>`:''}
     ${mine&&r.status==='제출'?`<button class="btn soft block" style="margin-top:8px;color:var(--danger)" onclick="cancelResign('${r.id}')">사직서 철회</button>`:''}`);
 }
 function handleResign(id){
@@ -3524,7 +3563,8 @@ function cancelResign(id){
 }
 function hrResignView(){
   const list=(DB.resignations||[]).slice().sort((a,b)=>String(b.submittedAt).localeCompare(String(a.submittedAt)));
-  return `<div class="hint">직원이 앱에서 낸 사직서예요. <b>제출한 시각</b>이 민법 §660 의 기산점입니다.</div>
+  return `<div class="hint">직원이 앱에서 낸 사직서예요. 언제부터 날짜를 세는지가 <b>제출한 시각</b>으로 정해집니다.<br>
+    <span class="lawcite">근거 · 민법 제660조</span></div>
     <div style="margin-top:12px">
     ${list.length? list.map(r=>{const s=staffById(r.staffId);
       return `<div class="trow" style="cursor:pointer" onclick="openResignView('${r.id}')">
@@ -3650,9 +3690,10 @@ function retireStaff(id){
   }
   const rem=annualRemain(s).remain;
   modal(`<h3>🚪 ${esc(s.name)} 님 퇴사 처리</h3>
-    <div class="hint">로그인만 막고 <b>기록은 그대로 둡니다.</b> 근로기준법 §42 는 근로계약 서류를 퇴직일부터 3년 보존하라고 해서, 지우지 않고 퇴사로 남깁니다.</div>
+    <div class="hint">로그인만 막고 <b>기록은 그대로 둡니다.</b> 근로계약 서류는 퇴직일부터 <b>3년간 보관</b>해야 해서, 지우지 않고 퇴사로 남깁니다.<br>
+      <span class="lawcite">근거 · 근로기준법 제42조</span></div>
     <label class="field" style="margin-top:12px"><span>마지막 근무일</span><input id="rtDay" type="date" value="${todayKey()}"></label>
-    ${rem>0?`<div class="tiny" style="color:var(--warn);margin:-4px 2px 12px">남은 연차 <b>${rem}일</b> — 정산하셨는지 확인하세요.</div>`:''}
+    ${rem>0?`<div class="tiny" style="color:var(--warn);margin:-4px 2px 12px">남은 ${leaveWord()} <b>${rem}일</b> — 정산하셨는지 확인하세요.</div>`:''}
     <label class="field"><span>메모 (안 적어도 돼요)</span><input id="rtNote" placeholder="예: 개인 사정 · 이직"></label>
     <button class="btn block" onclick="doRetire('${id}')">퇴사 처리</button>
     <div class="tiny muted" style="margin-top:10px">잘못 눌러도 직원 카드에서 <b>복직</b>으로 되돌릴 수 있어요.</div>`,
@@ -3676,6 +3717,122 @@ function unretireStaff(id){
   s.active=true; delete s.retiredAt; delete s.retireNote;
   hrLog('퇴사', `${s.name} 복직 처리`);
   saveDB(); closeModal(); renderStaff(); renderHome(); applyRole(); toast('복직 처리했어요');
+}
+
+
+/* ---- 노무 점검 ---------------------------------------------------------
+   노무사를 두는 병원은 많지 않다. 그래서 앱이 "지금 안 하고 있는 것"만
+   한 화면에 모아 보여준다.
+   다만 이건 체크리스트지 적법 판정이 아니다 — 여기가 다 초록이어도
+   병원 사정에 따라 다른 게 있을 수 있다. 그 말을 화면에 적어 둔다. */
+const CONTRACT_MUST=[
+  ['payAmount','기본급'], ['payParts','임금 구성항목'], ['payCalc','계산 방법'],
+  ['payDay','지급일'], ['payMethod','지급 방법'],
+  ['workHours','근무시간'], ['restDay','쉬는 날(주휴일)'], ['annual','휴가'],
+];
+// 계약서 본문은 잠겨 있어 열쇠 없이는 빈칸을 볼 수 없다. 열쇠가 열려 있을 때만 채운다.
+let contractGaps=null;
+async function scanContracts(){
+  const key=payUnlocked(); if(!key){ contractGaps=null; return; }
+  const out={};
+  for(const c of (DB.contracts||[])){
+    const d=await payDec(key, c.enc); if(!d) continue;
+    out[c.staffId]=CONTRACT_MUST.filter(f=>!String(d[f[0]]||'').trim()).map(f=>f[1]);
+  }
+  contractGaps=out;
+}
+function hrCheckView(){
+  const all=activeStaff(), ym=monthKey();
+  const noContract=all.filter(s=>!contractOf(s.id));
+  const notAgreed=all.filter(s=>{const c=contractOf(s.id);return c&&!c.agreedAt;});
+  const gaps=contractGaps? all.filter(s=>(contractGaps[s.id]||[]).length) : [];
+  const noPay=all.filter(s=>!(DB.payslips||[]).some(x=>x.staffId===s.id && x.ym===ym));
+  const pendResign=(DB.resignations||[]).filter(r=>r.status==='제출');
+  const oldGone=DB.staff.filter(s=>s.active===false && s.retiredAt
+    && (tms(todayKey())-tms(s.retiredAt))/DAY_MS > 365*3);
+  const noKey=!DB.payLock;
+
+  const item=(bad,icon,title,plain,people,cite,go)=>{
+    const n=people?people.length:0;
+    return `<div class="card" style="padding:13px 14px;margin-bottom:8px;border-left:4px solid var(--${bad?'danger':'ok'})">
+      <div class="spread" style="align-items:flex-start;gap:10px">
+        <div class="grow" style="min-width:0">
+          <div style="font-weight:800">${icon} ${title}</div>
+          <div class="tiny muted" style="margin-top:4px">${plain}</div>
+          ${n?`<div class="tiny" style="color:var(--danger);font-weight:700;margin-top:5px">${people.map(x=>esc(typeof x==='string'?x:staffLabel(x.id))).join(', ')}</div>`:''}
+          ${cite?`<div class="lawcite" style="margin-top:5px">근거 · ${esc(cite)}</div>`:''}
+        </div>
+        <div style="text-align:right;flex:none">
+          <div style="font-weight:900;font-size:19px;color:var(--${bad?'danger':'ok'})">${bad?n||'!':'✓'}</div>
+          ${go?`<button class="btn soft xs" style="margin-top:4px" onclick="${go}">보기 ›</button>`:''}
+        </div></div></div>`;
+  };
+
+  const bad=[noContract.length,notAgreed.length,gaps.length,noPay.length,pendResign.length].filter(Boolean).length + (noKey?1:0);
+
+  return `<div class="card" style="box-shadow:none;background:${bad?'var(--warn-soft)':'var(--ok-soft)'};border:0;padding:14px 15px;margin-bottom:12px">
+      <div style="font-weight:900;color:var(--${bad?'warn':'ok'});font-size:15px">${bad? `지금 챙길 것이 ${bad}가지 있어요` : '지금 챙길 것은 없어요'}</div>
+      <div class="tiny muted" style="margin-top:6px">직원 <b>${staffCount()}명</b> 기준 · ${isSmallBiz()?'5인 미만':'5인 이상'} 병원으로 보고 있어요.
+        숫자가 다르면 <b>설정 → 우리 병원 직원 수</b>에서 고치세요.</div>
+    </div>
+
+    ${item(noKey,'🔐','급여 열쇠',
+      noKey? '아직 안 정하셨어요. 이걸 정해야 근로계약서와 급여명세서를 넣을 수 있습니다.' : '정해져 있어요.',
+      null, null, noKey?'openPayKeySetup()':'')}
+
+    ${item(noContract.length,'📝','근로계약서를 안 쓴 사람',
+      '임금·근무시간·쉬는 날·휴가를 적은 종이를 직원에게 한 장 드려야 합니다. 안 쓰거나 써놓고 안 건네면 500만원 이하 벌금입니다.',
+      noContract, '근로기준법 제17조 · 제114조', "hrTab('contract')")}
+
+    ${item(notAgreed.length,'✍️','계약서를 만들었지만 직원 확인을 안 받은 사람',
+      '직원이 내용을 읽고 확인한 기록이 있어야 나중에 다툼이 없습니다.',
+      notAgreed, null, "hrTab('contract')")}
+
+    ${contractGaps===null
+      ? `<div class="card" style="padding:13px 14px;margin-bottom:8px">
+          <div style="font-weight:800">🔍 계약서 빈칸 검사</div>
+          <div class="tiny muted" style="margin-top:4px">계약서는 잠겨 있어요. 열쇠를 넣으면 빠진 칸이 있는지 봐 드립니다.</div>
+          <button class="btn soft sm block" style="margin-top:8px" onclick="runContractScan()">🔓 열쇠 넣고 검사</button></div>`
+      : item(gaps.length,'🔍','계약서에 빈칸이 있는 사람',
+          '꼭 적어야 하는 칸이 비어 있어요: '+CONTRACT_MUST.map(f=>f[1]).join(' · '),
+          gaps.map(s=>staffLabel(s.id)+' ('+(contractGaps[s.id]||[]).join('·')+')'),
+          '근로기준법 제17조', "hrTab('contract')")}
+
+    ${item(noPay.length,'💰',`이번 달(${ym}) 급여명세서를 못 받은 사람`,
+      '급여를 줄 때마다 명세서를 한 장씩 드려야 합니다. 빠뜨리거나 항목이 빠진 채로 드려도 과태료 대상이에요. (아직 급여일 전이면 괜찮습니다)',
+      noPay, '근로기준법 제48조제2항', "hrTab('pay')")}
+
+    ${item(pendResign.length,'📄','아직 처리 안 한 사직서',
+      '사직서는 받은 날부터 날짜를 셉니다. 처리를 미루면 퇴직일이 뒤로 밀려요.',
+      pendResign.map(r=>staffLabel(r.staffId)), '민법 제660조', "hrTab('resign')")}
+
+    ${oldGone.length? `<div class="card" style="padding:13px 14px;margin-bottom:8px">
+      <div style="font-weight:800">🗂️ 보관 기간이 지난 퇴사자 ${oldGone.length}명</div>
+      <div class="tiny muted" style="margin-top:4px">퇴직일부터 3년이 지났어요. 이제 지우셔도 됩니다(꼭 지워야 하는 건 아니에요).</div>
+      <div class="tiny" style="margin-top:5px">${oldGone.map(s=>esc(s.name)+' · '+esc(s.retiredAt)).join(', ')}</div>
+      <div class="lawcite" style="margin-top:5px">근거 · 근로기준법 제42조</div></div>`:''}
+
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:14px 15px;margin-top:14px">
+      <div style="font-weight:900;margin-bottom:4px">🙋 막히면 여기에 물어보세요</div>
+      <div class="tiny muted" style="margin-bottom:10px">노무사를 두지 않은 병원도 무료로 물어볼 수 있는 곳이 있어요.</div>
+      <a class="btn soft block" href="tel:1350">📞 고용노동부 상담 1350 — 평일 09~18시</a>
+      <div class="row" style="gap:6px;margin-top:8px">
+        <a class="btn soft sm grow" href="https://1350.moel.go.kr" target="_blank" rel="noopener">💬 인터넷 상담</a>
+        <a class="btn soft sm grow" href="https://www.law.go.kr" target="_blank" rel="noopener">📖 법 원문 찾기</a>
+      </div>
+      <div class="tiny muted" style="margin-top:9px;line-height:1.9">
+        · <b>고용노동부 고객상담센터(1350)</b> — 전화로 물어보는 게 제일 빠릅니다. 홈페이지에서 <b>인터넷 상담</b>도 돼요<br>
+        · <b>관할 지방고용노동관서 고객지원실</b> — 병원 주소지 노동청에 찾아가면 상담해 줍니다<br>
+        · <b>마을노무사</b> — 지자체가 노무사 상담을 무료로 연결해 주는 제도. 시·도청 누리집에서 "마을노무사"로 찾아보세요<br>
+        · 법 원문은 <b>국가법령정보센터</b>에서 "근로기준법 제17조"처럼 조문 번호로 찾으면 나옵니다</div>
+    </div>
+
+    <div class="tiny muted" style="margin:14px 2px 0;line-height:1.8">
+      이 화면은 <b>빠진 것을 찾아주는 점검표</b>이지 "이러면 문제없다"는 판정이 아니에요.
+      수습·교대근무·포괄임금처럼 병원마다 다른 사정은 여기서 알 수 없습니다. 중요한 결정은 위 창구에 확인하세요.</div>`;
+}
+function runContractScan(){
+  withPayKey(async()=>{ await scanContracts(); renderStaff(); toast('계약서를 살펴봤어요'); });
 }
 
 /* ---- 인쇄 -------------------------------------------------------------- */
@@ -3704,12 +3861,12 @@ function printDoc(title, body){
 }
 
 /* ---- 직원 탭 — 관리자는 노무, 직원은 자기 1페이지 ---------------------- */
-let hrView='list';
+let hrView='check';
 function hrTab(v){ hrView=v; renderStaff(); }
 function renderStaff(){
   const wrap=$('#staffWrap'); if(!wrap) return;
   if(!isHR()){ wrap.innerHTML=myPageHtml(); return; }
-  const tabs=[['list','명단'],['notice','공지'],['contract','근로계약서'],['pay','급여명세서'],['resign','사직서']];
+  const tabs=[['check','점검'],['list','명단'],['notice','공지'],['contract','근로계약서'],['pay','급여명세서'],['resign','사직서']];
   const pend=(DB.resignations||[]).filter(r=>r.status==='제출').length;
   wrap.innerHTML=`<div class="spread" style="margin:4px 2px 12px">
       <h2 class="sec" style="margin:0">👥 직원 · 노무</h2>
@@ -3719,6 +3876,7 @@ function renderStaff(){
       ${tabs.map(t=>`<button class="${t[0]===hrView?'on':''}" onclick="hrTab('${t[0]}')">${t[1]}${t[0]==='resign'&&pend?` <span class="pill warn" style="margin-left:3px">${pend}</span>`:''}</button>`).join('')}
     </div>
     <div>${
+      hrView==='check'? hrCheckView() :
       hrView==='notice'? hrNoticeView() :
       hrView==='contract'? hrContractView() :
       hrView==='pay'? hrPayView() :
@@ -3753,7 +3911,7 @@ function hrListHtml(){
           <div><div class="t" style="font-weight:800">${esc(s.name)} <span class="tiny muted" style="font-weight:600">${esc(s.position||'')}</span>
             ${s.role!==ROLE_STAFF?`<span class="pill info">${esc(ROLE_KO[s.role]||'')}</span>`:''}</div>
             <div class="d tiny muted">${esc(s.dept||'부서 미지정')}${s.joinDate?' · 입사 '+s.joinDate+(serviceNth(s.joinDate)?' · '+serviceNth(s.joinDate)+'년차':''):''}</div></div></div>
-        <div style="text-align:right"><div style="font-weight:800;color:var(--brand)">연차 ${r.remain}일</div>
+        <div style="text-align:right"><div style="font-weight:800;color:var(--brand)">${leaveWord()} ${r.remain}일</div>
           <div class="tiny muted">/ 총 ${r.total}일${s.annualAuto===false?' (수동)':''}</div></div></div>
       ${flags.length?`<div class="row" style="gap:5px;margin-top:8px;flex-wrap:wrap">${flags.join('')}</div>`:''}
       <div class="row" style="gap:6px;margin-top:9px;flex-wrap:wrap">
@@ -3781,7 +3939,7 @@ function myPageHtml(){
       <span class="tiny muted">${esc(u.dept||'')} ${esc(u.position||'')}</span>
     </div>
     <div class="summary3" style="margin-bottom:14px">
-      <div class="stat"><div class="n" style="color:var(--brand)">${r.remain}</div><div class="l">남은 연차</div></div>
+      <div class="stat"><div class="n" style="color:var(--brand)">${r.remain}</div><div class="l">남은 ${leaveWord()}</div></div>
       <div class="stat"><div class="n">${mine.length}</div><div class="l">이번 달 출근</div></div>
       <div class="stat"><div class="n">${Math.round(hrs)}</div><div class="l">이번 달 시간</div></div>
     </div>
@@ -3869,6 +4027,14 @@ function openMenu(){
       <button class="btn soft" onclick="logout()">로그아웃</button>
     </div>
     <div class="tiny muted" style="margin:8px 2px 0">직원 계정(전화번호·PIN·권한)은 <b>직원 탭</b>에서 추가/수정하세요. 직원은 <b>본인 전화번호+PIN</b>으로 로그인해 재고·출퇴근·연월차 신청을 씁니다.</div>
+    <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👥 우리 병원 직원 수</div>
+    <div class="tiny muted" style="margin:0 2px 8px">이 숫자에 따라 지켜야 할 법이 달라져요. <b>4명 이하</b>면 연차와 연장·야간·휴일 수당 가산이 법으로 정해진 게 아닙니다. 근로계약서·급여명세서·주휴수당·최저임금·퇴직금은 사람 수와 상관없이 지켜야 해요.</div>
+    <label class="field"><span>상시 근로자 수 (비우면 재직자 수로 셉니다)</span>
+      <input id="hcNum" type="number" inputmode="numeric" min="0" value="${(DB.hosp&&DB.hosp.headcount)||''}"
+        placeholder="지금 재직자 ${DB.staff.filter(x=>x.active!==false).length}명" onchange="setHeadcount(this.value)"></label>
+    <div class="tiny muted" style="margin:-4px 2px 0">지금 기준: <b>${staffCount()}명 · ${isSmallBiz()?'5인 미만':'5인 이상'}</b> ${isSmallBiz()?'(연차는 병원이 정하는 휴가)':'(연차가 법으로 정해져 있음)'}<br>
+      <span class="lawcite">사장님·대표는 빼고, 아르바이트·수습도 실제로 일하면 넣어 셉니다</span></div>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🔐 급여 열쇠</div>
     <div class="tiny muted" style="margin:0 2px 8px">급여명세서와 근로계약서 본문은 이 열쇠로 잠겨 저장돼요. ${DB.payLock? `<b style="color:var(--ok)">잠금 설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
