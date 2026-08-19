@@ -20,7 +20,8 @@
 - **검증 재실행을 강제했다**(사용자 선택: 가장 엄격한 단계). 오늘 그 근거가 나왔다 — 이 프로젝트는 세션마다 랩으로 저장소를 점검한다고 믿었지만 스크립트는 Windows 판뿐이었고 환경은 Linux였다. **안전장치가 한 번도 돈 적이 없는데 핸드오프는 계속 "완료"라고 적고 있었다.** 실측을 건너뛰는 랩은 틀린 사실을 세션마다 굳혀준다
 - **범용성은 서식이 아니라 질문에서 뽑았다.** 서식을 박으면 코드에만 맞고, 원고나 시안 작업에선 빈칸을 지어내게 된다. 아홉 가지 질문을 고정하고 서식은 프로젝트 관습에 맡겼다. `senior-oral-ebook` 같은 글 프로젝트도 대상이라 "저장소" 대신 "산출물"로 썼다
 - **원리를 `references/` 로 분리했다.** SKILL.md 는 "무엇을 하라", PRINCIPLES.md 는 "왜 그런가". 규칙을 구부려야 할 때만 열리면 되고, 매번 읽힐 필요가 없다
-- **별도 저장소로 못 옮겼다.** `mongsiljjang/skills` 가 없고, 이 세션 권한으로는 새 저장소를 만들 수 없다(붙어 있는 저장소에만 쓸 수 있음). 사용자가 빈 저장소를 만들어야 진행된다
+- **원본은 별도 저장소, 사본은 프로젝트 안**(사용자 선택). 세션 중에 사용자가 `mongsiljjang/skills` 를 만들어 옮겼다. 이 세션 권한으로는 저장소를 새로 만들 수 없어서 사용자 손이 필요했다
+- **`skills` 저장소는 프라이빗이어도 된다.** 프라이빗은 "내 컴퓨터에서만"이 아니라 "허락한 계정만"이라 다른 기기에서도 로그인하면 그대로 쓴다. 다만 **`mediops-pilot` 은 public 이어야 한다** — GitHub Pages 배포가 무료 요금제에서는 public 저장소에서만 되고, 그 주소를 직원들이 쓰고 있다
 
 ## 3. 산출물
 
@@ -38,7 +39,8 @@
 - **`baton` 스냅샷 스크립트**: 인공 작업공간을 새로 만들어 재현 — 저장소 2개 + `unreadable_git_dirs: ["<t>/broken"]`. 따옴표 파일명 `?? "say \"hi\".txt"` 정상 이스케이프, `node_modules` 제외, 깊이 4 제외. `wrap` 판이 아니라 **`baton` 사본으로** 돌렸다
 - **deslop-ko**: 3개 항목 4곳 — 전부 기존 것, 새 항목 없음
 - **`baton` 구조**: frontmatter 파싱 ✅ · SKILL.md 가 가리키는 참조 문서 2개 실재 ✅ · 상대경로 함정 재발 없음 ✅
-- **저장소**: `repository_count 1`, `unreadable_git_dirs` 없음, clean. 원격 `ls-remote` 로 `d1d3982` 일치 확인
+- **저장소**: `repository_count 1`, `unreadable_git_dirs` 없음, clean. 원격 `ls-remote` 로 로컬과 일치 확인. `mediops-pilot` 은 프로젝트 경로 밖이라 따로 확인(clean, `d26faab`)
+- **`skills` 저장소 푸시**: 파일 6개, `repo_snapshot.sh` 실행 비트 `100755` 보존, 원본·사본 `diff -r` 완전 일치
 
 **안 본 것** — `baton` 을 **다른 프로젝트에서 돌려보지 않았다.** 범용이라고 설계했지만 검증은 이 저장소(코드 프로젝트) 하나뿐이다. 글·디자인 프로젝트에서의 동작은 미확인. 그리고 이번 랩 자체가 `baton` 의 첫 실사용이라, 두 번째 세션에서 또 돌려봐야 진짜 굴러가는지 안다.
 
@@ -46,7 +48,7 @@
 
 | 저장소 | 브랜치 | HEAD | 상태 |
 |---|---|---|---|
-| `mongsiljjang/seoin` | `claude/mediops-auth-migration-610ec1` (작업) | `d1d3982` | clean · pushed · 원격 일치 |
+| `mongsiljjang/seoin` | `claude/mediops-auth-migration-610ec1` (작업) | 브랜치 끝 = 이 문서의 마지막 커밋 | clean · pushed · 원격 일치 |
 | `mongsiljjang/seoin` | `claude/hospital-inventory-hr-app-fw7a9g` (백업본) | `042caae` | **미반영** |
 | `mongsiljjang/mediops-pilot` | `main` (정식·배포) | `d26faab` | **미반영** · clean |
 | `mongsiljjang/skills` | `main` | `1364476` | 세션 중 신설 · `baton` 원본 · pushed |
