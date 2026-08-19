@@ -17,13 +17,26 @@ Do not use a planning, brainstorming, or superpower plugin unless the user expli
 
 ## 2. Reconcile repository state
 
-On Windows, run:
+Run the snapshot script for your platform. Both emit the same JSON. Paths are relative to this skill's own directory, so use the base directory given when the skill was invoked — the working directory is the project, not the skill.
 
-`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/repo_snapshot.ps1 -ProjectPath <path>`
+Windows:
 
-The script searches for repositories up to three directory levels below the project and stops descending once it finds one. Increase `-MaxDepth` only when the known workspace layout requires it. Confirm that `repository_count` matches the expected repositories; never trust an unexpectedly empty or incomplete snapshot.
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <skill-dir>/scripts/repo_snapshot.ps1 -ProjectPath <path>`
 
-Otherwise inspect the current branch, HEAD, staged and unstaged changes, recent commits, and directly nested repositories.
+Linux and macOS:
+
+`<skill-dir>/scripts/repo_snapshot.sh <path> [max-depth]`
+
+The script searches for repositories up to three directory levels below the project and stops descending once it finds one. Increase the max depth only when the known workspace layout requires it.
+
+Read the output critically:
+
+- Confirm `repository_count` matches the repositories you expect. Never trust an unexpectedly empty or incomplete snapshot.
+- Check `unreadable_git_dirs`. Entries there hold a `.git` that git refuses to open as a repository root — a corrupt, partial, or copied checkout. Investigate before committing anything near them.
+- Treat `ok: false` as unknown state, not as clean. `clean` is only meaningful when `ok` is true.
+- Repositories outside the project path — a second checkout elsewhere on disk — are not discovered. Snapshot those separately.
+
+If neither script can run, inspect each repository by hand: current branch, HEAD, staged and unstaged changes, recent commits, and directly nested repositories.
 
 Treat each Git repository independently. Never accidentally commit an embedded repository as a gitlink. Preserve unrelated user changes and never rewrite history.
 
@@ -64,7 +77,7 @@ For every repository changed in scope:
 5. Commit with an outcome-based message.
 6. Record the resulting short SHA.
 
-Do not push, deploy, create a PR, or change sharing unless the user requested it or that external action was already part of the active task.
+Do not push, deploy, create a PR, or change sharing unless the user requested it, the project's own rules require it, or that external action was already part of the active task. Project rules read in step 1 take precedence over this default — some projects require every session to end pushed, and following this line instead would leave the work stranded.
 
 ## 5. Verify and report
 
@@ -78,5 +91,8 @@ Report:
 - first recommended action for next time
 - suggested next-session skills
 - remaining dirty files or blockers
+- the copy-ready next-session start prompt, in a fenced code block
 
-Keep the final message concise; the handoff document carries the detail.
+The start prompt goes in the chat message itself, not only inside the handoff file. The user is about to open a fresh session and needs to copy it without opening the repository first. Anything else the project rules require in the final message goes here too.
+
+Keep the rest of the final message concise; the handoff document carries the detail.

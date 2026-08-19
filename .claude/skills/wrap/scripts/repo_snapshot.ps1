@@ -24,22 +24,49 @@ $excludedDirectoryNames = @(
 function Get-RepoSnapshot {
   param([string]$RepoPath)
 
+  $ok = $true
+  $errorText = ''
+
   $branch = (& git -C $RepoPath branch --show-current 2>$null)
-  $head = (& git -C $RepoPath rev-parse --short HEAD 2>$null)
-  $status = @(& git -C $RepoPath status --short 2>$null)
+
+  $head = (& git -C $RepoPath rev-parse --short HEAD 2>&1)
+  if ($LASTEXITCODE -ne 0) { $ok = $false; $errorText = "$head"; $head = '' }
+
+  $status = @(& git -C $RepoPath status --short 2>&1)
+  if ($LASTEXITCODE -ne 0) { $ok = $false; $errorText = ($status -join ' '); $status = @() }
+
   $recent = @(& git -C $RepoPath log -3 --pretty=format:'%h %s' 2>$null)
 
   [pscustomobject]@{
     path = $RepoPath
     branch = $branch
     head = $head
-    clean = ($status.Count -eq 0)
+    ok = $ok
+    error = $errorText
+    # A repository git could not read is NOT clean -- it is unknown.
+    clean = ($ok -and $status.Count -eq 0)
     status = $status
     recent_commits = $recent
   }
 }
 
+# A directory holding a .git entry is only a repository if git agrees it is the
+# root. Otherwise git silently answers for the PARENT repository, and a corrupt
+# or half-copied .git gets reported as a healthy repo carrying someone else's state.
+function Test-RepoRoot {
+  param([string]$CandidatePath)
+
+  $top = (& git -C $CandidatePath rev-parse --show-toplevel 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $top) { return $false }
+  try {
+    $topResolved = (Resolve-Path -LiteralPath $top -ErrorAction Stop).Path
+    $candidateResolved = (Resolve-Path -LiteralPath $CandidatePath -ErrorAction Stop).Path
+  } catch { return $false }
+  return ($topResolved.TrimEnd('\','/') -ieq $candidateResolved.TrimEnd('\','/'))
+}
+
 $repositoryPaths = [System.Collections.Generic.List[string]]::new()
+$unreadableGitDirs = [System.Collections.Generic.List[string]]::new()
 $seenRepositoryPaths = [System.Collections.Generic.HashSet[string]]::new(
   [System.StringComparer]::OrdinalIgnoreCase
 )
@@ -74,7 +101,11 @@ while ($queue.Count -gt 0) {
   $gitMarker = Join-Path $candidate.path '.git'
 
   if (Test-Path -LiteralPath $gitMarker) {
-    Add-RepositoryPath -RepoPath $candidate.path
+    if (Test-RepoRoot -CandidatePath $candidate.path) {
+      Add-RepositoryPath -RepoPath $candidate.path
+    } else {
+      $unreadableGitDirs.Add($candidate.path)
+    }
     continue
   }
 
@@ -103,5 +134,6 @@ $repositories = @(
   captured_at = (Get-Date).ToString('o')
   discovery_max_depth = $MaxDepth
   repository_count = $repositories.Count
+  unreadable_git_dirs = @($unreadableGitDirs)
   repositories = $repositories
 } | ConvertTo-Json -Depth 6
