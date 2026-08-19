@@ -4381,10 +4381,14 @@ function openMenu(){
       <button class="btn soft" onclick="exportLeaves()">🌴 연월차 내역</button>
       <button class="btn soft" onclick="exportData()">💾 전체 백업(JSON)</button>
     </div>
+    <div class="tiny muted" style="margin:8px 2px 0">마지막 백업: <b>${DB.lastBackupAt? fmtDateFull(String(DB.lastBackupAt).slice(0,10)) : '아직 받은 적 없어요'}</b>${DB.lastBackupAt?'':' — 큰 변경 전에는 먼저 받아 두세요'}<br>
+      백업 파일에는 <b>직원 PIN 과 잠긴 급여 기록</b>이 들어 있어요. 아무 데나 두지 말고 원장님만 아는 곳에 보관하세요.</div>
     <div class="divider"></div>
-    <div class="hint">기기를 바꾸거나 옮길 땐 <b>전체 백업(JSON)</b>으로 내보낸 뒤 아래에서 불러오세요.</div>
+    <div class="hint">기기를 바꾸거나 옮길 땐 <b>전체 백업(JSON)</b>으로 내보낸 뒤 아래에서 불러오세요. 불러오면 <b>지금 데이터가 파일 내용으로 바뀌고, 공유 중이면 모든 기기에서 함께 바뀝니다.</b></div>
     <button class="btn soft block" onclick="importData()">📥 백업 파일 불러오기</button>
     <input type="file" id="importFile" accept="application/json" style="display:none" onchange="doImport(event)">
+    ${hasRestoreUndo()?`<button class="btn soft block" style="margin-top:8px" onclick="undoRestore()">↩︎ 불러오기 직전으로 되돌리기</button>
+    <div class="tiny muted" style="margin:6px 2px 0">이 기기에서 마지막으로 불러오기 한 <b>직전 상태</b>가 남아 있어요.</div>`:''}
     <div class="divider"></div>
     <button class="btn danger block" onclick="wipeData()">전체 데이터 초기화</button>
     <div class="tiny muted" style="text-align:center;margin-top:14px">병원 관리 앱 · v1 · 로컬 저장</div>`);
@@ -4404,11 +4408,35 @@ function saveClinicLoc(){
     if($('#modalBg').classList.contains('open')) openMenu();
   }, ()=>{ toast('위치 권한이 필요해요(크롬/사파리에서 위치 허용)'); }, {enableHighAccuracy:true, timeout:8000, maximumAge:0});
 }
+/* ---------- 백업 · 복구 ----------
+   복구는 되돌리기의 마지막 수단이라, 실수로 눌러도 데이터가 날아가지 않게 만든다.
+   ① 무엇이 든 파일인지 보여주고 확인받는다  ② 덮기 직전 상태를 남겨 한 번 되돌릴 수 있게 한다
+   ③ 옛 백업에 없는 항목은 ensureSchema()가 채운다  ④ 공유 서버에 곧바로 반영한다 */
+const RESTORE_KEY = 'hospital_mgr_prev';
+const BACKUP_KEYS = ['staff','inventory','invLogs','attendance','leaves','implantCases',
+                     'notices','contracts','payslips','docReqs','vendors'];
+function backupSummary(d){
+  const n=k=>Array.isArray(d&&d[k])?d[k].length:0;
+  return { staff:n('staff'), inv:n('inventory'), att:n('attendance'), leave:n('leaves'),
+           pay:n('payslips'), doc:n('docReqs'), imp:n('implantCases'),
+           at: d && d.lastBackupAt ? String(d.lastBackupAt).slice(0,10) : '' };
+}
+// 이 앱의 백업이 맞는지 — 형식만 흉내 낸 파일이 전체 데이터를 덮어쓰지 못하게
+function looksLikeBackup(d){
+  if(!d || typeof d!=='object' || !d.version || !Array.isArray(d.staff)) return false;
+  return BACKUP_KEYS.filter(k=>Array.isArray(d[k])).length >= 3;
+}
+function summaryLine(s){
+  return `직원 ${s.staff}명 · 재고 ${s.inv}건 · 근무기록 ${s.att}건 · 연월차 ${s.leave}건 · 급여명세서 ${s.pay}건`;
+}
 function exportData(){
+  DB.lastBackupAt = new Date().toISOString();
   const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`병원관리_백업_${todayKey()}.json`; a.click(); URL.revokeObjectURL(a.href);
-  toast('백업 파일을 저장했어요');
+  saveDB();
+  toast(`백업 저장 — ${summaryLine(backupSummary(DB))}`);
+  if($('#modalBg').classList.contains('open')) openMenu();
 }
 
 /* ---------- 리포트 내보내기 (엑셀에서 열리는 CSV) ---------- */
@@ -4446,14 +4474,42 @@ function exportLeaves(){
 }
 function importData(){ $('#importFile').click(); }
 function doImport(ev){
-  const f=ev.target.files[0]; if(!f) return;
+  const f=ev.target.files[0]; ev.target.value=''; if(!f) return;
   const r=new FileReader();
-  r.onload=()=>{ try{ const d=JSON.parse(r.result);
-    if(!d.version||!Array.isArray(d.staff)) throw 0;
-    DB=d; saveDB(); closeModal(); $('#hospName').textContent=DB.hospName||'우리병원 관리';
-    go('home'); toast('데이터를 불러왔어요');
-  }catch(e){ toast('올바른 백업 파일이 아니에요'); } };
+  r.onload=()=>{
+    let d; try{ d=JSON.parse(r.result); }catch(e){ toast('읽을 수 없는 파일이에요'); return; }
+    if(!looksLikeBackup(d)){ toast('이 앱의 백업 파일이 아니에요 — 덮어쓰지 않았어요'); return; }
+    const nw=backupSummary(d), cur=backupSummary(DB);
+    const ok = confirm(
+      '백업 파일을 불러올까요?\n\n'+
+      '[파일 안]\n'+summaryLine(nw)+(nw.at?`\n만든 날 ${nw.at}`:'')+'\n\n'+
+      '[지금 데이터]\n'+summaryLine(cur)+'\n\n'+
+      '지금 데이터는 파일 내용으로 바뀝니다. 공유 중이면 모든 기기에서 함께 바뀝니다.\n'+
+      '불러온 뒤 설정에서 한 번은 되돌릴 수 있어요.');
+    if(!ok){ toast('불러오기를 취소했어요'); return; }
+    try{ localStorage.setItem(RESTORE_KEY, JSON.stringify(DB)); }catch(e){}
+    DB=d; ensureSchema();
+    localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+    cloudPushNow();
+    closeModal(); $('#hospName').textContent=DB.hospName||'우리병원 관리';
+    applyRole(); go('home');
+    toast('불러왔어요 — 잘못 불렀으면 설정에서 되돌리세요');
+  };
+  r.onerror=()=>toast('파일을 읽지 못했어요');
   r.readAsText(f);
+}
+function hasRestoreUndo(){ return !!localStorage.getItem(RESTORE_KEY); }
+function undoRestore(){
+  const raw=localStorage.getItem(RESTORE_KEY);
+  if(!raw){ toast('되돌릴 게 없어요'); return; }
+  let prev; try{ prev=JSON.parse(raw); }catch(e){ toast('되돌릴 자료가 깨졌어요'); return; }
+  if(!confirm('불러오기 직전 상태로 되돌릴까요?\n방금 불러온 내용은 사라집니다.')) return;
+  DB=prev; ensureSchema();
+  localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+  localStorage.removeItem(RESTORE_KEY);
+  cloudPushNow(); closeModal();
+  $('#hospName').textContent=DB.hospName||'우리병원 관리';
+  applyRole(); go('home'); toast('되돌렸어요');
 }
 function wipeData(){
   if(!confirm('모든 데이터를 삭제하고 초기 상태로 되돌릴까요? 되돌릴 수 없습니다.')) return;
@@ -4530,6 +4586,12 @@ function cloudSubscribe(){
       cloudPush(true);  // 원격이 비어있으면 이 기기 데이터로 시작
     }
   }, err=>{ updateSyncBadge('offline'); });
+}
+function cloudPushNow(){
+  if(!cloudDoc) return;
+  clearTimeout(pushTimer);
+  try{ cloudDoc.set({ db: JSON.stringify(DB), updatedAt: Date.now() }); }
+  catch(e){ updateSyncBadge('offline'); }
 }
 function cloudPush(force){
   if(applyingRemote || !cloudDoc) return;
