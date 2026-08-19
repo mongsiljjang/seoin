@@ -3033,7 +3033,9 @@ function payParse(rows, ym){
 // 기억해 둔 짝 → 전화 → 사번 → 이름(하나뿐일 때). 나머지는 사람이 고른다.
 // 손으로 고른 줄은 건드리지 않는다. 한 사람이 두 줄을 가져가지도 않는다.
 function payAutoMatch(p){
-  const staff=activeStaff();
+  // 퇴사자도 넣고 본다. 퇴직 정산 명세서는 퇴사자 것이 맞고, 무엇보다
+  // 퇴사자와 같은 이름의 신입에게 조용히 붙는 걸 막아야 한다.
+  const staff=DB.staff;
   const taken=new Set(p.rows.map(r=>r.staffId).filter(Boolean));
   p.rows.forEach(r=>{
     if(r.staffId) return;                        // 이미 정해진 줄은 그대로 둔다
@@ -3144,6 +3146,8 @@ function payNetCol(cols){
       || (cols||[]).find(c=>TOTAL_RE.test(c)) || null;
 }
 function payNum(v){ const n=parseInt(String(v==null?'':v).replace(/[^\d-]/g,''),10); return isNaN(n)?0:n; }
+// 엑셀에서 기본급으로 보이는 열
+function payBaseCol(cols){ return (cols||[]).find(c=>/기본급|기본임금|본봉/.test(c)) || null; }
 // 이 사람의 바로 전 달 명세서
 function payPrevSlip(sid, ym){
   return (DB.payslips||[]).filter(x=>x.staffId===sid && x.ym<ym).sort((a,b)=>b.ym.localeCompare(a.ym))[0];
@@ -3171,6 +3175,17 @@ function payPreview(){
       const v=payNum(d.cells[payNetCol(d.cols)]);
       if(v) prevNet.set(st.id, {ym:prev.ym, net:v});
     }
+    // 근로계약서에 적힌 기본급과 견준다 — 지난달 기록이 없는 첫 달에도 걸린다
+    const baseCol=payBaseCol(p.cols), offBase=[];
+    if(baseCol) for(const r of named){
+      const c=contractOf(r.staffId); if(!c) continue;
+      const cd=await payDec(key, c.enc); if(!cd) continue;
+      const want=payNum(cd.payAmount), got=payNum(r.cells[baseCol]);
+      if(!want || !got) continue;
+      const pct=Math.round((got-want)/want*100);
+      if(Math.abs(pct)>=5) offBase.push({name:staffLabel(r.staffId), pct});
+    }
+
     // ① 뒤바뀜 — 이 사람 금액이 '다른 사람'의 지난달 금액과 딱 맞으면 거의 확실하다
     // ② 급변 — 지난달 대비 15% 넘게 움직인 사람. 수당이 많은 달일 수도 있어 보여만 준다
     const jumps=[], swaps=[];
@@ -3194,7 +3209,7 @@ function payPreview(){
       <div class="summary3" style="margin-bottom:12px">
         <div class="stat"><div class="n">${named.length}</div><div class="l">직원</div></div>
         <div class="stat"><div class="n" style="color:${missing.length?'var(--danger)':'var(--ok)'}">${missing.length}</div><div class="l">빠진 사람</div></div>
-        <div class="stat"><div class="n" style="color:${(warn.length+jumps.length+swaps.length)?'var(--warn)':'var(--ok)'}">${warn.length+jumps.length+swaps.length}</div><div class="l">확인할 것</div></div>
+        <div class="stat"><div class="n" style="color:${(warn.length+jumps.length+swaps.length+offBase.length)?'var(--warn)':'var(--ok)'}">${warn.length+jumps.length+swaps.length+offBase.length}</div><div class="l">확인할 것</div></div>
       </div>
 
       ${twice.length? box('danger','⛔ 한 사람에게 두 줄이 붙었어요',
@@ -3208,6 +3223,10 @@ function payPreview(){
         swaps.map(w=>`<div class="tiny" style="padding:2px 0"><b>${esc(w.me)}</b> 님 금액이 <b>${esc(w.other)}</b> 님의 ${esc(w.ym)} 금액과 똑같아요</div>`).join('')
         +`<div class="tiny muted" style="margin-top:6px">엑셀 줄이 서로 바뀌었을 때 나오는 신호예요. ‹ 이전 으로 돌아가 확인하세요. 급여를 올려준 게 맞다면 그대로 진행하셔도 됩니다.</div>`):''}
 
+      ${offBase.length? box('warn','근로계약서의 기본급과 다른 사람',
+        offBase.map(o=>`<div class="tiny" style="padding:2px 0">${esc(o.name)} · 계약서 대비 <b>${o.pct>0?'+':''}${o.pct}%</b></div>`).join('')
+        +`<div class="tiny muted" style="margin-top:6px">줄이 잘못 붙었거나, 급여를 올려주고 <b>계약서를 안 고쳤을 때</b> 나옵니다. 임금이 바뀌면 §17 에 따라 계약서를 다시 써서 교부해야 해요.</div>`):''}
+
       ${jumps.length? box('warn','지난달과 많이 달라진 사람',
         jumps.map(j=>`<div class="tiny" style="padding:2px 0">${esc(j.name)} · ${esc(j.prev)} 대비 <b>${j.pct>0?'+':''}${j.pct}%</b></div>`).join('')
         +`<div class="tiny muted" style="margin-top:6px">수당이 많은 달이면 자연스러운 변화예요. 금액은 안 보여드리니 비율만 보고 판단하세요.</div>`):''}
@@ -3215,9 +3234,14 @@ function payPreview(){
       ${retired.length? box('warn','퇴사한 분에게 붙은 줄',
         `<div class="tiny">${retired.map(r=>esc(staffLabel(r.staffId))).join(', ')}<br>퇴직 정산이면 그대로 진행하세요.</div>`):''}
 
-      ${weak.length? box('warn','이름만 보고 붙인 줄',
-        `<div class="tiny">${weak.map(r=>esc(r.name)).join(', ')} — <b>${weak.length}명</b><br>
-         가장 약한 근거예요. 직원 카드에 <b>사번</b>을 넣어두면 다음부터 정확히 붙습니다.</div>`):''}
+      ${weak.length? box('warn','이름만 보고 붙인 줄 — 하나씩 확인해 주세요',
+        weak.map(r=>`<label class="trow" style="cursor:pointer;gap:8px;padding:6px 0">
+            <input type="checkbox" class="payweak" style="width:auto;margin:0;flex:none" onchange="payWeakTick()">
+            <span class="tiny grow" style="min-width:0"><b>${esc(r.name)}</b> · 엑셀 ${r.no}번째 줄
+              <span class="muted"> → ${esc(staffLabel(r.staffId))}</span></span></label>`).join('')
+        +`<div class="tiny muted" style="margin-top:6px">이름은 가장 약한 근거예요. 다 확인해야 교부 버튼이 열립니다.
+          매달 이걸 안 하시려면 <b>사번</b>을 쓰세요 — 아래 버튼으로 앱이 만들어 드립니다.</div>
+          <button class="btn soft sm block" style="margin-top:8px" onclick="openEmpNoHelp()">🔢 사번 만들고 세무사에게 줄 명단 뽑기</button>`):''}
 
       ${(p.skipped||[]).length? box('warn','건너뛴 줄',
         `<div class="tiny">${(p.skipped||[]).map(esc).join(', ')}</div>`):''}
@@ -3237,10 +3261,69 @@ function payPreview(){
       <div class="tiny muted" style="margin:-6px 2px 10px">금액은 여기 안 보여요. 넣은 뒤 <b>한 사람씩</b> 열어 인쇄하시면 됩니다.</div>
       ${twice.length
         ? `<button class="btn block" disabled style="opacity:.5">두 줄이 겹쳐 넣을 수 없어요</button>`
-        : `<button class="btn block" onclick="payCommit()">${named.length}명에게 교부 처리</button>`}`,
+        : `<button class="btn block" id="payGo" data-go="${named.length}명에게 교부 처리" onclick="payCommit()"
+             ${weak.length?'disabled style="opacity:.5"':''}>${weak.length?'이름만 보고 붙인 줄을 확인해 주세요':`${named.length}명에게 교부 처리`}</button>`}`,
       ()=>{ payPicks.length? payUndo() : openPayUpload(); });
   });
 }
+function payWeakTick(){
+  const boxes=[...document.querySelectorAll('.payweak')], btn=$('#payGo');
+  if(!btn) return;
+  const all=boxes.every(b=>b.checked);
+  btn.disabled=!all; btn.style.opacity=all?'':'.5';
+  btn.textContent = all? btn.dataset.go : '이름만 보고 붙인 줄을 확인해 주세요';
+}
+
+/* 사번이 없는 병원을 위해 — 앱이 만들어 주고, 세무사에게 줄 명단을 뽑는다.
+   사번이 한 번 자리잡으면 이름 대조를 영영 안 해도 된다. */
+function openEmpNoHelp(){
+  const none=DB.staff.filter(s=>s.active!==false && !String(s.empno||'').trim());
+  modal(`<h3>🔢 사번 만들기</h3>
+    <div class="hint">사번은 병원이 정하는 <b>그 사람만의 번호</b>예요. 급여 엑셀에 사번 열 하나만 있으면 동명이인이든 번호를 같이 쓰든 정확히 붙습니다 — 매달 이름 확인을 안 해도 돼요.</div>
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:12px 14px;margin:12px 0">
+      <div class="tiny muted" style="font-weight:800;margin-bottom:6px">이렇게 하시면 됩니다</div>
+      <div class="tiny" style="line-height:1.9">
+        1. 아래 <b>사번 자동 부여</b>를 누르면 입사연도 기준으로 만들어 드려요<br>
+        2. <b>명단 내려받기</b>로 CSV를 뽑아 세무사·급여 담당자에게 보내세요<br>
+        3. 다음 달 급여 엑셀에 <b>사번 열</b>을 넣어 달라고 하면 끝입니다</div>
+    </div>
+    <div class="spread" style="margin:0 2px 8px">
+      <span class="tiny muted">사번 없는 재직자</span>
+      <b class="tiny" style="color:${none.length?'var(--warn)':'var(--ok)'}">${none.length}명</b>
+    </div>
+    ${none.length?`<div class="tiny muted" style="margin:0 2px 10px">${none.map(x=>esc(x.name)).join(', ')}</div>`:''}
+    <button class="btn block" ${none.length?'':'disabled style="opacity:.5"'} onclick="assignEmpNos()">사번 자동 부여 (${none.length}명)</button>
+    <button class="btn soft block" style="margin-top:8px" onclick="exportRoster()">📄 명단 내려받기 (세무사 전달용)</button>
+    <div class="tiny muted" style="margin-top:10px">이미 사번이 있는 분은 건드리지 않아요. 직원 카드에서 손으로 고칠 수도 있습니다.</div>`,
+    payPending? payPreview : null);
+}
+function assignEmpNos(){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  const used=new Set(DB.staff.map(s=>String(s.empno||'').trim()).filter(Boolean));
+  let n=0;
+  DB.staff.filter(s=>s.active!==false && !String(s.empno||'').trim())
+    .sort((a,b)=>String(a.joinDate||'9999').localeCompare(String(b.joinDate||'9999')))
+    .forEach(s=>{
+      const y=(s.joinDate||todayKey()).slice(0,4);
+      let i=1, id;
+      do{ id=`${y}-${String(i).padStart(3,'0')}`; i++; }while(used.has(id));
+      used.add(id); s.empno=id; n++;
+    });
+  hrLog('사번', `사번 ${n}명 자동 부여`);
+  saveDB(); openEmpNoHelp(); toast(`${n}명에게 사번을 만들었어요`);
+}
+function exportRoster(){
+  const rows=DB.staff.filter(s=>s.active!==false);
+  const cell=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+  const NL=String.fromCharCode(10);
+  const csv='﻿'+['사번','성명','부서','직급','입사일'].join(',')+NL
+    +rows.map(s=>[s.empno,s.name,s.dept,s.position,s.joinDate].map(cell).join(',')).join(NL)+NL;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`직원명단_사번_${todayKey()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+  toast('내려받았어요 · 급여 담당자에게 보내세요');
+}
+
 function payCommit(){
   withPayKey(async key=>{
     const p=payPending; if(!p) return;
