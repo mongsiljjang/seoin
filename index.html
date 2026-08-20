@@ -4611,9 +4611,12 @@ function newSalt(){
 async function setOwnerKey(id, pw, staffId){
   const salt = newSalt();
   const hash = await ownerHash(id, pw, salt);
-  await refOwnerKey().set({ hash, at: now() });
-  await refMeta().set({ ownerSalt: salt, ownerStaffId: staffId,
-    hasClinic: (DB.staff||[]).length>0, updatedAt: Date.now() }, {merge:true});
+  await refOwnerKey().set({ hash, at: now() });       // 이건 꼭 되어야 한다
+  // 표지판은 못 적어도 넘어간다. 규칙이 아직 옛 판일 수 있다.
+  try{
+    await refMeta().set({ ownerSalt: salt, ownerStaffId: staffId,
+      hasClinic: (DB.staff||[]).length>0, updatedAt: Date.now() }, {merge:true});
+  }catch(e){ console.warn('[건너뜀] meta —', (e&&e.code)||e); }
 }
 function refClaims(){ return wsRef().collection('claims'); }
 
@@ -4896,11 +4899,15 @@ function writeAll(){
   // 어느 문서에서 막혔는지 알 수 있어야 한다. 뭉뚱그린 실패는 원인을 못 찾는다.
   const job=(name, p)=>jobs.push(p.catch(e=>{
     console.warn('[쓰기 막힘] '+name+' — '+((e&&e.code)||e)); throw e; }));
+  // 있으면 좋고 없어도 되는 것. 이게 실패한다고 계정 만들기가 통째로 되돌아가면 안 된다.
+  // 실제로 그랬다 — 규칙에 meta 가 없던 서버에서 계정이 만들어지자마자 지워졌다.
+  const jobOptional=(name, p)=>jobs.push(p.catch(e=>{
+    console.warn('[건너뜀] '+name+' — '+((e&&e.code)||e)+' (없어도 됩니다)'); }));
 
   if(booting || got.shared){ mine.shared=t; job('shared', refShared().set(Object.assign(pickShared(), stamp))); }
   if(booting || (admin && got.roster)){  mine.roster=t;  job('roster',  refRoster().set(Object.assign(pickRoster(), stamp)));
     // 문 앞 표지판 — 사람이 있는지만 적는다. 이름도 번호도 담지 않는다.
-    job('meta', refMeta().set({ hasClinic: (DB.staff||[]).length>0, updatedAt:t })); }
+    jobOptional('meta', refMeta().set({ hasClinic: (DB.staff||[]).length>0, updatedAt:t })); }
   if(booting || (admin && got.secrets)){ mine.secrets=t; job('secrets', refSecrets().set(Object.assign(pickSecrets(), stamp))); }
 
   if(admin){
