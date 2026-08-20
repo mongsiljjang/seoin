@@ -4789,7 +4789,11 @@ function migrateIfNeeded(){
     booting=true;
     return legacyDoc.get().then(old=>{
       const raw=old.exists && old.data() && old.data().db;
-      if(raw){ try{ const o=JSON.parse(raw); if(o && o.version){ applyLocal(()=>{ DB=o; ensureSchema(); }); } }catch(e){} }
+      let had=false;
+      if(raw){ try{ const o=JSON.parse(raw); if(o && o.version){ applyLocal(()=>{ DB=o; ensureSchema(); }); had=true; } }catch(e){} }
+      // 아무도 없는 상태로 빈 명단을 먼저 저장하면, 서버가 '이미 연 병원' 으로 보고
+      // 정작 첫 관리자를 막는다. 옮길 것이 있을 때만 쓴다.
+      if(!had && !(DB.staff||[]).length) return;
       return writeAll();
     }).then(()=>{ booting=false; migrating=false; });
   }).catch(()=>{ migrating=false; });
@@ -4858,8 +4862,12 @@ function applyRole(){
   if(!u){
     document.body.setAttribute('data-role','staff');
     // 승인을 기다리는 중이면 로그인 화면으로 되돌리지 않는다
-    if(myClaim && !myClaim.approved){ setGate('waiting'); return; }
-    setGate(hasAdmin()?'login':'setup'); return;
+    if(myClaim && !myClaim.approved){ wantSetup=false; setGate('waiting'); return; }
+    // 사용자가 직접 고른 화면은 뒤에서 온 자료 때문에 사라지면 안 된다 (입력 중에 날아간다)
+    if(wantSetup){ setGate('setup'); return; }
+    // 공유 모드에서는 명단을 못 읽는 게 정상이다(승인 전이라 서버가 막는다).
+    // 그걸 '첫 사용' 으로 착각하면 직원에게 원장 계정을 만들라고 권하게 된다.
+    setGate((fdb || hasAdmin()) ? 'login' : 'setup'); return;
   }
   const owner = u.role===ROLE_OWNER, admin = owner || u.role===ROLE_HR;
   document.body.setAttribute('data-role', owner?'owner':(admin?'hr':'staff'));
@@ -4887,8 +4895,12 @@ function gateLoginHtml(){
       <label class="field" style="margin-bottom:6px"><span>개인 PIN</span><input id="lgPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
       <button class="btn block" onclick="doLogin()">로그인</button>
     </div>
-    <div class="tiny muted" style="margin-top:16px">번호·PIN을 모르면 관리자에게 문의하세요.</div>`;
+    <div class="tiny muted" style="margin-top:16px">번호·PIN을 모르면 관리자에게 문의하세요.<br>
+      처음 여는 병원이면 <a href="#" onclick="openSetupGate();return false" style="color:var(--brand);font-weight:700">관리자 만들기</a>를 누르세요.</div>`;
 }
+let wantSetup=false;
+function openSetupGate(){ wantSetup=true; setGate(null); setGate('setup'); }
+function backToLogin(){ wantSetup=false; setGate(null); setGate('login'); }
 function gateWaitHtml(){
   const c=myClaim||{};
   return `<div class="gate-ic">⏳</div>
@@ -4911,7 +4923,8 @@ function gateSetupHtml(){
       <label class="field"><span>전화번호 *</span><input id="suPhone" inputmode="numeric" placeholder="01012345678"></label>
       <label class="field" style="margin-bottom:6px"><span>개인 PIN * (숫자 4자리 이상)</span><input id="suPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
       <button class="btn block" onclick="doSetupAdmin()">관리자 만들기</button>
-    </div>`;
+    </div>
+    <div class="tiny muted" style="margin-top:14px">이미 쓰던 병원이면 <a href="#" onclick="backToLogin();return false" style="color:var(--brand);font-weight:700">로그인으로 돌아가기</a></div>`;
 }
 async function sha256Hex(str){
   const b=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -4961,8 +4974,16 @@ function doSetupAdmin(){
   if(!/^\d{4,8}$/.test(pin)){ toast('PIN은 숫자 4~8자리로 정하세요'); return; }
   if(DB.staff.some(s=>normPhone(s.phone)===ph)){ toast('이미 등록된 번호예요'); return; }
   const u={id:uid(), name, dept:'', position:'관리자', phone:ph, pin, role:'관리자', active:true, annualTotal:15, joinDate:'', createdAt:now()};
-  DB.staff.push(u); setSession(u.id); saveDB();
-  claimDevice(u, true).then(()=>{ booting=true; return writeAll(); }).then(()=>{ booting=false; });
+  DB.staff.push(u); setSession(u.id); saveDB(); wantSetup=false;
+  claimDevice(u, true).then(()=>{ booting=true; return writeAll(); })
+    .then(()=>{ booting=false; })
+    .catch(()=>{                                  // 이미 병원이 열려 있으면 서버가 막는다
+      booting=false;
+      DB.staff=DB.staff.filter(x=>x.id!==u.id); setSession(''); saveDB();
+      if(fdb&&myUid) refClaims().doc(myUid).delete().catch(()=>{});
+      setGate(null); setGate('login');
+      toast('이미 만들어진 병원이에요 — 전화번호와 PIN으로 로그인하세요');
+    });
   applyRole(); go('home'); toast('관리자 계정을 만들었어요');
 }
 function logout(){ if(!confirm('로그아웃할까요?')) return; setSession(''); closeModal(); applyRole(); toast('로그아웃되었습니다'); }
