@@ -1,0 +1,20 @@
+// 8/19 판(e6a07b3)으로 되돌릴 때 Firebase 콘솔에 붙여넣는 규칙.
+//
+// 지금 콘솔에 올라간 규칙은 hospapp/{ws} 문서에 `allow write: if false` 가 걸려 있다.
+// 8/19 판 앱은 그 문서 하나에 전부를 저장하므로, 이 규칙으로 바꾸지 않으면
+// 앱은 열리지만 아무것도 저장되지 않는다. 코드만 되돌리면 안 된다.
+//
+// 주의 — 이 규칙은 익명 로그인한 누구나 병원 데이터 전체(PIN 포함)를 읽는다.
+// 8/20 개편은 바로 그것을 막으려던 작업이었다. 되돌리는 동안만 쓰고,
+// 실제 직원 데이터가 들어가기 전에 되돌아온다.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 옛 단일 문서 구조. 로그인(익명)한 기기가 읽고 쓴다.
+    match /hospapp/{ws} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
