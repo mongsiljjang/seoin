@@ -23,17 +23,20 @@ service cloud.firestore {
       function hasClaim() {
         return request.auth != null && exists(claimPath());
       }
+      // 없는 필드를 그냥 읽으면 규칙이 터진다. 터진 규칙은 무조건 거절이라
+      // 왜 막혔는지 알 수 없고, 목록 읽기는 문서 하나만 이상해도 통째로 막힌다.
+      // 그래서 전부 기본값을 주고 읽는다.
       function claim() { return get(claimPath()).data; }
       function approved() {
-        return hasClaim() && claim().approved == true;
+        return hasClaim() && claim().get('approved', false) == true;
       }
       function isAdmin() {
-        return approved() && claim().role in ['관리자', '인사담당자'];
+        return approved() && (claim().get('role', '') in ['관리자', '인사담당자']);
       }
       function isOwner() {
-        return approved() && claim().role == '관리자';
+        return approved() && claim().get('role', '') == '관리자';
       }
-      function myStaffId() { return claim().staffId; }
+      function myStaffId() { return claim().get('staffId', ''); }
 
       // 아직 아무도 없는 병원인가 — 첫 관리자만 통과하는 문.
       // 문서가 있어도 명단이 비어 있으면 아직 연 것이 아니다. 앱이 시작하면서
@@ -43,8 +46,23 @@ service cloud.firestore {
       }
       function noClinicYet() {
         return !exists(rosterPath())
-            || !('staff' in get(rosterPath()).data)
-            || get(rosterPath()).data.staff.size() == 0;
+            || get(rosterPath()).data.get('staff', []).size() == 0;
+      }
+
+      // 잠겼을 때 나올 길. 관리자 기기를 전부 잃으면 아무도 승인해 줄 수 없어
+      // 병원이 통째로 잠긴다. 그때 콘솔에서 recovery/open 문서를 만들면
+      // 첫 관리자 문이 다시 열린다.
+      //
+      // 앱에서는 이 문서를 만들 수 없다(쓰기 금지). 콘솔에 들어갈 수 있는
+      // 사람 — 즉 병원 주인 — 만 열 수 있다. 앱 안에 뒷문을 두지 않는 이유다.
+      function recoveryPath() {
+        return /databases/$(database)/documents/hospapp/$(ws)/recovery/open;
+      }
+      function recoveryOpen() {
+        return exists(recoveryPath()) && get(recoveryPath()).data.get('open', false) == true;
+      }
+      function bootstrapAllowed() {
+        return noClinicYet() || recoveryOpen();
       }
 
       // 옛 단일 문서. 새 구조로 옮기는 동안만 읽는다. 쓰기는 막는다.
@@ -59,33 +77,47 @@ service cloud.firestore {
         // approved 를 반드시 담게 한다. 없는 필드를 읽으면 규칙이 터지고,
         // 터진 규칙은 무조건 거절이라 왜 막혔는지 알 수 없다.
         allow create: if request.auth != null && request.auth.uid == uid
-                      && ('approved' in request.resource.data)
-                      && (request.resource.data.approved == false || noClinicYet());
+                      && (request.resource.data.get('approved', true) == false || bootstrapAllowed());
         // 승인은 관리자만. 본인은 자기 신청을 취소(삭제)할 수 있다.
         allow update: if isAdmin();
         allow delete: if isAdmin() || (request.auth != null && request.auth.uid == uid);
       }
 
+      // 문 앞 표지판 — "이 병원에 사람이 있는가" 그것만 적혀 있다.
+      // 승인 전 기기는 명단을 못 읽어서 빈 병원인지 알 수가 없다. 그러면 아무도
+      // 받아줄 수 없는 신청서를 내고 막다른 길에 갇힌다. 이름도 번호도 없이
+      // 있다/없다만 알려주는 문서를 따로 둔다.
+      match /meta/{doc} {
+        allow read:  if request.auth != null;
+        allow write: if isAdmin() || bootstrapAllowed();
+      }
+
+      // 복구 스위치 — 앱은 켜졌는지 볼 수만 있다. 만들고 지우는 건 콘솔에서.
+      match /recovery/{doc} {
+        allow read:  if request.auth != null;
+        allow write: if false;
+      }
+
       // 다 같이 보는 것 — 재고·출퇴근·연월차·공지·거래처
       match /shared/{doc} {
-        allow read, write: if approved() || noClinicYet();
+        allow read, write: if approved() || bootstrapAllowed();
       }
 
       // 직원 명단 — PIN 은 여기 없다. 고치는 건 관리자만.
       match /roster/{doc} {
         allow read:  if approved();
-        allow write: if isAdmin() || noClinicYet();
+        allow write: if isAdmin() || bootstrapAllowed();
       }
 
       // PIN 과 인사기록 — 관리자만. 직원 기기에는 아예 안 내려간다.
       match /secrets/{doc} {
-        allow read, write: if isAdmin() || noClinicYet();
+        allow read, write: if isAdmin() || bootstrapAllowed();
       }
 
       // 계약서·급여·신청서·사직서 — 본인과 관리자만
       match /people/{staffId} {
         allow read:  if isAdmin() || (approved() && staffId == myStaffId());
-        allow write: if isAdmin() || (approved() && staffId == myStaffId()) || noClinicYet();
+        allow write: if isAdmin() || (approved() && staffId == myStaffId()) || bootstrapAllowed();
       }
     }
   }
