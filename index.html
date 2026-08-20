@@ -541,7 +541,29 @@ function fmtHours(h){ const H=Math.floor(h), M=Math.round((h-H)*60); return H+'�
    <span>근거 · 근로기준법 제56조. 다만 상시 4명 이하면 이 가산이 적용되지 않는다(제11조)</span> */
 function restDayIdx(){ const n = DB.hosp && DB.hosp.restDayIdx; return (n>=0 && n<=6)? +n : 0; }
 const WEEK_KO=['일','월','화','수','목','금','토'];
-function isRestDay(date){ const d=new Date(date+'T00:00:00'); return !isNaN(d) && d.getDay()===restDayIdx(); }
+function isWeeklyRest(date){ const d=new Date(date+'T00:00:00'); return !isNaN(d) && d.getDay()===restDayIdx(); }
+
+/* 쉬는 날 목록 — 공휴일과 병원이 정한 휴무일을 한 자리에 둔다.
+   공공데이터 API 를 붙이지 않은 이유가 셋 있다.
+     하나 · 서버가 없어 API 키를 숨길 데가 없다
+     둘   · 임시공휴일·선거일·병원 휴무일(학회·여름휴가)은 어차피 API 에 없다.
+            손으로 넣는 자리가 반드시 있어야 하고, 그러면 API 몫이 거의 없다
+     셋   · 급여가 걸린 숫자다. 자료마다 다른 날짜를 앱이 미리 박아두면 안 된다
+   그래서 날짜가 고정된 것만 앱이 만들고, 음력·대체·임시 공휴일은 사람이 넣는다. */
+function hospHolidays(){ return (DB.hosp && Array.isArray(DB.hosp.holidays))? DB.hosp.holidays : []; }
+function holidayNameOf(date){ const h=hospHolidays().find(x=>x && x.date===date); return h? (h.name||'휴일') : null; }
+function isRestDay(date){ return isWeeklyRest(date) || !!holidayNameOf(date); }
+function restDayLabel(date){
+  const n=holidayNameOf(date);
+  if(n) return n;
+  return isWeeklyRest(date)? WEEK_KO[restDayIdx()]+'요일' : '';
+}
+/* 해마다 같은 날에 오는 것만. 근로자의 날은 관공서 공휴일은 아니지만
+   근로자에게는 법으로 정해진 유급휴일이라 같이 넣는다.
+   <span>근거 · 관공서의 공휴일에 관한 규정 · 근로자의 날 제정에 관한 법률</span> */
+const FIXED_HOLIDAYS=[['01-01','신정'],['03-01','삼일절'],['05-01','근로자의 날'],
+  ['05-05','어린이날'],['06-06','현충일'],['08-15','광복절'],
+  ['10-03','개천절'],['10-09','한글날'],['12-25','성탄절']];
 function nightHours(inAt,outAt){
   if(!inAt||!outAt) return 0;
   const a=new Date(inAt), b=new Date(outAt); if(isNaN(a)||isNaN(b)||b<=a) return 0;
@@ -2329,7 +2351,7 @@ function renderAtt(){
     // 그날 무엇이 있었는지 바로 보이게 한다 — 어느 날 늦게까지 있었는지가 월 합계보다 중요하다
     const w = (inT&&outT)? dayWork(a,s) : null;
     const marks = !w? '' : [
-      w.holiday>0.01? `<span class="pill danger">휴일 ${fmtHours(w.holiday)}</span>` : '',
+      w.holiday>0.01? `<span class="pill danger">${esc(restDayLabel(dk)||'휴일')} 근무 ${fmtHours(w.holiday)}</span>` : '',
       w.over>0.01?    `<span class="pill warn">연장 ${fmtHours(w.over)}</span>` : '',
       w.night>0.01?   `<span class="pill pend">야간 ${fmtHours(w.night)}</span>` : ''
     ].filter(Boolean).join(' ');
@@ -3463,6 +3485,58 @@ function openEmpNoHelp(){
     <div class="tiny muted" style="margin-top:10px">이미 사번이 있는 분은 건드리지 않아요. 직원 카드에서 손으로 고칠 수도 있습니다.</div>`,
     payPending? payPreview : null);
 }
+function openHolidays(){
+  const list=hospHolidays().slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  const y=new Date().getFullYear();
+  const rows = list.length? list.map(h=>`<div class="item">
+      <div class="grow"><div class="t" style="font-size:14.5px">${esc(h.name||'휴일')}</div>
+        <div class="d tiny muted">${fmtDateFull(h.date)}</div></div>
+      ${isHR()?`<button class="btn soft xs" onclick="delHoliday('${esc(h.date)}')">지우기</button>`:''}
+    </div>`).join('')
+    : `<div class="tiny muted" style="text-align:center;padding:18px 6px">아직 넣은 날이 없어요.</div>`;
+  modal(`<h3>📅 쉬는 날</h3>
+    <div class="hint">여기 넣은 날에 출근하면 그날 근무는 <b>전부 휴일근로</b>로 잡힙니다. 공휴일뿐 아니라 <b>병원이 쉬기로 한 날</b>(학회·여름휴가)도 같이 넣으세요.</div>
+    ${isHR()?`<div class="two" style="margin-top:12px">
+      <label class="field"><span>날짜</span><input id="hdDate" type="date" value="${todayKey()}"></label>
+      <label class="field"><span>이름</span><input id="hdName" placeholder="예: 추석"></label>
+    </div>
+    <button class="btn block" onclick="addHoliday()">넣기</button>
+    <button class="btn soft block" style="margin-top:8px" onclick="fillFixedHolidays(${y})">${y}년 고정 공휴일 한 번에 넣기</button>
+    <div class="tiny muted" style="margin:8px 2px 12px">고정 공휴일은 <b>해마다 날짜가 같은 것</b>만 넣습니다 — 신정·삼일절·근로자의 날·어린이날·현충일·광복절·개천절·한글날·성탄절.<br>
+      <b>설날·추석·부처님오신날은 음력이라 해마다 달라지고, 대체공휴일과 임시공휴일도 그때그때 정해집니다.</b> 이건 달력을 보고 직접 넣어주세요 — 앱이 지어내면 남의 급여가 틀어집니다.</div>`:''}
+    <div class="divider"></div>
+    ${rows}
+    <div class="tiny muted" style="margin-top:12px">${isSmallBiz()
+      ? `직원이 <b>${staffCount()}명</b>이라 공휴일이 <b>법으로 정해진 유급휴일은 아닙니다.</b> 그래도 쉬기로 했으면 지켜야 하고, 나온 날은 기록해 둡니다.`
+      : `직원이 <b>${staffCount()}명</b>이라 공휴일이 <b>유급휴일입니다.</b>`}<br>
+      <span class="lawcite">근거 · 근로기준법 제55조제2항 · 관공서의 공휴일에 관한 규정</span></div>`);
+}
+function saveHolidays(arr){
+  if(!DB.hosp||typeof DB.hosp!=='object') DB.hosp={};
+  DB.hosp.holidays=arr; saveDB(); if(currentTab==='att') renderAtt();
+}
+function addHoliday(){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 넣을 수 있어요'); return; }
+  const date=($('#hdDate').value||'').trim(), name=($('#hdName').value||'').trim()||'휴일';
+  if(!date){ toast('날짜를 골라주세요'); return; }
+  const arr=hospHolidays().filter(h=>h.date!==date);
+  arr.push({date,name}); saveHolidays(arr); closeModal(); openHolidays(); toast(`${name} 넣었어요`);
+}
+function delHoliday(date){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 지울 수 있어요'); return; }
+  saveHolidays(hospHolidays().filter(h=>h.date!==date));
+  closeModal(); openHolidays(); toast('지웠어요');
+}
+function fillFixedHolidays(year){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 넣을 수 있어요'); return; }
+  const arr=hospHolidays().slice(); let n=0;
+  FIXED_HOLIDAYS.forEach(([md,name])=>{
+    const date=year+'-'+md;
+    if(!arr.some(h=>h.date===date)){ arr.push({date,name}); n++; }
+  });
+  saveHolidays(arr); closeModal(); openHolidays();
+  toast(n? `${year}년 고정 공휴일 ${n}일 넣었어요 — 설날·추석은 직접 넣어주세요` : '이미 다 들어가 있어요');
+}
 function setRestDay(v){
   if(!isHR()){ toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
   if(!DB.hosp||typeof DB.hosp!=='object') DB.hosp={};
@@ -4514,6 +4588,7 @@ function openMenu(){
       <select id="hsRest" onchange="setRestDay(this.value)">
         ${WEEK_KO.map((w,i)=>`<option value="${i}" ${restDayIdx()===i?'selected':''}>${w}요일</option>`).join('')}
       </select></label>
+    <button class="btn soft block" style="margin-top:8px" onclick="openHolidays()">📅 쉬는 날 관리 (공휴일 · 병원 휴무일) — ${hospHolidays().length}일</button>
     <div class="tiny muted" style="margin:-4px 2px 0">이 요일에 나오면 그날 근무는 <b>전부 휴일근로</b>로 잡힙니다.
       ${isSmallBiz()? `지금은 직원이 <b>${staffCount()}명</b>이라 <b>가산이 법으로 정해진 건 아닙니다</b> — 그래도 얼마나 일했는지는 남겨둡니다.` : `지금은 직원이 <b>${staffCount()}명</b>이라 <b>가산이 법으로 정해져 있습니다</b>.`}<br>
       <span class="lawcite">근거 · 근로기준법 제56조 · 제55조 · 제11조</span></div>
