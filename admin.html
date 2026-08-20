@@ -79,17 +79,26 @@ async function start(){
   try{ const u = await firebase.auth().signInAnonymously(); myUid = u.user.uid; }
   catch(e){ return show(`<div class="card"><div class="hint danger">로그인하지 못했어요 — ${esc((e&&e.code)||e)}</div></div>`); }
 
-  let isOp=false;
-  try{ isOp = (await fdb.collection('operators').doc(myUid).get()).exists; }catch(e){}
-  if(!isOp) return notOperator();
+  let isOp=false, denied=false;
+  try{ isOp = (await fdb.collection('operators').doc(myUid).get()).exists; }
+  catch(e){ denied = ((e&&e.code)||'') === 'permission-denied'; }
+  if(!isOp) return notOperator(denied);
   await load();
 }
 
 function show(html){ $('#app').innerHTML = `<h1>MediOps 제작자 콘솔</h1>` + html; }
 
-function notOperator(){
+function notOperator(denied){
+  /* 읽기 자체가 막혔다면 규칙이 아직 옛 판이다 — 문서를 아무리 만들어도 안 보인다.
+     둘을 구별해 주지 않으면 사람이 같은 자리를 몇 번이고 다시 만들게 된다. */
+  const 규칙먼저 = denied
+    ? `<div class="hint danger" style="margin-bottom:10px"><b>보안규칙이 아직 옛 판입니다.</b>
+         지금은 문서를 만들어도 앱이 읽지 못해요. Firebase 콘솔 → Firestore Database →
+         <b>규칙</b> 탭에 새 <code>firestore.rules</code> 를 붙여넣고 <b>게시</b>부터 해주세요.</div>`
+    : '';
   show(`<p class="sub">이 기기는 아직 제작자로 등록되지 않았어요.</p>
     <div class="card">
+      ${규칙먼저}
       <div class="hint warn">앱 안에서는 제작자를 만들 수 없습니다. <b>Firebase 콘솔에서 한 번만</b> 넣어주세요 —
         앱에 뒷문을 두면 누구나 열 수 있기 때문입니다.</div>
       <p class="tiny" style="margin:12px 2px 6px"><b>이 기기 번호</b></p>
