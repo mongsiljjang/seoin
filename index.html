@@ -584,13 +584,35 @@ function annualTotalOf(st){
   if(st.annualAuto!==false){ const a=annualByService(st.joinDate); if(a!=null) return a; }
   return (+st.annualTotal||0);
 }
+/* 하루 소정근무시간 — 주 3일 근무와 주 5일 근무가 한 병원에 섞여 있다.
+   8시간 근무하는 곳이 오히려 드물어서, 연차를 날수로만 세면 짧게 일하는
+   사람이 손해를 본다. 그래서 사람마다 하루 길이를 적어두고 시간으로 환산한다. */
+function dailyHoursOf(st){ const h=+((st&&st.dailyHours)||0); return h>0? h : 8; }
+
+/* 연차가 새로 채워지는 한 해를 어디서 끊는가.
+   입사일 기준이면 사람마다 다르고, 회계연도 기준이면 모두 1월 1일에 같이 끊는다.
+   병원마다 다르게 쓰기 때문에 고를 수 있어야 한다. */
+function leaveBasis(){ return (DB.hosp && DB.hosp.leaveBasis==='fiscal')? 'fiscal' : 'join'; }
+function ymdOf(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function leaveYearRange(st, ref){
+  const now = ref? new Date(ref+'T00:00:00') : new Date();
+  const fiscal = ()=>({ from: now.getFullYear()+'-01-01', to: now.getFullYear()+'-12-31' });
+  if(leaveBasis()==='fiscal' || !st || !st.joinDate) return fiscal();
+  const j=new Date(st.joinDate+'T00:00:00'); if(isNaN(j)) return fiscal();
+  let start=new Date(now.getFullYear(), j.getMonth(), j.getDate());
+  if(start>now) start=new Date(now.getFullYear()-1, j.getMonth(), j.getDate());
+  const end=new Date(start.getFullYear()+1, start.getMonth(), start.getDate());
+  end.setDate(end.getDate()-1);
+  return { from: ymdOf(start), to: ymdOf(end) };
+}
 function annualRemain(st){
-  const y = new Date().getFullYear();
+  const r = leaveYearRange(st);
   const used = DB.leaves.filter(l=>l.staffId===st.id && l.status==='approved'
-      && l.startDate && l.startDate.startsWith(String(y)))
+      && l.startDate && l.startDate>=r.from && l.startDate<=r.to)
     .reduce((s,l)=>s+(+l.days||0),0);
-  const total = annualTotalOf(st);
-  return { total, used, remain: total-used };
+  const total = annualTotalOf(st), dh = dailyHoursOf(st), remain = total-used;
+  return { total, used, remain, range:r, dailyHours:dh,
+           totalH: total*dh, usedH: used*dh, remainH: remain*dh };
 }
 
 /* ========================================================================
@@ -2292,11 +2314,19 @@ function renderAtt(){
     const hrs = recs.reduce((t,a)=>t+hoursBetween(a.inAt,a.outAt),0);
     return {s,days,hrs};
   });
-  $('#attMonthly').innerHTML = rows.map(r=>`
-    <div class="item"><div class="avatar">${esc(initials(r.s.name))}</div>
+  // 계약시간을 적어둔 사람은 넘긴 시간·모자란 시간을 따로 보여준다.
+  // 몇 배로 쳐서 얼마를 줄지는 노무사가 정한다 — 앱은 시간까지만 센다.
+  $('#attMonthly').innerHTML = rows.map(r=>{
+    const c=+r.s.monthlyHours||0, gap=c? r.hrs-c : 0;
+    const gapPill = !c ? ''
+      : gap>0.01 ? `<div class="tiny" style="color:var(--warn);font-weight:800">계약보다 ${fmtHours(gap)} 더</div>`
+      : gap<-0.01 ? `<div class="tiny muted">계약보다 ${fmtHours(-gap)} 모자람</div>`
+      : `<div class="tiny" style="color:var(--ok);font-weight:800">계약시간과 같음</div>`;
+    return `<div class="item"><div class="avatar">${esc(initials(r.s.name))}</div>
       <div class="grow"><div class="t" style="font-size:14.5px">${esc(r.s.name)}</div>
-        <div class="d">${mk.replace('-','년 ')}월 · 근무 ${r.days}일</div></div>
-      <div style="text-align:right"><div style="font-weight:800">${fmtHours(r.hrs)}</div></div></div>`).join('');
+        <div class="d">${mk.replace('-','년 ')}월 · 근무 ${r.days}일${c?` · 계약 ${c}시간`:''}</div></div>
+      <div style="text-align:right"><div style="font-weight:800">${fmtHours(r.hrs)}</div>${gapPill}</div></div>`;
+  }).join('');
 }
 function getAtt(staffId,date,create){
   let a=DB.attendance.find(x=>x.staffId===staffId && x.date===date);
@@ -2377,13 +2407,14 @@ function renderLeaveStatus(){
   if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👤','직원을 먼저 등록하세요')}</div>`; return; }
   const y=new Date().getFullYear();
   box.innerHTML = `<div class="hint" style="margin-bottom:12px">${leaveNote()}</div>
-    <h2 class="sec">${y}년 ${leaveWord()} 잔여</h2>` + DB.staff.filter(s=>s.active!==false).map(s=>{
+    <h2 class="sec">${leaveBasis()==='fiscal'? y+'년' : '올해분'} ${leaveWord()} 잔여</h2>` + DB.staff.filter(s=>s.active!==false).map(s=>{
     const r=annualRemain(s); const ratio = r.total? Math.min(100,Math.round(r.used/r.total*100)):0;
     return `<div class="card" style="padding:13px 14px">
       <div class="spread"><div class="row" style="gap:10px"><div class="avatar">${esc(initials(s.name))}</div>
         <div><div class="t" style="font-weight:800">${esc(s.name)}</div><div class="d tiny muted">${esc(s.dept||'')}</div></div></div>
         <div style="text-align:right"><div class="big" style="font-size:22px;color:${r.remain<=1?'var(--danger)':'var(--brand)'}">${r.remain}</div>
-          <div class="tiny muted">잔여 / 총 ${r.total}일</div></div></div>
+          <div class="tiny muted">잔여 / 총 ${r.total}일</div>
+          <div class="tiny muted">${fmtHours(r.remainH)} · 하루 ${r.dailyHours}시간</div></div></div>
       <div style="height:7px;background:#eef2f4;border-radius:9px;margin-top:10px;overflow:hidden">
         <div style="height:100%;width:${ratio}%;background:${r.remain<=1?'var(--danger)':'var(--brand)'}"></div></div>
       <div class="tiny muted" style="margin-top:5px">사용 ${r.used}일</div>
@@ -2394,7 +2425,7 @@ function renderLeaveList(){
   const box=$('#leaveList');
   const list=DB.leaves.slice().sort((a,b)=> (b.createdAt||'').localeCompare(a.createdAt||''));
   if(!list.length){ box.innerHTML=`<div class="card">${emptyBox('🌴','연월차 신청 내역이 없어요')}</div>`; return; }
-  const typeLabel={annual:'연차',monthly:'월차',half:'반차',sick:'병가',etc:'기타'};
+  const typeLabel={annual:'연차',monthly:'월차',half:'반차',hours:'시간연차',sick:'병가',etc:'기타'};
   box.innerHTML = list.map(l=>{
     const s=staffById(l.staffId);
     const stPill = l.status==='approved'?`<span class="pill ok">승인</span>`
@@ -2404,7 +2435,7 @@ function renderLeaveList(){
       <div class="spread"><div class="row" style="gap:8px">
         <span class="pill info">${typeLabel[l.type]||l.type}</span>
         <span style="font-weight:800">${esc(s?s.name:'(삭제된 직원)')}</span></div>${stPill}</div>
-      <div class="tiny muted" style="margin:7px 0 2px">${range} · ${l.days}일 ${l.reason?'· '+esc(l.reason):''}</div>
+      <div class="tiny muted" style="margin:7px 0 2px">${range} · ${l.type==='hours'&&+l.hours? (+l.hours)+'시간 ('+l.days+'일)' : l.days+'일'} ${l.reason?'· '+esc(l.reason):''}</div>
       <div class="row" style="margin-top:9px">
         ${l.status!=='approved'?`<button class="btn ok xs" onclick="setLeave('${l.id}','approved')">승인</button>`:''}
         ${l.status!=='rejected'?`<button class="btn danger xs" onclick="setLeave('${l.id}','rejected')">반려</button>`:''}
@@ -2427,21 +2458,45 @@ function renderLeaveNew(){
     ${staffField}
     <label class="field"><span>종류</span><select id="lvType" onchange="lvTypeChange()">
       <option value="annual">연차 (1일)</option><option value="half">반차 (0.5일)</option>
+      <option value="hours">시간연차 (시간 단위)</option>
       <option value="monthly">월차 (1일)</option><option value="sick">병가</option><option value="etc">기타</option>
     </select></label>
     <div class="two">
       <label class="field"><span>시작일 *</span><input id="lvStart" type="date" value="${todayKey()}" onchange="lvCalc()"></label>
       <label class="field"><span>종료일 *</span><input id="lvEnd" type="date" value="${todayKey()}" onchange="lvCalc()"></label>
     </div>
+    <label class="field" id="lvHoursWrap" style="display:none"><span>사용 시간</span>
+      <input id="lvHours" type="number" step="0.5" value="1" oninput="lvHoursCalc()"></label>
+    <div class="tiny muted" id="lvHoursNote" style="display:none;margin:-6px 2px 10px"></div>
     <label class="field"><span>사용 일수</span><input id="lvDays" type="number" step="0.5" value="1"></label>
     <label class="field"><span>사유 (선택)</span><input id="lvReason" placeholder="예: 개인 사정"></label>
     <button class="btn block" onclick="submitLeave()">신청하기</button>
   </div>
   <div class="hint" style="margin-top:12px">💡 신청하면 <b>관리자</b>가 승인/반려해요. 승인된 연차만 잔여일수에서 차감됩니다.</div>`;
 }
-function lvTypeChange(){ const t=$('#lvType').value; if(t==='half'){ $('#lvEnd').value=$('#lvStart').value; $('#lvDays').value=0.5; } else lvCalc(); }
+// 신청자가 누구인지에 따라 하루 길이가 다르다. 시간연차는 그 사람 기준으로 나눈다.
+function lvStaffNow(){
+  const id = isAdmin() ? (($('#lvStaff')||{}).value) : (currentUser() && currentUser().id);
+  return id? staffById(id) : null;
+}
+function lvHoursCalc(){
+  const st=lvStaffNow(), dh=dailyHoursOf(st), h=Math.max(0,+($('#lvHours').value)||0);
+  $('#lvDays').value = Math.round((h/dh)*100)/100;
+  const note=$('#lvHoursNote');
+  if(note) note.innerHTML = `${esc(st?st.name:'')}님은 하루 <b>${dh}시간</b>이라 ${h}시간은 <b>${$('#lvDays').value}일</b>로 차감돼요.`;
+}
+function lvTypeChange(){
+  const t=$('#lvType').value, hw=$('#lvHoursWrap'), hn=$('#lvHoursNote');
+  const isH = t==='hours';
+  if(hw) hw.style.display = isH? '' : 'none';
+  if(hn) hn.style.display = isH? '' : 'none';
+  if(isH){ $('#lvEnd').value=$('#lvStart').value; lvHoursCalc(); return; }
+  if(t==='half'){ $('#lvEnd').value=$('#lvStart').value; $('#lvDays').value=0.5; } else lvCalc();
+}
 function lvCalc(){
-  const t=$('#lvType').value; if(t==='half'){ $('#lvEnd').value=$('#lvStart').value; $('#lvDays').value=0.5; return; }
+  const t=$('#lvType').value;
+  if(t==='hours'){ $('#lvEnd').value=$('#lvStart').value; lvHoursCalc(); return; }
+  if(t==='half'){ $('#lvEnd').value=$('#lvStart').value; $('#lvDays').value=0.5; return; }
   const s=$('#lvStart').value, e=$('#lvEnd').value; if(!s||!e) return;
   if(e<s){ $('#lvEnd').value=s; }
   const days=Math.round((new Date($('#lvEnd').value)-new Date(s))/8.64e7)+1;
@@ -2453,9 +2508,11 @@ function submitLeave(){
   if(!staffId){ toast('신청자를 확인하세요'); return; }
   const startDate=$('#lvStart').value, endDate=$('#lvEnd').value, days=+$('#lvDays').value||0;
   if(!startDate||!endDate){ toast('날짜를 선택하세요'); return; }
-  if(!days){ toast('사용 일수를 확인하세요'); return; }
+  const hours = type==='hours' ? Math.max(0, +(($('#lvHours')||{}).value)||0) : 0;
+  if(type==='hours' && !hours){ toast('사용 시간을 넣어주세요'); return; }
+  if(!days){ toast(type==='hours'?'사용 시간을 확인하세요':'사용 일수를 확인하세요'); return; }
   DB.leaves.push({id:uid(), staffId, type, startDate, endDate:endDate<startDate?startDate:endDate,
-    days, reason:$('#lvReason').value.trim(), status:'pending', createdAt:now()});
+    days, hours, reason:$('#lvReason').value.trim(), status:'pending', createdAt:now()});
   saveDB(); toast('신청되었습니다'); leaveTab('list'); renderHome();
 }
 
@@ -2488,6 +2545,13 @@ function openStaffForm(edit){
     <label class="field" style="display:flex;align-items:center;gap:8px;margin:-4px 2px 8px">
       <input type="checkbox" id="sAnnualAuto" style="width:auto;margin:0" ${(!s||s.annualAuto!==false)?'checked':''} onchange="staffAnnualSync()">
       <span id="sAnnualHint" class="tiny muted" style="margin:0;font-weight:600"></span></label>
+    <div class="two">
+      <label class="field"><span>하루 근무시간</span>
+        <input id="sDaily" type="number" step="0.5" inputmode="decimal" value="${s?dailyHoursOf(s):8}"></label>
+      <label class="field"><span>한 달 계약시간 (안 적어도 돼요)</span>
+        <input id="sMonthly" type="number" inputmode="numeric" value="${s&&+s.monthlyHours>0?+s.monthlyHours:''}" placeholder="예: 80"></label>
+    </div>
+    <div class="tiny muted" style="margin:-6px 2px 10px">하루 근무시간은 <b>${leaveWord()}를 시간으로 환산</b>할 때 씁니다 — 주 3일 근무와 주 5일 근무가 섞여 있으면 날수만으로는 공평하지 않아요.<br>한 달 계약시간을 적어두면 출퇴근 화면에서 <b>넘긴 시간</b>이 따로 보입니다.</div>
     <div class="field"><span>담당 분야</span>
       <div id="sDuties" class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:6px">
         ${(DB.duties||[]).length? (DB.duties||[]).map(d=>`<label class="dchip">
@@ -2552,8 +2616,10 @@ function saveStaff(id){
   if(empno && DB.staff.some(x=>x.id!==id && String(x.empno||'')===empno)){
     toast('이미 쓰고 있는 사번이에요'); return; }
   const duties=[...document.querySelectorAll('#sDuties input:checked')].map(x=>x.value);
+  const dailyHours = Math.min(24, Math.max(1, +(($('#sDaily')||{}).value) || 8));
+  const monthlyHours = Math.max(0, parseInt((($('#sMonthly')||{}).value)||'',10) || 0);
   const base={ name, dept:$('#sDept').value.trim(), position:$('#sPos').value.trim(),
-    joinDate:jd, annualAuto, annualTotal, phone, role, duties, empno };
+    joinDate:jd, annualAuto, annualTotal, dailyHours, monthlyHours, phone, role, duties, empno };
   if(id){
     const s=staffById(id);
     if(pinIn){ if(!/^\d{4,8}$/.test(pinIn)){ toast('PIN은 숫자 4~8자리'); return; } base.pin=pinIn; }
@@ -3331,6 +3397,13 @@ function openEmpNoHelp(){
     <button class="btn soft block" style="margin-top:8px" onclick="exportRoster()">📄 명단 내려받기 (세무사 전달용)</button>
     <div class="tiny muted" style="margin-top:10px">이미 사번이 있는 분은 건드리지 않아요. 직원 카드에서 손으로 고칠 수도 있습니다.</div>`,
     payPending? payPreview : null);
+}
+function setLeaveBasis(v){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
+  if(!DB.hosp||typeof DB.hosp!=='object') DB.hosp={};
+  DB.hosp.leaveBasis = (v==='fiscal')? 'fiscal' : 'join';
+  saveDB(); renderHome(); if(currentTab==='leave') renderLeave(); if(currentTab==='staff') renderStaff();
+  toast(leaveBasis()==='fiscal'? '회계연도(1월 1일) 기준으로 셉니다' : '입사일 기준으로 셉니다');
 }
 function setHeadcount(v){
   if(!isHR()){ toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
@@ -4352,6 +4425,15 @@ function openMenu(){
         placeholder="지금 재직자 ${DB.staff.filter(x=>x.active!==false).length}명" onchange="setHeadcount(this.value)"></label>
     <div class="tiny muted" style="margin:-4px 2px 0">지금 기준: <b>${staffCount()}명 · ${isSmallBiz()?'5인 미만':'5인 이상'}</b> ${isSmallBiz()?'(연차는 병원이 정하는 휴가)':'(연차가 법으로 정해져 있음)'}<br>
       <span class="lawcite">사장님·대표는 빼고, 아르바이트·수습도 실제로 일하면 넣어 셉니다</span></div>
+    <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📅 ${leaveWord()}를 어디서 끊나요</div>
+    <div class="tiny muted" style="margin:0 2px 8px">한 해가 지나 ${leaveWord()}가 새로 채워지는 시점이에요. 병원마다 다르게 씁니다.</div>
+    <label class="field"><span>산정 기준</span>
+      <select id="lvBasis" onchange="setLeaveBasis(this.value)">
+        <option value="join" ${leaveBasis()==='join'?'selected':''}>입사일 기준 — 사람마다 다른 날에 채워짐</option>
+        <option value="fiscal" ${leaveBasis()==='fiscal'?'selected':''}>회계연도 기준 — 모두 1월 1일에 같이 채워짐</option>
+      </select></label>
+    <div class="tiny muted" style="margin:-4px 2px 0">회계연도로 맞추는 곳은 입사 첫 해 몫을 <b>돈으로 정산하고</b> 넘어갑니다. 어느 쪽이든 직원에게 불리하면 안 돼요.<br><span class="lawcite">근거 · 근로기준법 제60조</span></div>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🔐 급여 열쇠</div>
     <div class="tiny muted" style="margin:0 2px 8px">급여명세서와 근로계약서 본문은 이 열쇠로 잠겨 저장돼요. ${DB.payLock? `<b style="color:var(--ok)">잠금 설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
