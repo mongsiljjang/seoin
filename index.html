@@ -548,7 +548,7 @@ function leaveUsed(staffId, type, year){
    근로계약서·급여명세서·주휴수당·최저임금·퇴직금은 사람 수와 무관하게 적용된다. */
 function staffCount(){
   const n=DB.hosp && +DB.hosp.headcount;
-  return n>0? n : DB.staff.filter(s=>s.active!==false).length;
+  return n>0? n : DB.staff.filter(s=>s.active!==false && !isEmployer(s)).length;
 }
 function isSmallBiz(){ return staffCount()<5; }
 // 5인 미만이면 연차가 법으로 정해진 게 아니라 병원이 정한 휴가다
@@ -2407,7 +2407,7 @@ function renderLeaveStatus(){
   if(!DB.staff.length){ box.innerHTML=`<div class="card">${emptyBox('👤','직원을 먼저 등록하세요')}</div>`; return; }
   const y=new Date().getFullYear();
   box.innerHTML = `<div class="hint" style="margin-bottom:12px">${leaveNote()}</div>
-    <h2 class="sec">${leaveBasis()==='fiscal'? y+'년' : '올해분'} ${leaveWord()} 잔여</h2>` + DB.staff.filter(s=>s.active!==false).map(s=>{
+    <h2 class="sec">${leaveBasis()==='fiscal'? y+'년' : '올해분'} ${leaveWord()} 잔여</h2>` + laborStaff().map(s=>{
     const r=annualRemain(s); const ratio = r.total? Math.min(100,Math.round(r.used/r.total*100)):0;
     return `<div class="card" style="padding:13px 14px">
       <div class="spread"><div class="row" style="gap:10px"><div class="avatar">${esc(initials(s.name))}</div>
@@ -2534,6 +2534,12 @@ function openStaffForm(edit){
         ${[ROLE_STAFF,ROLE_HR,ROLE_OWNER].map(r=>`<option value="${r}" ${(s?s.role:ROLE_STAFF)===r?'selected':''}>${ROLE_KO[r]}</option>`).join('')}
       </select>` : `<input value="${ROLE_KO[(s&&s.role)||ROLE_STAFF]}" disabled title="권한은 최고관리자만 바꿀 수 있어요">`}</label>
     </div>
+    <label class="field"><span>신분</span>
+      <select id="sEmp">
+        <option value="employee" ${(!s||!isEmployer(s))?'selected':''}>근로자 — 근로계약서·급여명세서·연차 대상</option>
+        <option value="owner" ${s&&isEmployer(s)?'selected':''}>사업주(원장·대표) — 해당 없음</option>
+      </select></label>
+    <div class="tiny muted" style="margin:-6px 2px 10px">사업주는 자기 자신과 근로계약을 맺지 않아요. <b>상시 근로자 수에서도 빠집니다</b> — 이 숫자가 5명을 넘느냐에 따라 지켜야 할 법이 달라지니 정확해야 합니다.<br>봉직의(페이닥터)처럼 <b>원장이라 불려도 월급을 받는 분은 근로자</b>입니다.</div>
     <label class="field"><span>사번 (급여 엑셀과 맞추는 칸 · 안 적어도 돼요)</span>
       <input id="sEmpNo" value="${s?esc(s.empno||''):''}" placeholder="예: 2021-003"></label>
     <div class="tiny muted" style="margin:-6px 2px 10px">급여 엑셀에 사번 열이 있으면 여기에 같은 값을 넣어주세요. <b>동명이인이어도 안 묻고 정확히 붙습니다.</b></div>
@@ -2618,8 +2624,9 @@ function saveStaff(id){
   const duties=[...document.querySelectorAll('#sDuties input:checked')].map(x=>x.value);
   const dailyHours = Math.min(24, Math.max(1, +(($('#sDaily')||{}).value) || 8));
   const monthlyHours = Math.max(0, parseInt((($('#sMonthly')||{}).value)||'',10) || 0);
+  const employment = (($('#sEmp')||{}).value==='owner')? 'owner' : 'employee';
   const base={ name, dept:$('#sDept').value.trim(), position:$('#sPos').value.trim(),
-    joinDate:jd, annualAuto, annualTotal, dailyHours, monthlyHours, phone, role, duties, empno };
+    joinDate:jd, annualAuto, annualTotal, dailyHours, monthlyHours, employment, phone, role, duties, empno };
   if(id){
     const s=staffById(id);
     if(pinIn){ if(!/^\d{4,8}$/.test(pinIn)){ toast('PIN은 숫자 4~8자리'); return; } base.pin=pinIn; }
@@ -2793,6 +2800,14 @@ async function doPayKeyReset(){
    서버가 없어 문자·카톡은 못 보낸다. 대신 필독 공지는 확인을 누를 때까지
    홈 맨 위에 붙어 있고, 관리자는 누가 안 읽었는지 이름으로 본다. */
 function activeStaff(){ return DB.staff.filter(s=>s.active!==false); }
+/* 사업주(원장·대표)는 자기 자신과 근로계약을 맺지 않는다.
+   근로계약서·급여명세서·연차·퇴직금은 전부 '근로자'에게 적용되는 것이라
+   사업주를 그 명단에 넣어두면 앱이 없는 의무를 있다고 말하게 된다.
+
+   권한과 신분은 다른 것이라 따로 둔다. 실장은 관리 권한을 갖지만 근로자이고,
+   봉직의(페이닥터)는 원장이라 불려도 근로자다. 그래서 사람이 골라야 한다. */
+function isEmployer(s){ return !!(s && s.employment==='owner'); }
+function laborStaff(){ return activeStaff().filter(s=>!isEmployer(s)); }
 // 같은 이름이 둘이면 부서를 붙여야 누구인지 알아본다
 function staffLabel(id){
   const s=staffById(id); if(!s) return '';
@@ -3042,7 +3057,7 @@ function printContract(sid){
   });
 }
 function hrContractView(){
-  const all=activeStaff();
+  const all=laborStaff();
   const done=all.filter(s=>{const c=contractOf(s.id);return c&&c.agreedAt;}).length;
   return `<div class="hint">근로계약서는 <b>써서 직원에게 건네야</b> 합니다. 써놓고 안 건네도 위반이라 <b>500만원 이하 벌금</b>을 물 수 있어요(과태료가 아니라 형사처벌입니다).<br>
     <span class="lawcite">근거 · 근로기준법 제17조 · 제114조</span></div>
@@ -3262,7 +3277,7 @@ function payPreview(){
     const named=p.rows.filter(r=>r.staffId);
     const ids=named.map(r=>r.staffId);
     const twice=[...new Set(ids.filter((x,i)=>ids.indexOf(x)!==i))].map(id=>(staffById(id)||{}).name||'');
-    const missing=activeStaff().filter(s=>!ids.includes(s.id));
+    const missing=laborStaff().filter(s=>!ids.includes(s.id));
     const retired=named.filter(r=>(staffById(r.staffId)||{}).active===false);
     const weak=named.filter(r=>r.why==='이름');
     const dup=(DB.payslips||[]).filter(x=>x.ym===p.ym).length;
@@ -3538,7 +3553,7 @@ function payExportCsv(ym){
 }
 function hrPayView(){
   const yms=[...new Set((DB.payslips||[]).map(x=>x.ym))].sort().reverse();
-  const all=activeStaff();
+  const all=laborStaff();
   return `<div class="hint">엑셀 한 장을 올리면 직원별로 쪼개 드려요. <b>금액은 한 사람씩 열었을 때만</b> 보입니다.</div>
     <div class="spread" style="margin:12px 2px 10px">
       <span class="tiny muted">${DB.payLock? (payUnlocked()?'🔓 지금 열려 있어요 (3분)':'🔐 잠겨 있어요'):'⚠️ 급여 열쇠를 먼저 정하세요'}</span>
@@ -3821,7 +3836,7 @@ async function scanContracts(){
   contractGaps=out;
 }
 function hrCheckView(){
-  const all=activeStaff(), ym=monthKey();
+  const all=laborStaff(), ym=monthKey();
   const noContract=all.filter(s=>!contractOf(s.id));
   const notAgreed=all.filter(s=>{const c=contractOf(s.id);return c&&!c.agreedAt;});
   const gaps=contractGaps? all.filter(s=>(contractGaps[s.id]||[]).length) : [];
@@ -4278,7 +4293,8 @@ function hrListHtml(){
     + (list.length? list.map(s=>{
     const r=annualRemain(s), c=contractOf(s.id), ps=payslipsOf(s.id)[0], rg=resignOf(s.id);
     const flags=[];
-    if(!c) flags.push('<span class="pill danger">계약서 없음</span>');
+    if(isEmployer(s)) flags.push('<span class="pill grey">사업주</span>');
+    else if(!c) flags.push('<span class="pill danger">계약서 없음</span>');
     else if(!c.agreedAt) flags.push('<span class="pill warn">계약서 확인 전</span>');
     if(rg && rg.status==='제출') flags.push('<span class="pill warn">사직서</span>');
     if(s.active===false) flags.push(`<span class="pill grey">퇴사${s.retiredAt?' · '+esc(s.retiredAt):''}</span>`);
