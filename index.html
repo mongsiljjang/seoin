@@ -3927,6 +3927,97 @@ function delVendor(id){
 /* ---- 퇴사 처리 --------------------------------------------------------
    근로기준법 §42 는 근로계약 서류를 퇴직일부터 3년 보존하라고 한다.
    그래서 삭제가 아니라 '퇴사'로 남긴다 — 로그인만 막고 기록은 지키자. */
+/* 직원 한 명을 놓고 할 일이 세 탭에 흩어져 있었다 —
+   출퇴근은 출퇴근 탭, 연차 승인은 연월차 탭, 퇴사는 직원 탭.
+   한 사람을 처리하려고 탭을 옮겨 다니게 하지 않는다. 여기 다 모은다. */
+function pendingLeavesOf(sid){
+  return (DB.leaves||[]).filter(l=>l.staffId===sid && l.status==='pending')
+    .sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate)));
+}
+function openStaffHub(id){
+  const s=staffById(id); if(!s) return;
+  const tk=todayKey(), a=DB.attendance.find(x=>x.staffId===id && x.date===tk);
+  const inT=a&&a.inAt?fmtTime(a.inAt):null, outT=a&&a.outAt?fmtTime(a.outAt):null;
+  const r=annualRemain(s), c=contractOf(id), ps=payslipsOf(id)[0], rg=resignOf(id);
+  const mk=monthKey();
+  const recs=DB.attendance.filter(x=>x.staffId===id && String(x.date||'').startsWith(mk));
+  const mh=recs.reduce((t,x)=>t+hoursBetween(x.inAt,x.outAt),0);
+  const mw=recs.reduce((t,x)=>{ const d=dayWork(x,s); t.over+=d.over; t.night+=d.night; t.holiday+=d.holiday; return t; },
+                       {over:0,night:0,holiday:0});
+  const pend=pendingLeavesOf(id);
+  const gone=s.active===false;
+  const emp=isEmployer(s);
+
+  const flags=[];
+  if(emp) flags.push('<span class="pill grey">사업주</span>');
+  else if(!c) flags.push('<span class="pill danger">계약서 없음</span>');
+  else if(!c.agreedAt) flags.push('<span class="pill warn">계약서 확인 전</span>');
+  if(rg && rg.status==='제출') flags.push('<span class="pill warn">사직서 제출</span>');
+  if(gone) flags.push(`<span class="pill grey">퇴사${s.retiredAt?' · '+esc(s.retiredAt):''}</span>`);
+
+  const todayLine = gone? '퇴사한 직원이에요'
+    : inT&&outT? `출근 ${inT} · 퇴근 ${outT} · ${fmtHours(hoursBetween(a.inAt,a.outAt))}`
+    : inT? `출근 ${inT} · 근무중` : '아직 안 찍었어요';
+  const todayBtns = gone? ''
+    : !inT? `<button class="btn ok sm" onclick="hubCheck('${id}','in')">출근</button>`
+    : !outT? `<button class="btn warn sm" onclick="hubCheck('${id}','out')">퇴근</button>`
+    : `<span class="pill info">오늘 완료</span>`;
+
+  const kinds=[ mw.over>0.01? `<span class="pill warn">연장 ${fmtHours(mw.over)}</span>`:'',
+                mw.night>0.01? `<span class="pill pend">야간 ${fmtHours(mw.night)}</span>`:'',
+                mw.holiday>0.01? `<span class="pill danger">휴일 ${fmtHours(mw.holiday)}</span>`:'' ].filter(Boolean).join(' ');
+
+  const typeKo={annual:'연차',monthly:'월차',half:'반차',hours:'시간연차',sick:'병가',etc:'기타'};
+  const pendRows = pend.length? pend.map(l=>`<div class="item">
+      <div class="grow"><div class="t" style="font-size:14px">${typeKo[l.type]||l.type} · ${l.type==='hours'&&+l.hours? (+l.hours)+'시간':l.days+'일'}</div>
+        <div class="d tiny muted">${l.startDate===l.endDate? fmtDateFull(l.startDate) : fmtDate(l.startDate)+'~'+fmtDate(l.endDate)}${l.reason?' · '+esc(l.reason):''}</div></div>
+      <div class="row" style="gap:5px">
+        <button class="btn ok xs" onclick="hubLeave('${id}','${l.id}','approved')">승인</button>
+        <button class="btn danger xs" onclick="hubLeave('${id}','${l.id}','rejected')">반려</button>
+      </div></div>`).join('')
+    : `<div class="tiny muted" style="padding:6px 2px">기다리는 신청이 없어요.</div>`;
+
+  modal(`<h3>👤 ${esc(s.name)} <span class="tiny muted" style="font-weight:600">${esc(s.position||'')} ${esc(s.dept||'')}</span></h3>
+    ${flags.length?`<div class="row wrap" style="gap:5px;margin:-6px 2px 12px">${flags.join('')}</div>`:''}
+
+    ${sechead('🕒 오늘 출퇴근', '관리자가 대신 찍어주는 자리입니다. 직원이 본인 폰으로 찍으면 GPS 확인이 걸리지만, 여기서 대신 찍는 것에는 걸리지 않아요.')}
+    <div class="spread" style="margin-bottom:4px"><span class="tiny">${todayLine}</span>${todayBtns}</div>
+    <div class="setnote">${mk.replace('-','년 ')}월 누적 <b>${fmtHours(mh)}</b> · 근무 ${recs.filter(x=>x.inAt).length}일${(+s.monthlyHours>0)?` · 계약 ${+s.monthlyHours}시간`:''}</div>
+    ${kinds?`<div class="row wrap" style="gap:5px;margin-top:6px">${kinds}</div>`:''}
+
+    <div class="divider"></div>
+    ${sechead(`🌴 ${leaveWord()} · 승인 대기 ${pend.length}건`, '직원이 낸 신청을 여기서 바로 승인하거나 반려합니다. <b>승인한 것만</b> 잔여에서 빠집니다.')}
+    ${emp? `<div class="tiny muted" style="padding:6px 2px">사업주라 ${leaveWord()} 대상이 아니에요.</div>`
+          : `<div class="setnote" style="margin-top:0">잔여 <b>${r.remain}일</b> · ${fmtHours(r.remainH)} / 총 ${r.total}일 (하루 ${r.dailyHours}시간)</div>
+             <div style="margin-top:6px">${pendRows}</div>`}
+
+    <div class="divider"></div>
+    ${sechead('📁 서류', '근로계약서는 <b>써서 직원에게 건네야</b> 합니다. 급여명세서는 급여를 줄 때마다 한 장씩 드려야 하고요.<br><span class="lawcite">근거 · 근로기준법 제17조 · 제48조제2항</span>')}
+    <div class="setrow">
+      <button class="btn soft sm" onclick="openContract('${id}')">📝 계약서</button>
+      ${ps?`<button class="btn soft sm" onclick="openPayslip('${ps.id}')">💰 ${esc(ps.ym)}</button>`:''}
+      ${rg?`<button class="btn soft sm" onclick="openResignView('${rg.id}')">📄 사직서</button>`:''}
+    </div>
+
+    <div class="divider"></div>
+    ${sechead('⚙️ 관리', '퇴사 처리는 <b>로그인만 막고 기록은 그대로 둡니다.</b> 근로계약 서류는 퇴직일부터 3년간 보관해야 해서 지우지 않습니다.<br><span class="lawcite">근거 · 근로기준법 제42조</span>')}
+    <div class="setrow">
+      <button class="btn soft sm" onclick="openStaffForm('${id}')">✏️ 정보 수정</button>
+      ${gone? `<button class="btn soft sm" onclick="unretireStaff('${id}')">↩︎ 복직</button>`
+            : `<button class="btn soft sm" onclick="retireStaff('${id}')">🚪 퇴사 처리</button>`}
+    </div>`);
+}
+// 여기서 찍고 승인한 뒤에는 이 화면을 다시 그린다 — 방금 한 일이 바로 보여야 한다
+function hubCheck(id, kind){
+  const tk=todayKey();
+  if(kind==='in') checkIn(id,tk); else checkOut(id,tk);
+  openStaffHub(id);
+}
+function hubLeave(id, leaveId, status){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  setLeave(leaveId, status);
+  openStaffHub(id);
+}
 function retireStaff(id){
   if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
   const s=staffById(id); if(!s) return;
@@ -3943,7 +4034,7 @@ function retireStaff(id){
     <label class="field"><span>메모 (안 적어도 돼요)</span><input id="rtNote" placeholder="예: 개인 사정 · 이직"></label>
     <button class="btn block" onclick="doRetire('${id}')">퇴사 처리</button>
     <div class="tiny muted" style="margin-top:10px">잘못 눌러도 직원 카드에서 <b>복직</b>으로 되돌릴 수 있어요.</div>`,
-    ()=>openStaffForm(id));
+    ()=>openStaffHub(id));
 }
 function doRetire(id){
   const s=staffById(id); if(!s) return;
@@ -4452,7 +4543,7 @@ function hrListHtml(){
     if(s.active===false) flags.push(`<span class="pill grey">퇴사${s.retiredAt?' · '+esc(s.retiredAt):''}</span>`);
     dutiesOf(s).forEach(d=>flags.push(`<span class="pill info">${esc(d)}</span>`));
     return `<div class="card" style="padding:13px 14px;margin-bottom:8px">
-      <div class="spread" style="cursor:pointer" onclick="openStaffForm('${s.id}')">
+      <div class="spread" style="cursor:pointer" onclick="openStaffHub('${s.id}')">
         <div class="row" style="gap:11px"><div class="avatar">${esc(initials(s.name))}</div>
           <div><div class="t" style="font-weight:800">${esc(s.name)} <span class="tiny muted" style="font-weight:600">${esc(s.position||'')}</span>
             ${s.role!==ROLE_STAFF?`<span class="pill info">${esc(ROLE_KO[s.role]||'')}</span>`:''}</div>
