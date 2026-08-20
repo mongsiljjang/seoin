@@ -1299,10 +1299,10 @@ function renderImplant(){
   let total=0, low=0, zero=0;
   list.forEach(p=>p.variants.forEach(v=>{ total+=(+v.qty||0); if(v.qty===0)zero++; else if(v.qty<=(+v.minQty||0))low++; }));
   const head=`<div class="spread" style="margin:2px 2px 10px"><h2 class="sec" style="margin:0">🦷 임플란트</h2>
-    <div class="row" style="gap:6px">
-      <button class="btn sm soft" onclick="openUploads()">📂 파일</button>
-      <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
-      <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div></div>`;
+      <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div>
+    <div class="btnrow" style="margin:0 0 12px">
+      <button class="btn soft sm grow" onclick="openUploads()">📂 파일</button>
+      <button class="btn soft sm grow" onclick="openMasters('fixtures')">⚙️ 재료 목록</button></div>`;
   if(!list.length){ box.innerHTML = head+`<div class="card">${emptyBox('🦷','등록된 임플란트가 없어요.<br><b>📂 파일</b>로 거래명세서나 규격 목록을 올리거나,<br><b>＋제품</b>으로 직접 추가하세요.')}</div>`; refreshBell(); return; }
   if(!currentImplantId || !implantById(currentImplantId)) currentImplantId=list[0].id;
   const summary=`<div class="summary3">
@@ -2089,11 +2089,12 @@ function claimReport(batch){
       ? `<div class="card" style="box-shadow:none;background:var(--ok-soft);border:0;padding:12px 14px">
            <b class="tiny">✅ 다 맞아요.</b> <span class="tiny">청구·대장·재고 세 숫자가 같습니다.</span></div>`
       : `<div class="card" style="box-shadow:none;background:var(--warn-soft,#fff6e5);border:0;padding:11px 13px;margin-bottom:10px">
-           <b class="tiny">숫자가 어긋나요.</b>
+           <b class="tiny">${(claimTot===ledTot&&stkTot===ledTot)?'개수는 맞는데 사람이 안 맞아요.':'숫자가 어긋나요.'}</b>
            <div class="tiny" style="margin-top:4px">
              ${claimTot>ledTot?`청구가 대장보다 <b>${claimTot-ledTot}개</b> 많아요 — 대장을 안 적었을 수 있어요.<br>`:''}
              ${ledTot>claimTot?`대장이 청구보다 <b>${ledTot-claimTot}개</b> 많아요 — <b>청구를 빠뜨렸는지</b> 확인하세요.<br>`:''}
-             ${stkTot!==ledTot?`재고에서 빠진 개수(${stkTot})가 대장(${ledTot})과 달라요 — 재고를 손으로 고쳤거나 대장을 나중에 고쳤을 수 있어요.`:''}
+             ${stkTot!==ledTot?`재고에서 빠진 개수(${stkTot})가 대장(${ledTot})과 달라요 — 재고를 손으로 고쳤거나 대장을 나중에 고쳤을 수 있어요.<br>`:''}
+             ${(claimTot===ledTot&&stkTot===ledTot)?`합계는 ${ledTot}개로 같은데 <b>차트번호가 서로 어긋납니다</b>. 한 사람 것을 다른 사람 앞으로 청구했거나 차트번호를 잘못 적었을 수 있어요 — 아래 두 줄을 짝지어 보세요.`:''}
            </div></div>
          ${gaps.length? `<div class="tiny muted" style="margin:0 2px 6px">차트번호별로 다른 곳 ${gaps.length}건</div>
          <div style="max-height:34vh;overflow:auto">
@@ -2460,13 +2461,13 @@ function renderLedger(){
 
   const head=`<div class="spread" style="margin:4px 2px 12px">
       <h2 class="sec" style="margin:0">📋 임플란트 대장</h2>
-      <div class="row" style="gap:6px">
-        <button class="btn sm soft" onclick="openVendors()">🏢 거래처</button>
-        <button class="btn sm soft" onclick="openUploads()">📂 파일</button>
-        <button class="btn sm soft" onclick="openClaims()">🧾 청구 대조</button>
-        <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
-        <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
-      </div>
+      <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
+    </div>
+    <div class="btnrow" style="margin:0 0 12px">
+      <button class="btn soft sm grow" onclick="openUploads()">📂 파일</button>
+      <button class="btn soft sm grow" onclick="openClaims()">🧾 청구 대조</button>
+      <button class="btn soft sm grow" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
+      <button class="btn soft sm grow" onclick="openVendors()">🏢 거래처</button>
     </div>
     <div class="summary3">
       <div class="stat"><div class="n">${monT}</div><div class="l">이번 달 식립</div></div>
