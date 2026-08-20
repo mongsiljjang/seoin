@@ -56,7 +56,10 @@ service cloud.firestore {
         // 본인 것은 본인이 본다(승인 여부를 알아야 한다). 관리자는 다 본다.
         allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
         // 신청은 본인만. 스스로 승인할 수는 없다 — 아무도 없는 첫 개설만 예외.
+        // approved 를 반드시 담게 한다. 없는 필드를 읽으면 규칙이 터지고,
+        // 터진 규칙은 무조건 거절이라 왜 막혔는지 알 수 없다.
         allow create: if request.auth != null && request.auth.uid == uid
+                      && ('approved' in request.resource.data)
                       && (request.resource.data.approved == false || noClinicYet());
         // 승인은 관리자만. 본인은 자기 신청을 취소(삭제)할 수 있다.
         allow update: if isAdmin();

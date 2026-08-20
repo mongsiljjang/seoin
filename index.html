@@ -4808,17 +4808,20 @@ function writeAll(){
   if(!fdb) return Promise.resolve();
   const jobs=[], t=Date.now(), stamp={ updatedAt: t };
   const admin = booting || claimIsAdmin();
+  // 어느 문서에서 막혔는지 알 수 있어야 한다. 뭉뚱그린 실패는 원인을 못 찾는다.
+  const job=(name, p)=>jobs.push(p.catch(e=>{
+    console.warn('[쓰기 막힘] '+name+' — '+((e&&e.code)||e)); throw e; }));
 
-  if(booting || got.shared){ mine.shared=t; jobs.push(refShared().set(Object.assign(pickShared(), stamp))); }
-  if(booting || (admin && got.roster)){  mine.roster=t;  jobs.push(refRoster().set(Object.assign(pickRoster(), stamp))); }
-  if(booting || (admin && got.secrets)){ mine.secrets=t; jobs.push(refSecrets().set(Object.assign(pickSecrets(), stamp))); }
+  if(booting || got.shared){ mine.shared=t; job('shared', refShared().set(Object.assign(pickShared(), stamp))); }
+  if(booting || (admin && got.roster)){  mine.roster=t;  job('roster',  refRoster().set(Object.assign(pickRoster(), stamp))); }
+  if(booting || (admin && got.secrets)){ mine.secrets=t; job('secrets', refSecrets().set(Object.assign(pickSecrets(), stamp))); }
 
   if(admin){
     if(booting || got.people){ mine.people=t; personIds().forEach(sid=>
-      jobs.push(refPeople(sid).set(Object.assign(pickPerson(sid), stamp)))); }
+      job('people/'+sid, refPeople(sid).set(Object.assign(pickPerson(sid), stamp)))); }
   }else if(myClaim && myClaim.staffId && got.people){
     mine.people=t;
-    jobs.push(refPeople(myClaim.staffId).set(Object.assign(pickPerson(myClaim.staffId), stamp)));
+    job('people/'+myClaim.staffId, refPeople(myClaim.staffId).set(Object.assign(pickPerson(myClaim.staffId), stamp)));
   }
   if(!jobs.length) return Promise.resolve();
   return Promise.all(jobs).catch(()=>updateSyncBadge('offline'));
@@ -4947,7 +4950,7 @@ function claimDevice(u, approved){
   return refClaims().doc(myUid).set({
     staffId:u.id, name:u.name, phone:normPhone(u.phone), role:u.role||ROLE_STAFF,
     approved:!!approved, at:now(), device:(navigator.userAgent||'').slice(0,120)
-  }).catch(()=>{});
+  });   // 실패를 삼키지 않는다. 왜 못 들어가는지 사용자가 알아야 한다.
 }
 async function doLogin(){
   const ph=normPhone($('#lgPhone').value), pin=($('#lgPin').value||'').trim();
@@ -4958,7 +4961,23 @@ async function doLogin(){
   if(u){
     const admin = u.role===ROLE_OWNER || u.role===ROLE_HR;
     setSession(u.id);
-    await claimDevice(u, admin);              // 관리자 기기는 스스로 열린다
+    try{
+      await claimDevice(u, admin);            // 관리자 기기는 스스로 열린다
+    }catch(e){
+      setSession('');
+      if(admin){
+        // 이미 병원이 열려 있으면 관리자라도 스스로 열 수 없다. 다른 관리자 기기가 승인해야 한다.
+        try{
+          await refClaims().doc(myUid).set({ phone:ph, pinHash:await sha256Hex(pin+'|'+ph),
+            approved:false, at:now(), device:(navigator.userAgent||'').slice(0,120) });
+          setGate('waiting');
+          toast('이 기기는 아직 등록 전이에요 — 다른 관리자 기기에서 승인해 주세요');
+        }catch(e2){ toast('서버가 막았어요. 규칙이 걸린 뒤 처음이면 관리자에게 승인을 받아야 해요'); }
+      }else{
+        toast('서버가 막았어요 — 관리자에게 문의하세요');
+      }
+      return;
+    }
     if(!admin && fdb){ setGate('waiting'); toast('사용 요청을 보냈어요 — 관리자 승인을 기다려주세요'); return; }
     applyRole(); go('home'); toast(`${u.name}님 환영합니다`);
     return;
@@ -4988,12 +5007,13 @@ function doSetupAdmin(){
   DB.staff.push(u); setSession(u.id); saveDB(); wantSetup=false;
   claimDevice(u, true).then(()=>{ booting=true; return writeAll(); })
     .then(()=>{ booting=false; })
-    .catch(()=>{                                  // 이미 병원이 열려 있으면 서버가 막는다
+    .catch(err=>{                                 // 이미 병원이 열려 있으면 서버가 막는다
+      console.error('[개설 실패]', err && (err.code||err.message||err));
       booting=false;
       DB.staff=DB.staff.filter(x=>x.id!==u.id); setSession(''); saveDB();
       if(fdb&&myUid) refClaims().doc(myUid).delete().catch(()=>{});
       setGate(null); setGate('login');
-      toast('이미 만들어진 병원이에요 — 전화번호와 PIN으로 로그인하세요');
+      toast('이미 열려 있는 병원이에요 — 로그인한 뒤 다른 관리자 기기에서 승인받으세요');
     });
   applyRole(); go('home'); toast('관리자 계정을 만들었어요');
 }
