@@ -5185,13 +5185,18 @@ function doSetupAdmin(){
   const name=($('#suName').value||'').trim(), ph=normPhone($('#suPhone').value), pin=($('#suPin').value||'').trim();
   if(!name||!ph){ toast('이름과 전화번호를 입력하세요'); return; }
   if(!/^\d{4,8}$/.test(pin)){ toast('PIN은 숫자 4~8자리로 정하세요'); return; }
-  if(DB.staff.some(s=>normPhone(s.phone)===ph)){ toast('이미 등록된 번호예요'); return; }
+  // 서버 명단을 한 번도 못 받아봤으면, 이 기기에 남은 옛 계정은 믿을 게 못 된다.
+  // 서버는 비어 있는데 브라우저에 남은 유령 계정이 "이미 등록된 번호" 라며 길을 막았다.
+  const freshStart = !!fdb && !got.roster;
+  if(!freshStart && DB.staff.some(s=>normPhone(s.phone)===ph)){
+    toast('이미 등록된 번호예요 — 그 번호와 PIN 으로 로그인해 보세요'); return; }
   const owId=(($('#suOwId')||{}).value||'').trim(), owPw=(($('#suOwPw')||{}).value||'');
   if(fdb){
     if(!owId){ toast('최고관리자 아이디를 정해주세요'); return; }
     if(owPw.length<8){ toast('비밀번호는 8자 이상으로 정해주세요'); return; }
   }
   const u={id:uid(), name, dept:'', position:'관리자', phone:ph, pin, role:'관리자', active:true, annualTotal:15, joinDate:'', createdAt:now()};
+  if(freshStart) DB.staff=[];        // 빈 병원에서 새로 시작한다. 옛 유령은 들고 가지 않는다
   DB.staff.push(u); setSession(u.id); saveDB(); wantSetup=false;
   claimDevice(u, true).then(()=>{ booting=true; return writeAll(); })
     .then(()=>fdb && owId ? setOwnerKey(owId, owPw, u.id).catch(e=>{
