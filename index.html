@@ -530,6 +530,39 @@ function fmtTime(iso){ if(!iso) return '--:--'; const d=new Date(iso); return pa
 function hoursBetween(a,b){ if(!a||!b) return 0; return Math.max(0,(new Date(b)-new Date(a))/3.6e6); }
 function fmtHours(h){ const H=Math.floor(h), M=Math.round((h-H)*60); return H+'시간'+(M?` ${M}분`:''); }
 
+/* 하루치 근로를 종류별로 나눈다.
+   1.5배를 곱하는 것은 노무사 몫이고, 앱은 어떤 시간이 며칠에 얼마나 있었는지까지만 센다.
+   가산이 붙는 기준이 셋인데 서로 다른 것을 본다 —
+     연장 · 하루 소정근로시간을 넘긴 만큼          (퇴근이 늦어지면 생긴다)
+     야간 · 밤 10시부터 아침 6시 사이              (시각이 기준이라 연장과 겹칠 수 있다)
+     휴일 · 쉬기로 한 날에 나온 날                 (그날은 전부 휴일근로다)
+   그래서 야간은 연장·휴일과 겹쳐도 따로 센다. 겹친 것을 어떻게 합칠지는 노무사가 정한다.
+   총 근무시간은 예전 그대로 둔다 — 나누는 것과 세는 것은 다른 일이다.
+   <span>근거 · 근로기준법 제56조. 다만 상시 4명 이하면 이 가산이 적용되지 않는다(제11조)</span> */
+function restDayIdx(){ const n = DB.hosp && DB.hosp.restDayIdx; return (n>=0 && n<=6)? +n : 0; }
+const WEEK_KO=['일','월','화','수','목','금','토'];
+function isRestDay(date){ const d=new Date(date+'T00:00:00'); return !isNaN(d) && d.getDay()===restDayIdx(); }
+function nightHours(inAt,outAt){
+  if(!inAt||!outAt) return 0;
+  const a=new Date(inAt), b=new Date(outAt); if(isNaN(a)||isNaN(b)||b<=a) return 0;
+  let ms=0;                       // 밤을 넘겨 일하는 경우가 있어 앞뒤 하루씩 같이 본다
+  for(let k=-1;k<=1;k++){
+    const from=new Date(a.getFullYear(),a.getMonth(),a.getDate()+k,22,0,0);
+    const to  =new Date(a.getFullYear(),a.getMonth(),a.getDate()+k+1,6,0,0);
+    ms += Math.max(0, Math.min(+b,+to) - Math.max(+a,+from));
+  }
+  return ms/3.6e6;
+}
+function dayWork(att, st){
+  const total = hoursBetween(att&&att.inAt, att&&att.outAt);
+  if(!total) return {total:0, over:0, night:0, holiday:0};
+  const holiday = isRestDay(att.date)? total : 0;
+  return { total,
+    over: holiday? 0 : Math.max(0, total - dailyHoursOf(st)),
+    night: nightHours(att.inAt, att.outAt),
+    holiday };
+}
+
 /* ---------- 조회 헬퍼 ---------- */
 const staffById = id => DB.staff.find(s=>s.id===id);
 const itemById = id => DB.inventory.find(i=>i.id===id);
@@ -2293,6 +2326,13 @@ function renderAtt(){
     let statusLine = '미출근';
     if(inT&&outT) statusLine=`출근 ${inT} · 퇴근 ${outT} · ${fmtHours(hoursBetween(a.inAt,a.outAt))}`;
     else if(inT) statusLine=`출근 ${inT} · 근무중`;
+    // 그날 무엇이 있었는지 바로 보이게 한다 — 어느 날 늦게까지 있었는지가 월 합계보다 중요하다
+    const w = (inT&&outT)? dayWork(a,s) : null;
+    const marks = !w? '' : [
+      w.holiday>0.01? `<span class="pill danger">휴일 ${fmtHours(w.holiday)}</span>` : '',
+      w.over>0.01?    `<span class="pill warn">연장 ${fmtHours(w.over)}</span>` : '',
+      w.night>0.01?   `<span class="pill pend">야간 ${fmtHours(w.night)}</span>` : ''
+    ].filter(Boolean).join(' ');
     let btns;
     if(!inT) btns=`<button class="btn ok sm" onclick="checkIn('${s.id}','${dk}')">출근</button>`;
     else if(!outT) btns=`<button class="btn warn sm" onclick="checkOut('${s.id}','${dk}')">퇴근</button>`;
@@ -2302,7 +2342,8 @@ function renderAtt(){
     return `<div class="card" style="padding:12px 14px"><div class="spread">
       <div class="row" style="gap:11px"><div class="avatar">${esc(initials(s.name))}</div>
         <div><div class="t" style="font-weight:800">${esc(s.name)}</div>
-          <div class="d tiny ${inT&&!outT?'':'muted'}" style="color:${inT&&!outT?'var(--ok)':''}">${statusLine}</div></div></div>
+          <div class="d tiny ${inT&&!outT?'':'muted'}" style="color:${inT&&!outT?'var(--ok)':''}">${statusLine}</div>
+          ${marks?`<div class="row wrap" style="gap:5px;margin-top:5px">${marks}</div>`:''}</div></div>
       ${btns}</div></div>`;
   }).join('');
 
@@ -2311,8 +2352,11 @@ function renderAtt(){
   const rows = roster.map(s=>{
     const recs = DB.attendance.filter(a=>a.staffId===s.id && a.date.startsWith(mk));
     const days = recs.filter(a=>a.inAt).length;
-    const hrs = recs.reduce((t,a)=>t+hoursBetween(a.inAt,a.outAt),0);
-    return {s,days,hrs};
+    const hrs = recs.reduce((t,a)=>t+hoursBetween(a.inAt,a.outAt),0);   // 총시간은 예전 그대로
+    const w = recs.reduce((t,a)=>{ const d=dayWork(a,s);
+      t.over+=d.over; t.night+=d.night; t.holiday+=d.holiday;
+      if(d.over>0.01) t.overDays++; return t; }, {over:0,night:0,holiday:0,overDays:0});
+    return {s,days,hrs,w};
   });
   // 계약시간을 적어둔 사람은 넘긴 시간·모자란 시간을 따로 보여준다.
   // 몇 배로 쳐서 얼마를 줄지는 노무사가 정한다 — 앱은 시간까지만 센다.
@@ -2322,9 +2366,15 @@ function renderAtt(){
       : gap>0.01 ? `<div class="tiny" style="color:var(--warn);font-weight:800">계약보다 ${fmtHours(gap)} 더</div>`
       : gap<-0.01 ? `<div class="tiny muted">계약보다 ${fmtHours(-gap)} 모자람</div>`
       : `<div class="tiny" style="color:var(--ok);font-weight:800">계약시간과 같음</div>`;
+    const kinds=[
+      r.w.over>0.01?    `<span class="pill warn">연장 ${fmtHours(r.w.over)} · ${r.w.overDays}일</span>` : '',
+      r.w.night>0.01?   `<span class="pill pend">야간 ${fmtHours(r.w.night)}</span>` : '',
+      r.w.holiday>0.01? `<span class="pill danger">휴일 ${fmtHours(r.w.holiday)}</span>` : ''
+    ].filter(Boolean).join(' ');
     return `<div class="item"><div class="avatar">${esc(initials(r.s.name))}</div>
       <div class="grow"><div class="t" style="font-size:14.5px">${esc(r.s.name)}</div>
-        <div class="d">${mk.replace('-','년 ')}월 · 근무 ${r.days}일${c?` · 계약 ${c}시간`:''}</div></div>
+        <div class="d">${mk.replace('-','년 ')}월 · 근무 ${r.days}일${c?` · 계약 ${c}시간`:''}</div>
+        ${kinds?`<div class="row wrap" style="gap:5px;margin-top:5px">${kinds}</div>`:''}</div>
       <div style="text-align:right"><div style="font-weight:800">${fmtHours(r.hrs)}</div>${gapPill}</div></div>`;
   }).join('');
 }
@@ -3413,6 +3463,13 @@ function openEmpNoHelp(){
     <div class="tiny muted" style="margin-top:10px">이미 사번이 있는 분은 건드리지 않아요. 직원 카드에서 손으로 고칠 수도 있습니다.</div>`,
     payPending? payPreview : null);
 }
+function setRestDay(v){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
+  if(!DB.hosp||typeof DB.hosp!=='object') DB.hosp={};
+  const n=parseInt(v,10); DB.hosp.restDayIdx = (n>=0&&n<=6)? n : 0;
+  saveDB(); if(currentTab==='att') renderAtt();
+  toast(`${WEEK_KO[restDayIdx()]}요일을 쉬는 날로 봅니다`);
+}
 function setLeaveBasis(v){
   if(!isHR()){ toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
   if(!DB.hosp||typeof DB.hosp!=='object') DB.hosp={};
@@ -4449,7 +4506,17 @@ function openMenu(){
         <option value="join" ${leaveBasis()==='join'?'selected':''}>입사일 기준 — 사람마다 다른 날에 채워짐</option>
         <option value="fiscal" ${leaveBasis()==='fiscal'?'selected':''}>회계연도 기준 — 모두 1월 1일에 같이 채워짐</option>
       </select></label>
-    <div class="tiny muted" style="margin:-4px 2px 0">회계연도로 맞추는 곳은 입사 첫 해 몫을 <b>돈으로 정산하고</b> 넘어갑니다. 어느 쪽이든 직원에게 불리하면 안 돼요.<br><span class="lawcite">근거 · 근로기준법 제60조</span></div>
+    <div class="tiny muted" style="margin:-4px 2px 0"><b>입사일 기준이 기본</b>입니다 — 사람마다 받는 날이 달라 손이 더 가지만, 각자 일한 만큼 그대로 나옵니다. 회계연도로 맞추는 곳은 입사 첫 해 몫을 <b>돈으로 정산하고</b> 넘어갑니다. 어느 쪽이든 직원에게 불리하면 안 돼요.<br><span class="lawcite">근거 · 근로기준법 제60조</span></div>
+    <div class="divider"></div>
+    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🌙 쉬는 날과 늦은 시간</div>
+    <div class="tiny muted" style="margin:0 2px 8px">더 쳐줘야 하는 시간이 세 가지인데 기준이 서로 달라요. <b>연장</b>은 하루 근무시간을 넘긴 만큼, <b>야간</b>은 밤 10시~아침 6시, <b>휴일</b>은 쉬기로 한 날에 나온 것입니다. 앱은 <b>시간만 나눠서</b> 보여드리고 몇 배로 칠지는 노무사가 정합니다.</div>
+    <label class="field"><span>주휴일 (주에 하루 유급으로 쉬는 날)</span>
+      <select id="hsRest" onchange="setRestDay(this.value)">
+        ${WEEK_KO.map((w,i)=>`<option value="${i}" ${restDayIdx()===i?'selected':''}>${w}요일</option>`).join('')}
+      </select></label>
+    <div class="tiny muted" style="margin:-4px 2px 0">이 요일에 나오면 그날 근무는 <b>전부 휴일근로</b>로 잡힙니다.
+      ${isSmallBiz()? `지금은 직원이 <b>${staffCount()}명</b>이라 <b>가산이 법으로 정해진 건 아닙니다</b> — 그래도 얼마나 일했는지는 남겨둡니다.` : `지금은 직원이 <b>${staffCount()}명</b>이라 <b>가산이 법으로 정해져 있습니다</b>.`}<br>
+      <span class="lawcite">근거 · 근로기준법 제56조 · 제55조 · 제11조</span></div>
     <div class="divider"></div>
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🔐 급여 열쇠</div>
     <div class="tiny muted" style="margin:0 2px 8px">급여명세서와 근로계약서 본문은 이 열쇠로 잠겨 저장돼요. ${DB.payLock? `<b style="color:var(--ok)">잠금 설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
