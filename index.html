@@ -470,7 +470,23 @@
    데이터는 이 기기의 브라우저(localStorage)에 저장됩니다.
    ========================================================================== */
 
-const STORE_KEY = 'hospital_mgr_v1';
+/* 병원마다 다른 자리를 쓴다.
+   예전에는 모든 병원이 'clinic' 한 자리를 같이 썼다. 병원이 둘이 되면 섞인다.
+   주소 뒤에 ?h=코드 를 붙여 열면 그 병원이 되고, 한 번 열면 이 기기가 기억한다.
+   아무것도 없으면 처음 만든 병원 그대로다 — 쓰던 사람이 갑자기 빈 앱을 보면 안 된다. */
+const WS_ID = (function(){
+  let ws='';
+  try{
+    const q=String(new URLSearchParams(location.search).get('h')||'').trim().toLowerCase();
+    if(/^[a-z0-9-]{2,32}$/.test(q)){ ws=q; localStorage.setItem('hospital_ws', ws); }
+  }catch(e){}
+  if(!ws){ try{ ws=localStorage.getItem('hospital_ws')||''; }catch(e){} }
+  return ws || (window.WORKSPACE_ID || 'clinic');
+})();
+const WS = ()=>WS_ID;
+// 기기에 남기는 자리도 병원마다 갈라야 한다. 안 그러면 옆 병원 자료가 화면에 뜬다.
+// 처음 병원은 예전 이름을 그대로 쓴다 — 이름을 바꾸면 쓰던 자료가 사라진다.
+const STORE_KEY = 'hospital_mgr_v1' + (WS_ID==='clinic' ? '' : ':'+WS_ID);
 const $ = (s,el=document)=>el.querySelector(s);
 const $$ = (s,el=document)=>[...el.querySelectorAll(s)];
 const uid = ()=> Date.now().toString(36) + Math.floor(Math.random()*1e6).toString(36);
@@ -3934,6 +3950,97 @@ function pendingLeavesOf(sid){
   return (DB.leaves||[]).filter(l=>l.staffId===sid && l.status==='pending')
     .sort((a,b)=>String(a.startDate).localeCompare(String(b.startDate)));
 }
+/* 사직서 링크.
+   무단결근 뒤 퇴직 처리할 때 사직서를 못 받는 것이 가장 흔한 사고다.
+   퇴직자에게 앱을 열어주면 남의 개인정보가 같이 보이니, 주소 하나만 준다.
+   그 주소로는 자기 사직서 한 장 말고는 아무것도 못 본다 — 규칙이 막는다.
+
+   자필이어야 한다는 법은 없다. 사직은 의사표시라 전자문서라는 이유로
+   효력이 부인되지 않는다. 다툼이 생기면 쟁점은 '본인이 냈는가' 이므로
+   낸 시각·기기와 병원이 보낸 내용을 같이 남긴다.
+   <span>근거 · 민법 제660조 · 전자문서 및 전자거래 기본법 제4조</span> */
+function newToken(){
+  const b=new Uint8Array(16); crypto.getRandomValues(b);
+  return [...b].map(x=>x.toString(36).padStart(2,'0')).join('').slice(0,24);
+}
+function resignUrlOf(token){
+  const base = location.origin + location.pathname.replace(/[^/]*$/,'');
+  return `${base}resign.html?h=${encodeURIComponent(WS())}&t=${encodeURIComponent(token)}`;
+}
+async function openResignLink(sid){
+  const s=staffById(sid); if(!s) return;
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  if(!fdb){ toast('공유 모드에서만 됩니다'); return; }
+  modal(`<h3>🔗 ${esc(s.name)} 님 사직서 링크</h3><div class="tiny muted" style="padding:14px 2px">불러오는 중이에요…</div>`,
+        ()=>openStaffHub(sid));
+  let inv=null, sub=null, err='';
+  try{
+    const qs=await refResignInv().where('staffId','==',sid).get();
+    qs.forEach(d=>{ const v=d.data()||{};
+      if(!inv || String(v.at||'') > String(inv.at||'')) inv=Object.assign({token:d.id}, v); });
+    if(inv){ const g=await refResignSub().doc(inv.token).get(); if(g.exists) sub=g.data()||{}; }
+  }catch(e){ err=(e&&e.code)||String(e); }
+
+  const body = err
+    ? `<div class="hint">불러오지 못했어요 — <b>${esc(err)}</b><br>보안규칙이 아직 옛 판이면 이 기능이 안 됩니다.</div>`
+    : sub
+      ? `<div class="card" style="box-shadow:none;background:var(--ok-soft);border:0;padding:13px 14px">
+           <div class="spread" style="padding:3px 0"><span class="tiny muted">받은 시각</span><b class="tiny">${esc(String(sub.at||'').slice(0,16).replace('T',' '))}</b></div>
+           <div class="spread" style="padding:3px 0"><span class="tiny muted">마지막 근무일</span><b class="tiny">${esc(sub.lastDay||'-')}</b></div>
+           <div class="spread" style="padding:3px 0"><span class="tiny muted">본인 확인</span><b class="tiny">${sub.agreed?'동의함':'—'} · 전화 뒤 4자리 ${esc(sub.phone4||'-')}</b></div>
+           <div style="margin-top:8px"><div class="tiny muted">사유</div>
+             <div class="tiny" style="white-space:pre-wrap;margin-top:3px">${esc(sub.reason||'')}</div></div>
+         </div>
+         <button class="btn block" style="margin-top:12px" onclick="acceptResignSub('${sid}','${esc(inv.token)}')">사직서로 접수하기</button>
+         <div class="tiny muted" style="margin-top:8px">접수하면 앱 안 사직서 목록에 들어가고, 거기서 <b>수리하고 퇴사 처리</b>까지 이어집니다.</div>`
+      : inv
+        ? `<div class="hint">아직 안 냈어요. 아래 주소를 <b>카톡으로 보내주세요.</b></div>
+           <div class="card" style="margin-top:10px;padding:12px 13px;box-shadow:none;background:var(--bg);border:0">
+             <div class="tiny" style="word-break:break-all;font-family:ui-monospace,Menlo,monospace">${esc(resignUrlOf(inv.token))}</div></div>
+           <div class="setrow" style="margin-top:10px">
+             <button class="btn soft sm" onclick="copyResignUrl('${esc(inv.token)}')">주소 복사</button>
+             <button class="btn soft sm" onclick="makeResignLink('${sid}',true)">새 주소로 다시 만들기</button>
+           </div>
+           <div class="tiny muted" style="margin-top:10px">새로 만들면 <b>먼저 준 주소는 못 쓰게</b> 됩니다.</div>`
+        : `<div class="hint">퇴직자가 로그인 없이 열어서 낼 수 있는 주소를 만듭니다. 이름과 입사일만 미리 채워 보내고, <b>그 주소로는 다른 건 아무것도 못 봅니다.</b></div>
+           <button class="btn block" style="margin-top:12px" onclick="makeResignLink('${sid}')">링크 만들기</button>`;
+
+  modal(`<h3>🔗 ${esc(s.name)} 님 사직서 링크</h3>${body}`, ()=>openStaffHub(sid));
+}
+async function makeResignLink(sid, again){
+  const s=staffById(sid); if(!s) return;
+  if(again && !confirm('새 주소를 만들면 먼저 준 주소는 못 쓰게 됩니다. 계속할까요?')) return;
+  toast('만드는 중이에요…');
+  try{
+    if(again){
+      const qs=await refResignInv().where('staffId','==',sid).get();
+      for(const d of qs.docs){ await refResignInv().doc(d.id).delete(); }
+    }
+    const token=newToken();
+    await refResignInv().doc(token).set({ staffId:sid, name:s.name, joinDate:s.joinDate||'',
+      at:now(), by:(currentUser()||{}).name||'' });
+    openResignLink(sid);
+  }catch(e){ toast('만들지 못했어요 — '+((e&&e.code)||e)); }
+}
+function copyResignUrl(token){
+  const t=resignUrlOf(token);
+  (navigator.clipboard? navigator.clipboard.writeText(t) : Promise.reject())
+    .then(()=>toast('주소를 복사했어요 — 카톡에 붙여넣으세요'), ()=>toast('길게 눌러 복사해 주세요'));
+}
+async function acceptResignSub(sid, token){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 할 수 있어요'); return; }
+  try{
+    const g=await refResignSub().doc(token).get(); const sub=g.exists? (g.data()||{}) : null;
+    if(!sub){ toast('받은 사직서가 없어요'); return; }
+    if(!Array.isArray(DB.resignations)) DB.resignations=[];
+    if(DB.resignations.some(r=>r.token===token)){ toast('이미 접수한 사직서예요'); openStaffHub(sid); return; }
+    DB.resignations.unshift({ id:uid(), staffId:sid, token,
+      submittedAt: sub.at||now(), submitDay: String(sub.at||todayKey()).slice(0,10),
+      lastDay: sub.lastDay||'', reason: sub.reason||'', status:'제출', via:'링크' });
+    hrLog('사직서', `${(staffById(sid)||{}).name||''} 링크로 받은 사직서 접수`);
+    saveDB(); toast('접수했어요'); openStaffHub(sid);
+  }catch(e){ toast('접수하지 못했어요 — '+((e&&e.code)||e)); }
+}
 function openStaffHub(id){
   const s=staffById(id); if(!s) return;
   const tk=todayKey(), a=DB.attendance.find(x=>x.staffId===id && x.date===tk);
@@ -3997,6 +4104,7 @@ function openStaffHub(id){
       <button class="btn soft sm" onclick="openContract('${id}')">📝 계약서</button>
       ${ps?`<button class="btn soft sm" onclick="openPayslip('${ps.id}')">💰 ${esc(ps.ym)}</button>`:''}
       ${rg?`<button class="btn soft sm" onclick="openResignView('${rg.id}')">📄 사직서</button>`:''}
+      ${(!gone && fdb)?`<button class="btn soft sm" onclick="openResignLink('${id}')">🔗 사직서 링크</button>`:''}
     </div>
 
     <div class="divider"></div>
@@ -4780,7 +4888,7 @@ function saveClinicLoc(){
    복구는 되돌리기의 마지막 수단이라, 실수로 눌러도 데이터가 날아가지 않게 만든다.
    ① 무엇이 든 파일인지 보여주고 확인받는다  ② 덮기 직전 상태를 남겨 한 번 되돌릴 수 있게 한다
    ③ 옛 백업에 없는 항목은 ensureSchema()가 채운다  ④ 공유 서버에 곧바로 반영한다 */
-const RESTORE_KEY = 'hospital_mgr_prev';
+const RESTORE_KEY = 'hospital_mgr_prev' + (WS_ID==='clinic' ? '' : ':'+WS_ID);
 const BACKUP_KEYS = ['staff','inventory','invLogs','attendance','leaves','implantCases',
                      'notices','contracts','payslips','docReqs','vendors'];
 function backupSummary(d){
@@ -4932,7 +5040,6 @@ function stale(kind, d){ return !!(d && d.updatedAt && mine[kind] && d.updatedAt
 let booting=false;             // 최초 이전 중에만 전부 쓸 수 있다
 let legacyDoc=null;            // 옛 단일 문서 — 옮기고 나면 읽기만 한다
 
-const WS = ()=> window.WORKSPACE_ID || 'clinic';
 const B_SHARED = ['version','hospName','inventory','invLogs','purchases','attendance','leaves',
   'implants','implantLogs','implantCases','masters','notices','duties','vendors','hosp',
   'docTypes','docForms','geo','members','prefs','payLock','lastBackupAt'];
@@ -4967,18 +5074,69 @@ function newSalt(){
   const a=new Uint8Array(16); crypto.getRandomValues(a);
   return btoa(String.fromCharCode(...a));
 }
+/* 비밀번호를 잊었을 때 쓰는 한 번짜리 코드.
+   지금까지는 잊으면 Firebase 콘솔에서 복구 문을 여는 길 하나뿐이었다.
+   콘솔에 2단계 인증까지 걸리면 폰까지 있어야 하고, 폰을 잃으면 병원이 통째로 잠긴다.
+   종이에 적어 둘 수 있는 코드를 같이 준다 — 콘솔도 만든 곳도 필요 없다.
+   0·O·1·I 처럼 헷갈리는 글자는 뺐다. 손으로 옮겨 적을 물건이기 때문이다. */
+function newRecoveryCodes(n){
+  const AB='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const b=new Uint8Array(n*10); crypto.getRandomValues(b);
+  const out=[];
+  for(let i=0;i<n;i++){
+    let c=''; for(let j=0;j<10;j++) c+=AB[b[i*10+j] % AB.length];
+    out.push(c.slice(0,5)+'-'+c.slice(5));
+  }
+  return out;
+}
 // 최고관리자 열쇠를 새로 정한다(=처음 만들 때 · 바꿀 때)
+// 돌려주는 것은 종이에 적을 복구 코드다. 이때 한 번만 보여줄 수 있다 —
+// 서버에는 늘린 값만 남아서 앱도 다시 꺼내지 못한다.
 async function setOwnerKey(id, pw, staffId){
   const salt = newSalt();
   const hash = await ownerHash(id, pw, salt);
-  await refOwnerKey().set({ hash, at: now() });       // 이건 꼭 되어야 한다
+  const plain = newRecoveryCodes(8);
+  const codes = [];
+  for(const c of plain) codes.push(await ownerHash('recovery', c, salt));
+  await refOwnerKey().set({ hash, codes, at: now() });   // 이건 꼭 되어야 한다
   // 표지판은 못 적어도 넘어간다. 규칙이 아직 옛 판일 수 있다.
   try{
     await refMeta().set({ ownerSalt: salt, ownerStaffId: staffId,
       hasClinic: (DB.staff||[]).length>0, updatedAt: Date.now() }, {merge:true});
   }catch(e){ console.warn('[건너뜀] meta —', (e&&e.code)||e); }
+  return plain;
+}
+// 코드는 이 화면을 닫으면 다시 볼 수 없다. 그래서 인쇄와 복사를 같이 둔다.
+function showRecoveryCodes(codes){
+  const list=codes.map(c=>`<div style="font-family:ui-monospace,Menlo,monospace;font-size:16px;font-weight:800;letter-spacing:.5px;padding:5px 0">${esc(c)}</div>`).join('');
+  modal(`<h3>🔑 복구 코드 8개</h3>
+    <div class="hint">비밀번호를 잊었을 때 이 중 <b>하나로 한 번</b> 들어올 수 있어요. <b>인쇄해서 원장님만 아는 곳에 보관하세요.</b><br>
+      이 화면을 닫으면 <b>다시 볼 수 없습니다</b> — 서버에도 늘린 값만 남아 앱이 꺼내지 못해요.</div>
+    <div class="card" style="margin-top:12px;padding:14px 16px;text-align:center;box-shadow:none;background:var(--brand-soft);border:0">${list}</div>
+    <div class="two" style="margin-top:12px">
+      <button class="btn soft sm" onclick="copyRecoveryCodes(${JSON.stringify(codes).replace(/"/g,'&quot;')})">복사</button>
+      <button class="btn soft sm" onclick="printRecoveryCodes(${JSON.stringify(codes).replace(/"/g,'&quot;')})">인쇄</button>
+    </div>
+    <button class="btn block" style="margin-top:10px" onclick="closeModal()">적어뒀어요 · 닫기</button>
+    <div class="tiny muted" style="margin-top:10px">코드 하나를 쓰면 <b>여덟 개가 모두 새로 발급</b>됩니다. 쓴 뒤에는 새로 받은 것으로 바꿔 두세요.</div>`);
+}
+function copyRecoveryCodes(codes){
+  const t=`${DB.hospName||'병원'} 복구 코드\n`+codes.join('\n');
+  (navigator.clipboard? navigator.clipboard.writeText(t) : Promise.reject())
+    .then(()=>toast('복사했어요'), ()=>toast('복사가 안 되면 인쇄를 눌러주세요'));
+}
+function printRecoveryCodes(codes){
+  printDoc('복구코드', `<h1>${esc(DB.hospName||'병원')} · 최고관리자 복구 코드</h1>
+    <p class="note">비밀번호를 잊었을 때 이 중 하나로 한 번 들어올 수 있습니다. 하나를 쓰면 여덟 개가 모두 새로 발급됩니다.</p>
+    <p class="note">발급 ${fmtDateFull(todayKey())}</p>
+    <div style="font-family:monospace;font-size:16px;line-height:2.2;letter-spacing:1px">${codes.map(esc).join('<br>')}</div>
+    <p class="note">이 종이를 원장님만 아는 곳에 보관하세요.</p>`);
 }
 function refClaims(){ return wsRef().collection('claims'); }
+function refLicense(){ return wsRef().collection('license').doc('main'); }
+function refOpslog(){ return wsRef().collection('opslog'); }
+function refResignInv(){ return wsRef().collection('resigninv'); }
+function refResignSub(){ return wsRef().collection('resignsub'); }
 
 function updateSyncBadge(state){
   const b=$('#syncBadge'); if(!b) return;
@@ -5037,7 +5195,7 @@ function cloudInit(){
 /* ---------- 이 기기가 누구 것인가 ---------- */
 function watchClaim(){
   if(!myUid) return;
-  watchRecovery();
+  watchRecovery(); watchLicense();
   // 서버가 확인해 준 등록만 믿는다.
   // 예전에는 아직 서버에 저장되지도 않은 내 글씨(대기 중 쓰기)를 보고 데이터를
   // 요청했다. 서버는 "그런 등록 없다"며 거절했고, 거절당한 구독은 다시 살아나지
@@ -5059,22 +5217,79 @@ function watchClaim(){
   }, ()=>updateSyncBadge('offline')));
 }
 let recoveryOn=false;
+/* 화면 아래 띠는 여러 개가 겹칠 수 있다 — 복구 문이 열려 있는데 구독도 끝난 경우처럼.
+   한 자리에 쌓아 올린다. */
+function barStack(){
+  let st=$('#barStack');
+  if(!st){ st=document.createElement('div'); st.id='barStack';
+    st.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;display:flex;flex-direction:column';
+    document.body.appendChild(st); }
+  return st;
+}
+function setBar(id, html, bg){
+  let el=document.getElementById(id);
+  if(!html){ if(el) el.remove(); return; }
+  if(!el){ el=document.createElement('div'); el.id=id; barStack().appendChild(el); }
+  el.style.cssText='background:'+bg+';color:#fff;padding:10px 14px;font-size:13px;'+
+    'line-height:1.6;font-weight:700;text-align:center;word-break:keep-all';
+  el.innerHTML=html;
+}
 function watchRecovery(){
   if(!fdb) return;
   baseUnsubs.push(wsRef().collection('recovery').doc('open').onSnapshot(s=>{
     recoveryOn = !!(s.exists && (s.data()||{}).open===true);
-    const b=$('#recoveryBar');
-    if(b) b.style.display = recoveryOn ? '' : 'none';
-    if(recoveryOn && !$('#recoveryBar')){
-      const d=document.createElement('div');
-      d.id='recoveryBar';
-      d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#7a2e0c;color:#fff;'+
-        'padding:10px 14px;font-size:13px;line-height:1.5;font-weight:700;text-align:center';
-      d.innerHTML='🔓 복구 문이 열려 있어요 — 누구나 관리자를 만들 수 있는 상태입니다.<br>'+
-        '<span style="font-weight:400">Firebase 콘솔에서 <b>recovery</b> 컬렉션을 지워 닫아주세요.</span>';
-      document.body.appendChild(d);
-    }
+    setBar('recoveryBar', recoveryOn
+      ? '🔓 복구 문이 열려 있어요 — 누구나 관리자를 만들 수 있는 상태입니다.<br>'+
+        '<span style="font-weight:400">Firebase 콘솔에서 <b>recovery</b> 컬렉션을 지워 닫아주세요.</span>'
+      : '', '#7a2e0c');
   }, ()=>{}));
+}
+
+/* 구독 기한과 제작자가 손댄 기록.
+   기한은 서버가 막는 것이라 앱이 미리 알려주기만 한다 — 며칠 남았는지 모르고
+   어느 날 갑자기 자료가 안 보이면 그게 더 나쁘다.
+   제작자 기록은 숨기면 안 된다. 남의 병원 비밀번호를 초기화해 놓고
+   아무도 모르게 두는 일이 없어야 한다. */
+let licenseInfo=null, opsLatest=null;
+function licenseUntil(){
+  const p=licenseInfo && licenseInfo.paidUntil;
+  if(!p) return null;
+  try{ return p.toDate? p.toDate() : new Date(p); }catch(e){ return null; }
+}
+function licenseDaysLeft(){
+  const d=licenseUntil(); if(!d||isNaN(d)) return null;
+  return Math.ceil((d - Date.now())/86400000);
+}
+function watchLicense(){
+  if(!fdb) return;
+  baseUnsubs.push(refLicense().onSnapshot(s=>{
+    licenseInfo = s.exists? (s.data()||{}) : null; renderOpsBars();
+  }, ()=>{}));
+  baseUnsubs.push(refOpslog().onSnapshot(qs=>{
+    let latest=null;
+    qs.forEach(d=>{ const v=d.data()||{};
+      if(!latest || String(v.at||'') > String(latest.at||'')) latest=Object.assign({id:d.id}, v); });
+    opsLatest=latest; renderOpsBars();
+  }, ()=>{}));
+}
+function renderOpsBars(){
+  const left=licenseDaysLeft(), sus=licenseInfo && licenseInfo.status==='suspended';
+  let msg='';
+  if(sus) msg='⏸ 사용이 멈춰 있어요 — 만든 곳에 문의해 주세요.<br><span style="font-weight:400">자료는 지워지지 않았고, 다시 열리면 그대로 살아납니다.</span>';
+  else if(left!=null && left<=0) msg='📅 이용 기간이 끝났어요 — 자료를 새로 받아오지 못합니다.<br><span style="font-weight:400">기간을 늘리면 그대로 살아납니다. 기기에 남은 자료는 <b>설정 → 전체 백업</b>으로 받을 수 있어요.</span>';
+  else if(left!=null && left<=7) msg=`📅 이용 기간이 <b>${left}일</b> 남았어요.`;
+  setBar('licenseBar', msg, left!=null && left<=0 ? '#7a2e0c' : '#12303a');
+
+  const o=opsLatest;
+  const seen=(()=>{ try{ return localStorage.getItem('ops_seen')||''; }catch(e){ return ''; } })();
+  setBar('opsBar', (o && o.id!==seen)
+    ? `🛠 만든 곳에서 <b>${esc(o.what||'설정을 손댔어요')}</b>${o.at?` · ${esc(String(o.at).slice(0,10))}`:''}`+
+      `<br><span style="font-weight:400"><a href="#" onclick="dismissOps();return false" style="color:#ffe8a8">확인했어요</a></span>`
+    : '', '#3a2f12');
+}
+function dismissOps(){
+  try{ localStorage.setItem('ops_seen', (opsLatest&&opsLatest.id)||''); }catch(e){}
+  renderOpsBars();
 }
 function myRole(){ return (myClaim && myClaim.role) || ''; }
 function claimIsAdmin(){ return myRole()===ROLE_OWNER || myRole()===ROLE_HR; }
@@ -5144,9 +5359,10 @@ function watchPendingClaims(){
     if($('#claimList')) renderClaimList();
   }, e=>reopenSoon('대기목록 '+((e&&e.code)||e))));
 }
-function openOwnerKeySetup(){
+function openOwnerKeySetup(afterRecovery){
   modal(`<h3>👑 최고관리자 아이디·비밀번호</h3>
-    <div class="tiny muted" style="margin:0 2px 10px">이걸 아는 사람은 <b>어느 기기에서든</b> 최고관리자로 바로 들어옵니다. 기기 승인이 필요 없어요. 원장님과 실장님만 아셔야 합니다.</div>
+    ${afterRecovery? `<div class="hint" style="background:var(--warn-soft)">복구 코드로 들어오셨어요. <b>지금 새로 정해야</b> 방금 쓴 코드가 더는 통하지 않습니다.</div>`:''}
+    <div class="tiny muted" style="margin:10px 2px">이걸 아는 사람은 <b>어느 기기에서든</b> 최고관리자로 바로 들어옵니다. 기기 승인이 필요 없어요. 원장님과 실장님만 아셔야 합니다.</div>
     <label class="field"><span>아이디</span><input id="okId" autocomplete="username" placeholder="영문·숫자"></label>
     <label class="field"><span>비밀번호 (8자 이상)</span><input id="okPw" type="password" autocomplete="new-password" placeholder="••••••••"></label>
     <label class="field"><span>한 번 더</span><input id="okPw2" type="password" autocomplete="new-password" placeholder="••••••••"></label>
@@ -5160,8 +5376,8 @@ async function saveOwnerKey(){
   if(a!==b){ toast('두 번 입력이 달라요'); return; }
   const me=currentUser();
   if(!me || me.role!==ROLE_OWNER){ toast('최고관리자만 정할 수 있어요'); return; }
-  toast('저장 중이에요…');
-  try{ await setOwnerKey(id, a, me.id); closeModal(); toast('아이디·비밀번호를 정했어요'); }
+  toast('저장 중이에요… 복구 코드도 같이 만듭니다');
+  try{ const codes = await setOwnerKey(id, a, me.id); showRecoveryCodes(codes); }
   catch(e){ toast('저장하지 못했어요 — 최고관리자로 로그인했는지 확인해 주세요'); }
 }
 function openDeviceClaims(){
@@ -5403,7 +5619,40 @@ function gateOwnerHtml(){
       <button class="btn block" onclick="doOwnerLogin()">들어가기</button>
     </div>
     <div class="tiny muted" style="margin-top:16px">
-      <a href="#" onclick="backToLogin();return false" style="color:var(--brand);font-weight:700">직원 로그인으로 돌아가기</a></div>`;
+      <a href="#" onclick="backToLogin();return false" style="color:var(--brand);font-weight:700">직원 로그인으로 돌아가기</a><br>
+      <a href="#" onclick="openRecoveryGate();return false" style="color:var(--sub);text-decoration:underline">비밀번호를 잊었어요 — 복구 코드로 들어가기</a></div>`;
+}
+/* 복구 코드로 들어오는 문.
+   앱은 정답을 모르고 서버만 안다. 코드도 같은 방식으로 대조되기 때문에
+   '맞았는지' 는 들어와졌느냐로만 알 수 있다. 들어오면 곧바로 새로 정하게 한다 —
+   앱이 ownerkey 를 읽지 못해 쓴 코드 하나만 지우는 것이 불가능하기 때문이다. */
+function openRecoveryGate(){
+  modal(`<h3>🔑 복구 코드로 들어가기</h3>
+    <div class="hint">아이디·비밀번호를 정할 때 받아 적어 둔 코드 여덟 개 중 <b>하나</b>를 넣으세요.<br>
+      들어오면 <b>바로 새 비밀번호를 정하게 되고, 코드도 여덟 개 새로 발급</b>됩니다.</div>
+    <label class="field" style="margin-top:12px"><span>복구 코드</span>
+      <input id="rcCode" placeholder="ABCDE-FGHIJ" autocapitalize="characters" style="font-family:ui-monospace,Menlo,monospace;letter-spacing:1px"></label>
+    <button class="btn block" onclick="doRecoveryLogin()">들어가기</button>
+    <div class="tiny muted" style="margin-top:10px">코드도 잃어버렸으면 로그인 화면의 <b>아무도 못 들어갈 때</b>를 눌러보세요.</div>`,
+    ()=>{ closeModal(); openOwnerGate(); });
+}
+async function doRecoveryLogin(){
+  const code=(($('#rcCode')||{}).value||'').trim().toUpperCase();
+  if(!code){ toast('복구 코드를 넣어주세요'); return; }
+  if(!fdb||!myUid){ toast('연결 중이에요. 잠시 뒤 다시 눌러주세요'); return; }
+  toast('확인 중이에요…');
+  let meta={}; try{ meta=(await refMeta().get()).data()||{}; }catch(e){}
+  if(!meta.ownerSalt){ toast('아직 아이디·비밀번호를 정하지 않은 병원이에요'); return; }
+  try{
+    const key = await ownerHash('recovery', code, meta.ownerSalt);
+    await refUnlock().set({ key, at: now() });
+    await refClaims().doc(myUid).set({ staffId: meta.ownerStaffId||'', name:'최고관리자',
+      role: ROLE_OWNER, approved:true, at: now(),
+      device:(navigator.userAgent||'').slice(0,120) }, {merge:true});
+    wantSetup=false; wantOwner=false; closeModal();
+    toast('들어왔어요 — 새 비밀번호를 정해주세요');
+    setTimeout(()=>openOwnerKeySetup(true), 700);
+  }catch(e){ toast('맞지 않는 코드예요'); }
 }
 async function doOwnerLogin(){
   const id=($('#owId').value||'').trim(), pw=$('#owPw').value||'';
@@ -5563,16 +5812,50 @@ function doSetupAdmin(){
         console.warn('[아이디·비밀번호 저장 실패]', (e&&e.code)||e);
         toast('계정은 만들어졌지만 아이디·비밀번호는 저장 못 했어요 — 설정에서 다시 정해주세요');
       }) : null)
-    .then(()=>{ booting=false; })
-    .catch(err=>{                                 // 이미 병원이 열려 있으면 서버가 막는다
+    .then(codes=>{ booting=false; if(codes && codes.length) showRecoveryCodes(codes); })
+    .catch(err=>{                                 // 이미 열려 있거나, 아직 개통 승인을 못 받았다
       console.error('[개설 실패]', err && (err.code||err.message||err));
       booting=false;
       DB.staff=DB.staff.filter(x=>x.id!==u.id); setSession(''); saveDB();
       if(fdb&&myUid) refClaims().doc(myUid).delete().catch(()=>{});
       setGate(null); setGate('login');
-      toast('이미 열려 있는 병원이에요 — 로그인한 뒤 다른 관리자 기기에서 승인받으세요');
+      explainSetupFail(name);
     });
   applyRole(); go('home'); toast('관리자 계정을 만들었어요');
+}
+/* 개설이 막히는 이유가 둘인데 지금까지 하나로만 말했다.
+   이미 열린 병원이라 막힌 것과, 아직 개통 승인을 못 받아 막힌 것은 할 일이 다르다. */
+async function explainSetupFail(hospName){
+  let need=false, approved=true;
+  try{
+    const c=await fdb.collection('config').doc('main').get();
+    need = !!(c.exists && (c.data()||{}).requireApproval===true);
+    if(need){
+      const h=await fdb.collection('hospitals').doc(WS()).get();
+      approved = !!(h.exists && (h.data()||{}).approved===true);
+    }
+  }catch(e){}
+  if(need && !approved){
+    modal(`<h3>🏥 아직 개통 전이에요</h3>
+      <div class="hint">이 주소(<code>${esc(WS())}</code>)는 아직 열려 있지 않아요. 만든 곳이 열어줘야 씁니다.<br>
+        아래로 <b>개설 신청</b>을 남기면 연락이 갑니다.</div>
+      <label class="field" style="margin-top:12px"><span>병원 이름</span>
+        <input id="rqName" value="${esc(hospName||DB.hospName||'')}" maxlength="60"></label>
+      <label class="field"><span>연락처 (전화 또는 카톡 아이디)</span>
+        <input id="rqContact" placeholder="01012345678" maxlength="60"></label>
+      <button class="btn block" onclick="sendOpenRequest()">개설 신청하기</button>
+      <div class="tiny muted" style="margin-top:10px">신청에는 <b>이름과 연락처만</b> 담깁니다.</div>`);
+    return;
+  }
+  toast('이미 열려 있는 병원이에요 — 로그인한 뒤 다른 관리자 기기에서 승인받으세요');
+}
+async function sendOpenRequest(){
+  const name=(($('#rqName')||{}).value||'').trim(), contact=(($('#rqContact')||{}).value||'').trim();
+  if(!name||!contact){ toast('병원 이름과 연락처를 넣어주세요'); return; }
+  try{
+    await fdb.collection('hospreq').doc(WS()).set({ name, contact, at: now() });
+    closeModal(); toast('신청했어요 — 열리면 연락드립니다');
+  }catch(e){ toast('신청하지 못했어요 — '+((e&&e.code)||e)); }
 }
 function logout(){ if(!confirm('로그아웃할까요?')) return; setSession(''); closeModal(); applyRole(); toast('로그아웃되었습니다'); }
 function changeMyPin(){
