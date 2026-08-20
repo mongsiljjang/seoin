@@ -65,6 +65,28 @@ service cloud.firestore {
         return noClinicYet() || recoveryOpen();
       }
 
+      // 최고관리자 아이디·비밀번호 — 서버가 대조한다.
+      //
+      // 실장이 원장을 대신하는 일이 잦아, 최고관리자는 어느 기기에서든 바로
+      // 들어갈 수 있어야 한다. 그렇다고 앱이 스스로 열게 두면 뒷문이 된다.
+      // 그래서 앱은 답을 모르고, 서버만 안다.
+      //
+      // 앱은 아이디·비밀번호를 늘려 만든 값(PBKDF2 25만 회)을 unlock 에 적는다.
+      // 규칙의 get() 은 앱 권한과 무관하게 읽으므로, 앱이 못 읽는 ownerkey 와
+      // 맞춰볼 수 있다. 틀리면 아무 일도 일어나지 않고, 맞았는지조차 알려주지
+      // 않는다 — 한 번에 한 번씩만 물어볼 수 있다.
+      function ownerKeyPath() {
+        return /databases/$(database)/documents/hospapp/$(ws)/ownerkey/main;
+      }
+      function unlockPath() {
+        return /databases/$(database)/documents/hospapp/$(ws)/unlock/$(request.auth.uid);
+      }
+      function ownerKeyMatches() {
+        return exists(ownerKeyPath()) && exists(unlockPath())
+            && get(ownerKeyPath()).data.get('hash', '@none') ==
+               get(unlockPath()).data.get('key', '@nope');
+      }
+
       // 옛 단일 문서. 새 구조로 옮기는 동안만 읽는다. 쓰기는 막는다.
       allow read: if request.auth != null;
       allow write: if false;
@@ -77,9 +99,15 @@ service cloud.firestore {
         // approved 를 반드시 담게 한다. 없는 필드를 읽으면 규칙이 터지고,
         // 터진 규칙은 무조건 거절이라 왜 막혔는지 알 수 없다.
         allow create: if request.auth != null && request.auth.uid == uid
-                      && (request.resource.data.get('approved', true) == false || bootstrapAllowed());
-        // 승인은 관리자만. 본인은 자기 신청을 취소(삭제)할 수 있다.
-        allow update: if isAdmin();
+                      && (request.resource.data.get('approved', true) == false
+                          || bootstrapAllowed()
+                          || (request.resource.data.get('role', '') == '관리자' && ownerKeyMatches()));
+        // 최고관리자 아이디·비밀번호로 들어오면 기기를 바꿔 다시 열 수도 있어야 한다
+        allow update: if isAdmin()
+                      || (request.auth != null && request.auth.uid == uid
+                          && request.resource.data.get('role', '') == '관리자'
+                          && ownerKeyMatches());
+        // 본인은 자기 신청을 취소(삭제)할 수 있다.
         allow delete: if isAdmin() || (request.auth != null && request.auth.uid == uid);
       }
 
@@ -90,6 +118,19 @@ service cloud.firestore {
       match /meta/{doc} {
         allow read:  if request.auth != null;
         allow write: if isAdmin() || bootstrapAllowed();
+      }
+
+      // 최고관리자 비밀번호의 정답. 앱은 절대 읽지 못한다 — 규칙만 읽는다.
+      match /ownerkey/{doc} {
+        allow read:  if false;
+        allow write: if isAdmin() || bootstrapAllowed();
+      }
+
+      // 앱이 답안을 적어내는 곳. 쓰기만 되고 아무도 못 읽는다.
+      // 맞았는지는 오직 '들어가졌는가' 로만 알 수 있다.
+      match /unlock/{uid} {
+        allow read:   if false;
+        allow write:  if request.auth != null && request.auth.uid == uid;
       }
 
       // 복구 스위치 — 앱은 켜졌는지 볼 수만 있다. 만들고 지우는 건 콘솔에서.
