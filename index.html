@@ -189,6 +189,27 @@
     border-radius:999px; padding:5px 11px 5px 8px; font-size:12.5px; font-weight:700; color:var(--sub); cursor:pointer}
   .dchip input{width:auto; margin:0; flex:none}
   .dchip:has(input:checked){background:var(--brand-soft); border-color:var(--brand); color:var(--brand)}
+  /* 설정처럼 설명이 긴 화면 — 제목 옆 ⓘ 에 설명을 접어 넣는다.
+     PC 는 마우스를 올리면 뜨고, 폰은 커서가 없으니 눌러야 뜬다.
+     둘 다 되게 hover 와 focus 를 함께 건다. */
+  .sechead{display:flex; align-items:center; gap:6px; position:relative;
+    margin:0 2px 8px; font-size:12.5px; font-weight:800; color:var(--sub)}
+  .tip{display:inline-flex; align-items:center; justify-content:center; flex:none;
+    width:19px; height:19px; border-radius:999px; background:#dbe4e8; color:var(--ink);
+    font-size:11.5px; font-weight:900; cursor:pointer; user-select:none}
+  .tip:hover, .tip:focus, .tip.on{background:var(--brand); color:#fff; outline:none}
+  .tipbox{display:none; position:absolute; left:0; right:0; top:calc(100% + 7px); z-index:6;
+    background:#12303a; color:#fff; font-size:12.5px; font-weight:500; line-height:1.75;
+    padding:12px 14px; border-radius:12px; word-break:keep-all; text-align:left;
+    box-shadow:0 8px 24px rgba(0,0,0,.3); cursor:auto}
+  .tipbox b{color:#ffe8a8}
+  .tipbox .lawcite{color:#b9ccd3; opacity:1}
+  .tip:hover .tipbox, .tip:focus .tipbox, .tip.on .tipbox{display:block}
+  .setrow{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+  .setrow .btn{flex:1 1 auto; min-width:132px}
+  .setrow select{flex:1 1 132px; width:auto; min-width:120px}
+  .setnote{font-size:11.5px; font-weight:700; color:var(--sub); margin:7px 2px 0; word-break:keep-all}
+
   .mback{display:inline-flex; align-items:center; border:0; background:#eaf1f3; color:var(--sub);
     font-size:12.5px; font-weight:800; padding:6px 12px 6px 9px; border-radius:999px; cursor:pointer; margin-bottom:11px}
   .mback:active{background:#dde8ea}
@@ -4539,6 +4560,19 @@ function openStaffMenu(){
     <div class="tiny muted" style="margin:10px 2px 0">연월차 관리·설정·직원 관리는 최고관리자와 인사담당자만 볼 수 있어요.</div>
     <div class="tiny muted" style="text-align:center;margin-top:16px">병원 관리 앱 · v1</div>`);
 }
+// 설명은 ⓘ 안으로 접는다. 화면이 짧아지고 필요한 사람만 펼쳐 본다.
+// 폰에는 마우스 커서가 없어서 hover 만으로는 안내가 사라진다 — 눌러도 열리게 한다.
+function tipHtml(html){
+  return `<span class="tip" tabindex="0" role="button" aria-label="설명 보기" onclick="tipTap(event,this)">i<span class="tipbox">${html}</span></span>`;
+}
+function tipTap(e,el){
+  if(e.target.closest && e.target.closest('.tipbox')) return;   // 설명 안을 눌러도 안 닫힌다
+  e.stopPropagation();
+  const was=el.classList.contains('on');
+  document.querySelectorAll('.tip.on').forEach(x=>x.classList.remove('on'));
+  if(!was) el.classList.add('on');
+}
+function sechead(title, html){ return `<div class="sechead"><span>${title}</span>${tipHtml(html)}</div>`; }
 function openMenu(){
   if(!isAdmin()) return openStaffMenu();
   const on = cloudReady;
@@ -4558,87 +4592,79 @@ function openMenu(){
     <label class="field"><span>병원(앱) 이름</span><input id="setName" value="${esc(DB.hospName||'')}"></label>
     <button class="btn block" onclick="saveHospName()">이름 저장</button>
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👑 관리자 · 계정</div>
-    <div class="two" style="gap:8px">
-      <button class="btn soft" onclick="changeMyPin()">🔒 내 PIN 변경</button>
-      <button class="btn soft" onclick="logout()">로그아웃</button>
+    ${sechead('👑 관리자 · 계정', '직원 계정(전화번호·PIN·권한)은 <b>직원 탭</b>에서 추가·수정합니다. 직원은 <b>본인 전화번호 + 개인 PIN</b> 으로 로그인해 재고·출퇴근·연월차 신청을 씁니다.')}
+    <div class="setrow">
+      <button class="btn soft sm" onclick="changeMyPin()">🔒 내 PIN 변경</button>
+      <button class="btn soft sm" onclick="logout()">로그아웃</button>
     </div>
-    <div class="tiny muted" style="margin:8px 2px 0">직원 계정(전화번호·PIN·권한)은 <b>직원 탭</b>에서 추가/수정하세요. 직원은 <b>본인 전화번호+PIN</b>으로 로그인해 재고·출퇴근·연월차 신청을 씁니다.</div>
+
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👥 우리 병원 직원 수</div>
-    <div class="tiny muted" style="margin:0 2px 8px">이 숫자에 따라 지켜야 할 법이 달라져요. <b>4명 이하</b>면 연차와 연장·야간·휴일 수당 가산이 법으로 정해진 게 아닙니다. 근로계약서·급여명세서·주휴수당·최저임금·퇴직금은 사람 수와 상관없이 지켜야 해요.</div>
-    <label class="field"><span>상시 근로자 수 (비우면 재직자 수로 셉니다)</span>
-      <input id="hcNum" type="number" inputmode="numeric" min="0" value="${(DB.hosp&&DB.hosp.headcount)||''}"
-        placeholder="지금 재직자 ${DB.staff.filter(x=>x.active!==false).length}명" onchange="setHeadcount(this.value)"></label>
-    <div class="tiny muted" style="margin:-4px 2px 0">지금 기준: <b>${staffCount()}명 · ${isSmallBiz()?'5인 미만':'5인 이상'}</b> ${isSmallBiz()?'(연차는 병원이 정하는 휴가)':'(연차가 법으로 정해져 있음)'}<br>
-      <span class="lawcite">사장님·대표는 빼고, 아르바이트·수습도 실제로 일하면 넣어 셉니다</span></div>
+    ${sechead('👥 우리 병원 직원 수', '이 숫자에 따라 지켜야 할 법이 달라집니다. <b>4명 이하</b> 면 연차와 연장·야간·휴일 수당 가산이 법으로 정해진 것이 아닙니다. 근로계약서·급여명세서·주휴수당·최저임금·퇴직금은 사람 수와 상관없이 지켜야 합니다.<br><span class="lawcite">사장님·대표는 빼고, 아르바이트·수습도 실제로 일하면 넣어 셉니다 · 근로기준법 제11조</span>')}
+    <input id="hcNum" type="number" inputmode="numeric" min="0" value="${(DB.hosp&&DB.hosp.headcount)||''}"
+      placeholder="비우면 재직자 수 (지금 ${DB.staff.filter(x=>x.active!==false&&!isEmployer(x)).length}명)" onchange="setHeadcount(this.value)">
+    <div class="setnote">지금 기준 <b>${staffCount()}명 · ${isSmallBiz()?'5인 미만':'5인 이상'}</b> ${isSmallBiz()?'— 연차는 병원이 정하는 휴가':'— 연차가 법으로 정해져 있음'}</div>
+
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📅 ${leaveWord()}를 어디서 끊나요</div>
-    <div class="tiny muted" style="margin:0 2px 8px">한 해가 지나 ${leaveWord()}가 새로 채워지는 시점이에요. 병원마다 다르게 씁니다.</div>
-    <label class="field"><span>산정 기준</span>
+    ${sechead(leaveWord()+' · 근무시간 기준', '<b>'+leaveWord()+' 산정</b> — 한 해가 지나 새로 채워지는 시점입니다. <b>입사일 기준이 기본</b>이고, 사람마다 받는 날이 다르지만 각자 일한 만큼 그대로 나옵니다. 회계연도로 맞추는 곳은 입사 첫 해 몫을 <b>돈으로 정산하고</b> 넘어갑니다.<br><br><b>주휴일</b> — 그 요일에 나오면 그날 근무는 <b>전부 휴일근로</b>가 됩니다.<br><br>더 쳐줘야 하는 시간은 셋인데 기준이 서로 다릅니다. <b>연장</b>은 하루 근무시간을 넘긴 만큼, <b>야간</b>은 밤 10시~아침 6시, <b>휴일</b>은 쉬기로 한 날에 나온 것입니다. 앱은 <b>시간만 나눠서</b> 보여주고 몇 배로 칠지는 노무사가 정합니다.<br><span class="lawcite">근거 · 근로기준법 제60조 · 제56조 · 제55조 · 제11조</span>')}
+    <div class="setrow" style="margin-bottom:8px">
       <select id="lvBasis" onchange="setLeaveBasis(this.value)">
-        <option value="join" ${leaveBasis()==='join'?'selected':''}>입사일 기준 — 사람마다 다른 날에 채워짐</option>
-        <option value="fiscal" ${leaveBasis()==='fiscal'?'selected':''}>회계연도 기준 — 모두 1월 1일에 같이 채워짐</option>
-      </select></label>
-    <div class="tiny muted" style="margin:-4px 2px 0"><b>입사일 기준이 기본</b>입니다 — 사람마다 받는 날이 달라 손이 더 가지만, 각자 일한 만큼 그대로 나옵니다. 회계연도로 맞추는 곳은 입사 첫 해 몫을 <b>돈으로 정산하고</b> 넘어갑니다. 어느 쪽이든 직원에게 불리하면 안 돼요.<br><span class="lawcite">근거 · 근로기준법 제60조</span></div>
-    <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🌙 쉬는 날과 늦은 시간</div>
-    <div class="tiny muted" style="margin:0 2px 8px">더 쳐줘야 하는 시간이 세 가지인데 기준이 서로 달라요. <b>연장</b>은 하루 근무시간을 넘긴 만큼, <b>야간</b>은 밤 10시~아침 6시, <b>휴일</b>은 쉬기로 한 날에 나온 것입니다. 앱은 <b>시간만 나눠서</b> 보여드리고 몇 배로 칠지는 노무사가 정합니다.</div>
-    <label class="field"><span>주휴일 (주에 하루 유급으로 쉬는 날)</span>
+        <option value="join" ${leaveBasis()==='join'?'selected':''}>입사일 기준</option>
+        <option value="fiscal" ${leaveBasis()==='fiscal'?'selected':''}>회계연도 기준</option>
+      </select>
       <select id="hsRest" onchange="setRestDay(this.value)">
-        ${WEEK_KO.map((w,i)=>`<option value="${i}" ${restDayIdx()===i?'selected':''}>${w}요일</option>`).join('')}
-      </select></label>
-    <button class="btn soft block" style="margin-top:8px" onclick="openHolidays()">📅 쉬는 날 관리 (공휴일 · 병원 휴무일) — ${hospHolidays().length}일</button>
-    <div class="tiny muted" style="margin:-4px 2px 0">이 요일에 나오면 그날 근무는 <b>전부 휴일근로</b>로 잡힙니다.
-      ${isSmallBiz()? `지금은 직원이 <b>${staffCount()}명</b>이라 <b>가산이 법으로 정해진 건 아닙니다</b> — 그래도 얼마나 일했는지는 남겨둡니다.` : `지금은 직원이 <b>${staffCount()}명</b>이라 <b>가산이 법으로 정해져 있습니다</b>.`}<br>
-      <span class="lawcite">근거 · 근로기준법 제56조 · 제55조 · 제11조</span></div>
+        ${WEEK_KO.map((w,i)=>`<option value="${i}" ${restDayIdx()===i?'selected':''}>주휴일 ${w}요일</option>`).join('')}
+      </select>
+    </div>
+    <div class="setrow">
+      <button class="btn soft sm" onclick="openHolidays()">📅 쉬는 날 ${hospHolidays().length}일</button>
+    </div>
+    <div class="setnote">${isSmallBiz()? `직원 ${staffCount()}명 — 가산이 법정 의무는 아니지만 시간은 남겨둡니다` : `직원 ${staffCount()}명 — 가산이 법으로 정해져 있습니다`}</div>
+
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🔐 급여 열쇠</div>
-    <div class="tiny muted" style="margin:0 2px 8px">급여명세서와 근로계약서 본문은 이 열쇠로 잠겨 저장돼요. ${DB.payLock? `<b style="color:var(--ok)">잠금 설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
-    <button class="btn soft block owner-only" onclick="openPayKeySetup()">${DB.payLock?'열쇠 바꾸기':'급여 열쇠 정하기'}</button>
-    ${payUnlocked()?`<button class="btn soft block" style="margin-top:8px" onclick="payRelock(); closeModal(); toast('급여를 다시 잠갔어요')">지금 바로 잠그기</button>`:''}
-    <div class="tiny muted" style="margin:8px 2px 0">열쇠는 앱에도 서버에도 저장하지 않습니다 — <b>잊으면 아무도 못 엽니다.</b> 최고관리자만 정할 수 있어요.</div>
+    ${sechead('🔐 잠금 · 계정 열쇠', '<b>급여 열쇠</b> — 급여명세서와 근로계약서 본문은 이 열쇠로 잠겨 저장됩니다. 열쇠는 앱에도 서버에도 저장하지 않습니다. <b>잊으면 아무도 못 엽니다.</b><br><br><b>최고관리자 아이디·비밀번호</b> — 이걸로 <b>어느 기기에서든</b> 기기 승인 없이 바로 들어갑니다. 원장님과 실장님이 함께 쓰세요.<br><br>둘 다 최고관리자만 정할 수 있습니다.')}
+    <div class="setrow">
+      <button class="btn soft sm owner-only" onclick="openPayKeySetup()">${DB.payLock?'급여 열쇠 바꾸기':'급여 열쇠 정하기'}</button>
+      ${payUnlocked()?`<button class="btn soft sm" onclick="payRelock(); closeModal(); toast('급여를 다시 잠갔어요')">지금 바로 잠그기</button>`:''}
+      <button class="btn soft sm owner-only" onclick="openOwnerKeySetup()">👑 아이디·비밀번호</button>
+    </div>
+    <div class="setnote">급여 열쇠 ${DB.payLock? `<b style="color:var(--ok)">설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
+
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">👑 최고관리자 아이디·비밀번호</div>
-    <div class="tiny muted" style="margin:0 2px 8px">이걸로 <b>어느 기기에서든</b> 기기 승인 없이 바로 들어갑니다. 원장님과 실장님이 함께 쓰세요.</div>
-    <button class="btn soft block owner-only" onclick="openOwnerKeySetup()">아이디·비밀번호 정하기 / 바꾸기</button>
+    ${sechead('📱 기기 · 출근 체크', '<b>기기 승인</b> — 직원 폰마다 한 번씩 승인해야 데이터가 내려갑니다. 승인 안 한 기기는 아무것도 못 봅니다.<br><br><b>공용 기기 출근 체크</b> — 데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면 직원이 <b>이름 + 개인 PIN</b> 으로 출퇴근을 찍습니다(개인폰 로그인 불필요). 주소 뒤에 <b>#kiosk</b> 를 붙여 북마크하면 바로 열립니다. 나갈 땐 관리자 PIN.')}
+    <div class="setrow">
+      <button class="btn soft sm" onclick="openDeviceClaims()">기기 승인${pendingClaims.length?` <span class="pill pend">${pendingClaims.length}</span>`:''}</button>
+      <button class="btn soft sm" onclick="closeModal(); enterKiosk()">🖥️ 출근 체크 화면</button>
+    </div>
+
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📱 기기 승인</div>
-    <div class="tiny muted" style="margin:0 2px 8px">직원 폰마다 한 번씩 승인해야 데이터가 내려갑니다. 승인 안 한 기기는 아무것도 못 봅니다.</div>
-    <button class="btn soft block" onclick="openDeviceClaims()">기기 승인 관리${pendingClaims.length?` <span class="pill pend">${pendingClaims.length}</span>`:''}</button>
-    <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">🖥️ 공용 기기 출근 체크</div>
-    <button class="btn soft block" onclick="closeModal(); enterKiosk()">이 기기를 ‘출근 체크 화면’으로 열기</button>
-    <div class="tiny muted" style="margin:8px 2px 0">데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면, 직원이 <b>이름+개인 PIN</b>으로 출근/퇴근을 찍어요(개인폰 로그인 불필요). 주소 뒤에 <b>#kiosk</b>를 붙여 북마크하면 바로 열립니다. 나갈 땐 관리자 PIN.</div>
-    <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📍 GPS 출근 확인 (선택 · 무료)</div>
+    ${sechead('📍 GPS 출근 확인 (선택 · 무료)', '직원이 <b>본인 폰</b>으로 출근할 때만 병원 위치를 확인합니다. 관리자 대리 출근과 공용 키오스크에는 적용되지 않습니다.<br><br>병원 위치는 <b>병원에 계실 때</b> 저장하세요. 카톡 안에서 위치가 막히면 크롬·사파리로 열어주세요. GPS 사용에 <b>돈은 들지 않습니다.</b>')}
     <label class="field" style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
       <input type="checkbox" id="geoOn" style="width:auto;margin:0" ${DB.geo.on?'checked':''} onchange="setGeoOn(this.checked)">
-      <span style="margin:0;font-weight:700">직원이 본인 폰으로 출근할 때 병원 위치 확인</span></label>
-    <div class="two" style="gap:8px">
-      <button class="btn soft" onclick="saveClinicLoc()">📍 현재 위치를 병원으로 저장</button>
+      <span style="margin:0;font-weight:700">본인 폰 출근 때 위치 확인</span></label>
+    <div class="setrow">
+      <button class="btn soft sm" onclick="saveClinicLoc()">📍 현재 위치를 병원으로</button>
       <select id="geoRadius" onchange="setGeoRadius(this.value)">
         ${[100,200,300,500].map(r=>`<option value="${r}" ${DB.geo.radiusM===r?'selected':''}>반경 ${r}m</option>`).join('')}</select>
     </div>
-    <div class="tiny muted" style="margin:6px 2px 0">${DB.geo.lat!=null?`✅ 병원 위치 설정됨 · 반경 ${DB.geo.radiusM}m 이내에서만 출근`:'⚠ 병원 위치 미설정 — <b>병원에 계실 때</b> 위 버튼을 눌러 저장하세요'}. GPS는 <b>무료</b>이며, 관리자 대리 출근·공용 키오스크에는 적용되지 않아요. 카톡에서 위치가 막히면 크롬/사파리로 열어주세요.</div>
+    <div class="setnote">${DB.geo.lat!=null?`✅ 위치 설정됨 · 반경 ${DB.geo.radiusM}m 이내에서만 출근`:'⚠ 위치 미설정 — 병원에서 위 버튼을 눌러주세요'}</div>
+
     <div class="divider"></div>
-    <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
-    <div class="two" style="gap:8px">
-      <button class="btn soft" onclick="exportInventory()">📦 재고 현황</button>
-      <button class="btn soft" onclick="exportAttendance()">🕒 이번 달 근무</button>
-      <button class="btn soft" onclick="exportLeaves()">🌴 연월차 내역</button>
-      <button class="btn soft" onclick="exportData()">💾 전체 백업(JSON)</button>
+    ${sechead('📊 내보내기 · 백업', '엑셀에서 바로 열리는 파일로 내려받습니다.<br><br>기기를 바꾸거나 옮길 때는 <b>전체 백업(JSON)</b> 으로 내보낸 뒤 불러오세요. 불러오면 <b>지금 데이터가 파일 내용으로 바뀌고, 공유 중이면 모든 기기에서 함께 바뀝니다.</b><br><br>백업 파일에는 <b>직원 PIN 과 잠긴 급여 기록</b>이 들어 있습니다. 아무 데나 두지 말고 원장님만 아는 곳에 보관하세요.')}
+    <div class="setrow" style="margin-bottom:8px">
+      <button class="btn soft sm" onclick="exportInventory()">📦 재고</button>
+      <button class="btn soft sm" onclick="exportAttendance()">🕒 이번 달 근무</button>
+      <button class="btn soft sm" onclick="exportLeaves()">🌴 연월차</button>
     </div>
-    <div class="tiny muted" style="margin:8px 2px 0">마지막 백업: <b>${DB.lastBackupAt? fmtDateFull(String(DB.lastBackupAt).slice(0,10)) : '아직 받은 적 없어요'}</b>${DB.lastBackupAt?'':' — 큰 변경 전에는 먼저 받아 두세요'}<br>
-      백업 파일에는 <b>직원 PIN 과 잠긴 급여 기록</b>이 들어 있어요. 아무 데나 두지 말고 원장님만 아는 곳에 보관하세요.</div>
-    <div class="divider"></div>
-    <div class="hint">기기를 바꾸거나 옮길 땐 <b>전체 백업(JSON)</b>으로 내보낸 뒤 아래에서 불러오세요. 불러오면 <b>지금 데이터가 파일 내용으로 바뀌고, 공유 중이면 모든 기기에서 함께 바뀝니다.</b></div>
-    <button class="btn soft block" onclick="importData()">📥 백업 파일 불러오기</button>
+    <div class="setrow">
+      <button class="btn soft sm" onclick="exportData()">💾 전체 백업</button>
+      <button class="btn soft sm" onclick="importData()">📥 백업 불러오기</button>
+      ${hasRestoreUndo()?`<button class="btn soft sm" onclick="undoRestore()">↩︎ 불러오기 직전으로</button>`:''}
+    </div>
     <input type="file" id="importFile" accept="application/json" style="display:none" onchange="doImport(event)">
-    ${hasRestoreUndo()?`<button class="btn soft block" style="margin-top:8px" onclick="undoRestore()">↩︎ 불러오기 직전으로 되돌리기</button>
-    <div class="tiny muted" style="margin:6px 2px 0">이 기기에서 마지막으로 불러오기 한 <b>직전 상태</b>가 남아 있어요.</div>`:''}
+    <div class="setnote">마지막 백업 <b>${DB.lastBackupAt? fmtDateFull(String(DB.lastBackupAt).slice(0,10)) : '아직 없음'}</b>${DB.lastBackupAt?'':' — 큰 변경 전에는 먼저 받아 두세요'}</div>
+
     <div class="divider"></div>
-    <button class="btn danger block" onclick="wipeData()">전체 데이터 초기화</button>
+    <div class="setrow"><button class="btn danger sm" onclick="wipeData()">전체 데이터 초기화</button></div>
     <div class="tiny muted" style="text-align:center;margin-top:14px">병원 관리 앱 · v1 · 로컬 저장</div>`);
 }
 function saveHospName(){ DB.hospName=$('#setName').value.trim()||'우리병원 관리'; saveDB();
