@@ -362,7 +362,7 @@
       <div class="spread" style="margin:4px 2px 12px">
         <h2 class="sec" style="margin:0">📦 재고 현황</h2>
         <div class="row" style="gap:6px">
-          <button class="btn sm soft" onclick="openImport()">⬆ 엑셀</button>
+          <button class="btn sm soft" onclick="openUploads()">📂 파일</button>
           <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
         </div>
       </div>
@@ -473,6 +473,7 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(typeof DB.adminPin!=='string') DB.adminPin='';
   if(!Array.isArray(DB.implants)) DB.implants=[];            // 예전 버전에서 올라온 데이터엔 없다
   if(!Array.isArray(DB.implantLogs)) DB.implantLogs=[];
+  if(!Array.isArray(DB.claims)) DB.claims=[];                // 보험 청구내역 (대조용 · 처치명은 안 담는다)
   // 노무 — 공지·근로계약서·급여명세서·사직서. 금액이 든 것은 enc 안에 잠겨 있다.
   if(!Array.isArray(DB.notices)) DB.notices=[];
   if(!Array.isArray(DB.contracts)) DB.contracts=[];
@@ -1298,8 +1299,11 @@ function renderImplant(){
   let total=0, low=0, zero=0;
   list.forEach(p=>p.variants.forEach(v=>{ total+=(+v.qty||0); if(v.qty===0)zero++; else if(v.qty<=(+v.minQty||0))low++; }));
   const head=`<div class="spread" style="margin:2px 2px 10px"><h2 class="sec" style="margin:0">🦷 임플란트</h2>
-    <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div>`;
-  if(!list.length){ box.innerHTML = head+`<div class="card">${emptyBox('🦷','등록된 임플란트가 없어요.<br>＋제품으로 브랜드·부품·규격을 직접 추가하세요.')}</div>`; refreshBell(); return; }
+    <div class="row" style="gap:6px">
+      <button class="btn sm soft" onclick="openUploads()">📂 파일</button>
+      <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
+      <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div></div>`;
+  if(!list.length){ box.innerHTML = head+`<div class="card">${emptyBox('🦷','등록된 임플란트가 없어요.<br><b>📂 파일</b>로 거래명세서나 규격 목록을 올리거나,<br><b>＋제품</b>으로 직접 추가하세요.')}</div>`; refreshBell(); return; }
   if(!currentImplantId || !implantById(currentImplantId)) currentImplantId=list[0].id;
   const summary=`<div class="summary3">
     <div class="stat"><div class="n">${total}</div><div class="l">전체 수량</div></div>
@@ -1335,10 +1339,29 @@ function implantCard(p){
   const useMatrix=(p.part==='픽스처') && parsed.some(x=>x.dl);
   const body = p.variants.length ? (useMatrix?matrixHtml(p,parsed):variantRows(p,p.variants)) : emptyBox('📐','규격을 추가하세요');
   const bulk = p.part==='픽스처' ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
-  const stk = p.variants.length ? `<button class="btn soft sm grow" onclick="openStocktake('${p.id}')">📋 재고 실사</button>` : '';
+  // 재고 실사는 설정(최고관리자)으로 옮겼다 — 자주 쓰는 화면이 아니고 장부를 고치는 일이라
   return `<div class="card">${head}${recon}<div class="divider"></div>${body}
-    <div class="btnrow" style="margin-top:12px"><button class="btn sm grow" onclick="openVariantForm('${p.id}')">＋ 규격 추가</button>${bulk}</div>
-    ${stk?`<div class="btnrow" style="margin-top:8px">${stk}</div>`:''}</div>`;
+    <div class="btnrow" style="margin-top:12px"><button class="btn sm grow" onclick="openVariantForm('${p.id}')">＋ 규격 추가</button>${bulk}</div></div>`;
+}
+// 실사는 제품 단위로 센다. 설정에서 들어오므로 어느 제품인지 먼저 고른다.
+function openStocktakePick(){
+  if(!isOwner()){ toast('재고 실사는 최고관리자만 할 수 있어요'); return; }
+  const list=(DB.implants||[]).filter(p=>(p.variants||[]).length);
+  modal(`<h3>📋 재고 실사</h3>
+    <div class="hint">규격별로 <b>실제 개수</b>를 세어 넣으면 장부와 견줘 오차를 보여줍니다. 원하면 장부를 실재고로 맞출 수 있어요.</div>
+    <div class="tiny muted" style="margin:8px 2px 12px">셀 제품을 고르세요.</div>
+    ${list.length? list.map(p=>{
+      const counted=pHasCount(p), diff=pDiff(p);
+      return `<div class="trow" onclick="openStocktake('${p.id}')" style="cursor:pointer">
+        <div class="grow" style="min-width:0">
+          <div style="font-weight:700;font-size:14px">${esc(p.brand)} ${esc(p.line||'')}</div>
+          <div class="tiny muted">${esc(p.part||'')} · 규격 ${p.variants.length}개 · 장부 ${pQty(p)}개</div>
+        </div>
+        ${counted? (diff===0? '<span class="pill ok">오차 없음</span>'
+                            : `<span class="pill ${diff<0?'danger':'warn'}">오차 ${diff>0?'+':''}${diff}</span>`)
+                 : '<span class="pill grey">실사 전</span>'}
+        <span class="chev">›</span></div>`; }).join('')
+      : emptyBox('📐','규격이 있는 임플란트 제품이 없어요')}`, openMenu);
 }
 function openStocktake(pid){
   const p=implantById(pid);
@@ -1352,7 +1375,7 @@ function openStocktake(pid){
     <div class="row" style="margin-top:14px">
       <button class="btn grow" onclick="saveStocktake('${pid}',false)">실재고만 저장</button>
       <button class="btn warn grow" onclick="saveStocktake('${pid}',true)">저장 + 장부 보정</button></div>
-    <div class="tiny muted" style="margin-top:8px">‘장부 보정’은 각 규격의 현재고를 실재고와 같게 맞추고, 차이는 보정 기록으로 남겨요.</div>`);
+    <div class="tiny muted" style="margin-top:8px">‘장부 보정’은 각 규격의 현재고를 실재고와 같게 맞추고, 차이는 보정 기록으로 남겨요.</div>`, openStocktakePick);
 }
 function saveStocktake(pid,reconcile){
   const p=implantById(pid); let changed=0, adjusted=0;
@@ -1361,7 +1384,7 @@ function saveStocktake(pid,reconcile){
     v.phys=val; v.physAt=todayKey(); changed++;
     if(reconcile && val!==v.qty){ const before=v.qty; implantLog(pid,v.id,'adjust',null,val-before,before,val,'실사 보정(일괄)'); v.qty=val; adjusted++; }
   });
-  saveDB(); closeModal(); renderImplant();
+  saveDB(); renderImplant(); openStocktakePick();
   toast(reconcile?`실사 저장 · ${adjusted}개 규격 보정`:`실재고 ${changed}개 규격 저장`);
 }
 function matrixHtml(p,parsed){
@@ -1807,7 +1830,8 @@ function openMasters(kind){
     <div class="seg" style="margin-bottom:10px">
       ${Object.keys(MKINDS).map(k=>`<button class="${k===mKind?'on':''}" onclick="openMasters('${k}')">${MKINDS[k].ko}</button>`).join('')}
     </div>
-    <button class="btn block" style="margin-bottom:10px" onclick="openPurchase()">📥 거래명세서 올리기 &mdash; 목록·입고 한 번에</button>
+    <button class="btn block" style="margin-bottom:8px" onclick="openPurchase()">📥 거래명세서 올리기 &mdash; 목록·입고 한 번에</button>
+    <button class="btn soft block" style="margin-bottom:10px" onclick="openMassAdd()">＋ 규격 한꺼번에 넣기 &mdash; 붙여넣기·파일·조합</button>
     <div class="tiny muted" style="margin:-2px 2px 8px"><b>수량</b> 칸에 지금 남은 개수를 적으면 그대로 재고가 돼요. ▲▼ 로 순서를 바꾸고, <b>안씀</b> 을 켜면 대장 목록에서 숨겨져요(기록은 남습니다).</div>
     <div style="max-height:38vh;overflow:auto;margin-bottom:12px">
       ${rows.length? rows.map((r,i)=>`<div class="trow" style="gap:6px">
@@ -1937,6 +1961,390 @@ function mImport(ev){
   r.readAsText(f,'utf-8');
 }
 
+/* ========================================================================
+   보험 청구 대조 — 청구한 개수와 재고에서 빠진 개수를 맞춰본다
+   안 맞으면 둘 중 하나다. 청구를 빠뜨렸거나(그만큼 돈을 못 받는다),
+   대장을 안 적었거나(재고가 장부와 어긋난다). 어느 쪽인지 알려주는 게 목적.
+   ── 개인정보: 청구 파일에는 환자 이름이 그대로 들어 있다. 앱에는
+      성+초성으로 바꿔서만 남기고, 처치명(진료내역)은 저장하지 않는다.
+      대신 몇 단계인지만 숫자로 남긴다.
+   ======================================================================== */
+const CCOL={
+  chart:['차트번호','챠트번호','차트','환자번호','등록번호','수진자번호','chartno','chart'],
+  name:['환자명','환자','성명','이름','수진자명','수진자','name'],
+  date:['진료일','진료일자','청구일','일자','날짜','시행일','date'],
+  item:['항목','항목명','처치명','수가명','명칭','내역','진료내역','산정명칭','item'],
+  qty:['수량','개수','횟수','건수','qty'],
+};
+// 임플란트 보험은 단계로 나눠 청구한다. 재고가 빠지는 건 2단계(고정체 식립)뿐이다.
+function claimStage(txt){
+  const t=String(txt||'').replace(/\s/g,'');
+  if(/3단계|보철|최종|크라운|crown|지대주|abut/i.test(t)) return 3;
+  if(/2단계|고정체|픽스[처쳐]|식립|fixture/i.test(t)) return 2;
+  if(/1단계|진단|계획|본뜨기/i.test(t)) return 1;
+  return 0;
+}
+function isImplantClaim(txt){ return /임플란트|임프란트|implant|고정체|픽스[처쳐]|지대주/i.test(String(txt||'')); }
+
+function claimRows(rows){
+  rows=(rows||[]).filter(r=>r&&r.some(c=>String(c).trim()!==''));
+  if(!rows.length) return {ok:[], other:0, noHeader:false, empty:true};
+  const norm=s=>String(s||'').replace(/\s|\(.*?\)/g,'').toLowerCase();
+  const header=rows[0].map(norm), idx={};
+  for(const k in CCOL) idx[k]=header.findIndex(h=>CCOL[k].some(x=>norm(x)===h||(h&&h.includes(norm(x)))));
+  if(idx.chart<0 && idx.item<0) return {ok:[], other:0, noHeader:true};   // 열 제목이 없으면 손댈 수 없다
+  const nd=v=>{ const m=String(v??'').match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/); return m?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`:''; };
+  const num=v=>{ const n=parseInt(String(v??'').replace(/[^\d-]/g,''),10); return isNaN(n)?0:n; };
+  const pick=(r,k)=> idx[k]>=0? r[idx[k]] : undefined;
+  const ok=[]; let other=0;
+  for(const r of rows.slice(1)){
+    const item=String(pick(r,'item')??'').trim();
+    const chart=String(pick(r,'chart')??'').trim();
+    if(!chart && !item) continue;
+    if(/합\s*계|소\s*계|총\s*계/.test(chart+item)) continue;
+    if(!isImplantClaim(item)){ other++; continue; }        // 임플란트 아닌 줄은 세지 않는다
+    ok.push({ chart, name:maskName(String(pick(r,'name')??'').trim()),
+              date:nd(pick(r,'date')), qty:Math.max(1,num(pick(r,'qty'))||1),
+              stage:claimStage(item) });
+  }
+  return {ok, other, noHeader:false};
+}
+
+let clPending=null, clYm='';
+function ymOf(d){ return String(d||'').slice(0,7); }
+function thisYm(){ return todayKey().slice(0,7); }
+function openClaims(ym){
+  ensureSchema();
+  clYm = ym || clYm || thisYm();
+  const batch=(DB.claims||[]).filter(b=>b.ym===clYm).sort((a,b)=>String(b.at).localeCompare(String(a.at)))[0];
+  const yms=[...new Set([thisYm(), ...(DB.claims||[]).map(b=>b.ym)])].sort().reverse();
+  modal(`<h3>🧾 보험 청구 대조</h3>
+    <div class="hint">덴트웹에서 받은 <b>청구내역 파일</b>을 올리면, 앱 대장·재고와 맞는지 견줘 봅니다.
+      안 맞는 줄만 골라서 보여드려요.</div>
+    <label class="field" style="margin-top:12px"><span>어느 달</span>
+      <select id="clYm" onchange="openClaims(this.value)">
+        ${yms.map(y=>`<option value="${y}"${y===clYm?' selected':''}>${y.replace('-','년 ')}월</option>`).join('')}
+      </select></label>
+    <label class="btn block" style="cursor:pointer">📂 청구내역 파일 고르기
+      <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleClaims(event)"></label>
+    <div class="tiny muted" style="margin:8px 2px 4px">읽는 열: <b>차트번호 · 환자명 · 진료일 · 항목 · 수량</b>.
+      열 제목만 있으면 순서가 달라도 찾아요. 임플란트가 아닌 줄은 셈에서 빠집니다.</div>
+    <div class="tiny muted" style="margin:0 2px 12px">환자 이름은 <b>성만 남기고 초성</b>으로 바꿔 저장하고,
+      <b>처치명은 저장하지 않아요</b>(몇 단계인지만 남깁니다).</div>
+    ${batch? claimReport(batch) : `<div class="divider"></div>${emptyBox('🧾','아직 이 달 청구내역을 안 올렸어요')}`}`);
+}
+/* 대장이 말하는 그 달 보험 식립 — 차트번호별로 몇 개 심었나 */
+function ledgerInsMap(ym){
+  const m=new Map();
+  (DB.implantCases||[]).forEach(c=>{
+    if(c.insur!=='보험') return;
+    if(ymOf(c.d1)!==ym) return;
+    const n=(c.teeth||[]).length; if(!n) return;
+    const k=String(c.chart||'').trim(); if(!k) return;
+    m.set(k,(m.get(k)||0)+n);
+  });
+  return m;
+}
+/* 그 달 재고에서 '보험'으로 빠진 개수 — 픽스처만 센다(힐링·지대주는 따로 빠진다) */
+function stockInsCount(ym){
+  let n=0;
+  (DB.implantLogs||[]).forEach(l=>{
+    if(l.type!=='out' || l.cat!=='insurance') return;
+    if(ymOf(String(l.at).slice(0,10))!==ym) return;
+    const p=(DB.implants||[]).find(x=>x.id===l.pid);
+    if(p && (p.part||'').includes('픽스처')) n+=l.amount;
+  });
+  return n;
+}
+function claimReport(batch){
+  const ym=batch.ym;
+  const claimMap=new Map();                                  // 차트번호 → 식립 청구 개수
+  batch.rows.filter(r=>r.stage===2).forEach(r=>{
+    const k=String(r.chart||'').trim(); if(!k) return;
+    claimMap.set(k,(claimMap.get(k)||0)+r.qty);
+  });
+  const ledMap=ledgerInsMap(ym);
+  const claimTot=[...claimMap.values()].reduce((s,n)=>s+n,0);
+  const ledTot=[...ledMap.values()].reduce((s,n)=>s+n,0);
+  const stkTot=stockInsCount(ym);
+  const nameOf=k=>{ const r=batch.rows.find(x=>x.chart===k && x.name); if(r) return r.name;
+    const c=(DB.implantCases||[]).find(x=>String(x.chart||'').trim()===k); return c? (c.pname||'') : ''; };
+  const gaps=[];
+  new Set([...claimMap.keys(), ...ledMap.keys()]).forEach(k=>{
+    const a=claimMap.get(k)||0, b=ledMap.get(k)||0;
+    if(a!==b) gaps.push({chart:k, claim:a, led:b, name:nameOf(k)});
+  });
+  gaps.sort((x,y)=>Math.abs(y.claim-y.led)-Math.abs(x.claim-x.led));
+  const match = claimTot===ledTot && ledTot===stkTot && !gaps.length;
+  const stages=[1,2,3,0].map(s=>({s, n:batch.rows.filter(r=>r.stage===s).reduce((t,r)=>t+r.qty,0)})).filter(x=>x.n);
+  return `<div class="divider"></div>
+    <div class="summary3" style="margin-bottom:10px">
+      <div class="stat"><div class="n">${claimTot}</div><div class="l">청구(식립)</div></div>
+      <div class="stat"><div class="n" style="color:${ledTot===claimTot?'var(--ok)':'var(--warn)'}">${ledTot}</div><div class="l">대장</div></div>
+      <div class="stat"><div class="n" style="color:${stkTot===claimTot?'var(--ok)':'var(--warn)'}">${stkTot}</div><div class="l">재고에서 빠짐</div></div>
+    </div>
+    <div class="tiny muted" style="margin:0 2px 10px">올린 날 ${esc(String(batch.at).slice(0,10))} · 청구 줄 ${batch.rows.length}개${
+      stages.length?` (${stages.map(x=>`${x.s?x.s+'단계':'기타'} ${x.n}`).join(' · ')})`:''}</div>
+    ${match
+      ? `<div class="card" style="box-shadow:none;background:var(--ok-soft);border:0;padding:12px 14px">
+           <b class="tiny">✅ 다 맞아요.</b> <span class="tiny">청구·대장·재고 세 숫자가 같습니다.</span></div>`
+      : `<div class="card" style="box-shadow:none;background:var(--warn-soft,#fff6e5);border:0;padding:11px 13px;margin-bottom:10px">
+           <b class="tiny">숫자가 어긋나요.</b>
+           <div class="tiny" style="margin-top:4px">
+             ${claimTot>ledTot?`청구가 대장보다 <b>${claimTot-ledTot}개</b> 많아요 — 대장을 안 적었을 수 있어요.<br>`:''}
+             ${ledTot>claimTot?`대장이 청구보다 <b>${ledTot-claimTot}개</b> 많아요 — <b>청구를 빠뜨렸는지</b> 확인하세요.<br>`:''}
+             ${stkTot!==ledTot?`재고에서 빠진 개수(${stkTot})가 대장(${ledTot})과 달라요 — 재고를 손으로 고쳤거나 대장을 나중에 고쳤을 수 있어요.`:''}
+           </div></div>
+         ${gaps.length? `<div class="tiny muted" style="margin:0 2px 6px">차트번호별로 다른 곳 ${gaps.length}건</div>
+         <div style="max-height:34vh;overflow:auto">
+           ${gaps.map(g=>`<div class="trow">
+             <div class="grow" style="min-width:0">
+               <div style="font-weight:700;font-size:14px">${esc(g.chart)}${g.name?` <span class="tiny muted">${esc(g.name)}</span>`:''}</div>
+               <div class="tiny" style="color:${g.led>g.claim?'var(--danger)':'var(--warn)'}">${
+                 g.led>g.claim? `대장 ${g.led} · 청구 ${g.claim} — 청구 누락 의심`
+                              : `청구 ${g.claim} · 대장 ${g.led} — 대장 누락 의심`}</div>
+             </div></div>`).join('')}
+         </div>`:''}`}
+    <button class="btn soft sm block" style="margin-top:10px" onclick="delClaimBatch('${batch.id}')">이 달 청구내역 지우기</button>`;
+}
+function handleClaims(ev){
+  const f=ev.target.files[0]; ev.target.value=''; if(!f) return;
+  const isCsv=/\.csv$/i.test(f.name), r=new FileReader();
+  r.onload=()=>{
+    try{
+      let rows;
+      if(!isCsv && typeof XLSX!=='undefined'){
+        const wb=XLSX.read(new Uint8Array(r.result),{type:'array'});
+        rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+      } else rows=parseCSV(typeof r.result==='string'?r.result:new TextDecoder('utf-8').decode(r.result));
+      const res=claimRows(rows);
+      if(res.noHeader){ toast('열 제목(차트번호·항목)을 찾지 못했어요'); return; }
+      if(!res.ok.length){ toast(res.other? `임플란트 줄이 없어요 (다른 줄 ${res.other}개)` : '읽을 줄이 없어요'); return; }
+      previewClaims(res);
+    }catch(e){ toast('파일을 읽지 못했어요'); }
+  };
+  if(!isCsv && typeof XLSX!=='undefined') r.readAsArrayBuffer(f); else r.readAsText(f,'utf-8');
+}
+function previewClaims(res){
+  clPending=res.ok;
+  const byYm={}; res.ok.forEach(r=>{ const y=ymOf(r.date)||clYm; byYm[y]=(byYm[y]||0)+1; });
+  const guess=Object.keys(byYm).sort((a,b)=>byYm[b]-byYm[a])[0]||clYm;
+  const st=[1,2,3,0].map(s=>({s,n:res.ok.filter(r=>r.stage===s).reduce((t,r)=>t+r.qty,0)})).filter(x=>x.n);
+  modal(`<h3>🧾 이대로 넣을까요?</h3>
+    <div class="summary3" style="margin-bottom:10px">
+      <div class="stat"><div class="n">${res.ok.length}</div><div class="l">임플란트 줄</div></div>
+      <div class="stat"><div class="n" style="color:var(--brand)">${res.ok.filter(r=>r.stage===2).reduce((t,r)=>t+r.qty,0)}</div><div class="l">식립(2단계)</div></div>
+      <div class="stat"><div class="n" style="color:var(--sub)">${res.other}</div><div class="l">임플란트 아님</div></div>
+    </div>
+    ${st.length?`<div class="tiny muted" style="margin:0 2px 10px">${st.map(x=>`${x.s?x.s+'단계':'단계 못 읽음'} ${x.n}개`).join(' · ')}</div>`:''}
+    ${res.ok.some(r=>!r.stage)?`<div class="tiny" style="color:var(--warn);margin:0 2px 10px">⚠ 단계를 못 읽은 줄이 있어요. 대조는 <b>2단계(식립)</b>만 셉니다.</div>`:''}
+    <label class="field"><span>어느 달로 넣을까요</span>
+      <input id="clYmIn" type="month" value="${esc(guess)}"></label>
+    <div style="max-height:32vh;overflow:auto;margin-bottom:12px">
+      ${res.ok.slice(0,60).map(r=>`<div class="trow">
+        <div class="grow" style="min-width:0">
+          <div style="font-weight:700;font-size:14px">${esc(r.chart)||'(차트번호 없음)'} <span class="tiny muted">${esc(r.name||'')}</span></div>
+          <div class="tiny muted">${esc(r.date||'날짜 없음')} · ${r.stage?r.stage+'단계':'단계 못 읽음'}</div>
+        </div><b style="white-space:nowrap">${r.qty}</b></div>`).join('')}
+      ${res.ok.length>60?`<div class="tiny muted" style="padding:8px 2px">…그 밖에 ${res.ok.length-60}줄</div>`:''}
+    </div>
+    <button class="btn block" onclick="applyClaims()">넣고 대조하기</button>`, ()=>openClaims(clYm));
+}
+function applyClaims(){
+  if(!clPending) return;
+  const ym=($('#clYmIn').value||'').trim() || clYm || thisYm();
+  if(!Array.isArray(DB.claims)) DB.claims=[];
+  DB.claims = DB.claims.filter(b=>b.ym!==ym);        // 같은 달은 마지막에 올린 것만 남긴다
+  DB.claims.unshift({id:uid(), ym, at:now(), rows:clPending});
+  if(DB.claims.length>36) DB.claims=DB.claims.slice(0,36);
+  clPending=null; clYm=ym; saveDB(); openClaims(ym);
+  toast('청구내역을 넣었어요');
+}
+function delClaimBatch(id){
+  if(!confirm('이 달 청구내역을 지울까요? (대장·재고는 그대로입니다)')) return;
+  DB.claims=(DB.claims||[]).filter(b=>b.id!==id); saveDB(); openClaims(clYm);
+}
+
+/* ---- 규격 한꺼번에 넣기 -------------------------------------------------
+   사이즈는 거기서 거기라 한 번 잡아두면 오래 쓴다. 넣는 길을 셋 둔다.
+   ① 파일(엑셀·CSV) ② 붙여넣기 ③ 지름×길이 조합.
+   어느 길로 오든 마지막은 같다 — 이미 있는 건 건너뛰고 없는 것만 만든다. */
+/* ---- 파일 올리는 곳 한자리 --------------------------------------------
+   올릴 수 있는 게 다섯 가지인데 저마다 다른 화면 안쪽에 숨어 있었다.
+   "어디서 올리지?" 를 없애려고 재고 세 탭 어디서든 같은 문을 연다. */
+function openUploads(){
+  const noXlsx = window.__noXLSX || typeof XLSX==='undefined';
+  const row=(icon,title,desc,fn)=>`<div class="trow" onclick="${fn}" style="cursor:pointer">
+    <span style="font-size:20px;flex:0 0 auto">${icon}</span>
+    <div class="grow" style="min-width:0">
+      <div style="font-weight:700;font-size:14px">${title}</div>
+      <div class="tiny muted">${desc}</div></div>
+    <span class="chev">›</span></div>`;
+  modal(`<h3>📂 파일 올리기</h3>
+    <div class="hint">엑셀(.xlsx)·CSV 를 그대로 올리면 됩니다. 열 제목만 있으면 <b>순서가 달라도</b> 알아서 찾아요.</div>
+    <div style="margin-top:12px">
+      ${row('📦','일반 재고 목록','품목·수량을 한 번에 등록. 같은 품목명은 수량만 갱신','openImport()')}
+      ${row('📥','거래명세서 (임플란트 매입)','거래처가 준 명세서 → 재료 목록 등록 + 입고까지 한 번에','openPurchase()')}
+      ${row('📐','임플란트 규격 목록','픽스처·힐링 등 규격만 한 번에. 이미 있는 건 건너뜁니다','openMassAdd(null,"fixtures")')}
+      ${row('🧾','보험 청구내역 (덴트웹)','청구한 개수와 대장·재고가 맞는지 견줍니다','openClaims()')}
+      ${row('📄','재료 목록 되살리기','전에 저장해 둔 재료 목록 CSV 를 되돌립니다','openMasters("fixtures")')}
+    </div>
+    ${noXlsx?`<div class="tiny" style="color:var(--warn);margin-top:10px">⚠️ 지금은 CSV만 읽을 수 있어요(엑셀 라이브러리 미로딩).</div>`:''}
+    <div class="divider"></div>
+    <div class="tiny muted">📷 종이나 손으로 적은 목록은 <b>사진을 찍어 Claude 대화창에 보내주세요.</b> 올릴 수 있는 파일로 만들어 드려요.</div>`);
+}
+let maTab='paste', maPending=null;
+function openMassAdd(tab, kind){
+  ensureMasters(); maTab=tab||maTab; maPending=null;
+  if(kind) mKind=kind;
+  const isFx = mKind==='fixtures';
+  const K=MKINDS[mKind];
+  const body = maTab==='file'
+    ? `<div class="tiny muted" style="margin:2px 2px 10px">엑셀·CSV 를 올리면 ${isFx?'<b>제조사·브랜드·사이즈</b> 열을':'<b>이름</b> 열을'} 찾아 읽어요.
+         열이 하나뿐이면 ${isFx?'사이즈로 봅니다':'이름으로 봅니다'}.</div>
+       <label class="btn block" style="cursor:pointer">📂 파일 고르기
+         <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="maFile(event)"></label>`
+    : maTab==='combo'
+    ? `<div class="tiny muted" style="margin:2px 2px 10px">지름과 길이를 쉼표로 나눠 적으면 조합이 한 번에 만들어져요.</div>
+       <label class="field"><span>지름(mm)</span><input id="maD" placeholder="3.5, 4.0, 4.5, 5.0"></label>
+       <label class="field"><span>길이(mm)</span><input id="maL" placeholder="7, 8.5, 10, 11.5, 13"></label>
+       <button class="btn block" onclick="maCombo()">만들어 보기</button>`
+    : `<div class="tiny muted" style="margin:2px 2px 10px">한 줄에 하나씩, 또는 쉼표로 나눠 붙여넣으세요.</div>
+       <textarea id="maText" rows="6" placeholder="${isFx?'4.0×10\n4.0×8.5\n4.5×10':'힐링 4.5 GH3\n힐링 5.0 GH5'}"></textarea>
+       <button class="btn block" style="margin-top:8px" onclick="maPaste()">읽어 보기</button>`;
+  modal(`<h3>＋ ${K.ko} 규격 한꺼번에 넣기</h3>
+    <div class="seg" style="margin-bottom:10px">
+      <button class="${maTab==='paste'?'on':''}" onclick="openMassAdd('paste')">붙여넣기</button>
+      <button class="${maTab==='file'?'on':''}" onclick="openMassAdd('file')">파일</button>
+      ${isFx?`<button class="${maTab==='combo'?'on':''}" onclick="openMassAdd('combo')">지름×길이</button>`:''}
+    </div>
+    ${isFx?`<div class="two">
+      <label class="field"><span>제조사</span><input id="maMaker" list="makerList" placeholder="오스템"></label>
+      <label class="field"><span>브랜드</span><input id="maBrand" placeholder="TS III"></label></div>
+      <datalist id="makerList">${MAKERS.map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+      <div class="tiny muted" style="margin:-4px 2px 10px">사이즈만 붙여넣을 때 여기 적은 제조사·브랜드가 붙어요.
+        파일에 제조사 열이 있으면 파일 쪽을 씁니다.</div>`:''}
+    ${body}`, ()=>openMasters(mKind));
+}
+function maSizes(list){                                  // 문자열 목록 → 목록 줄로
+  const isFx = mKind==='fixtures';
+  const maker=isFx? (($('#maMaker')||{}).value||'').trim() : '';
+  const brand=isFx? (($('#maBrand')||{}).value||'').trim() : '';
+  return list.map(s=>String(s||'').trim()).filter(Boolean)
+    .map(s=> isFx? {maker,brand,size:s} : {name:s});
+}
+function maPaste(){
+  const raw=($('#maText').value||'').split(/[\n,;\t]+/).map(s=>s.trim()).filter(Boolean);
+  if(!raw.length){ toast('붙여넣은 게 없어요'); return; }
+  maPreview(maSizes(raw));
+}
+function maCombo(){
+  const ds=($('#maD').value||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
+  const ls=($('#maL').value||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
+  if(!ds.length||!ls.length){ toast('지름과 길이를 적어주세요'); return; }
+  const out=[]; ds.forEach(d=>ls.forEach(l=>out.push(`${d}×${l}`)));
+  maPreview(maSizes(out));
+}
+function maFile(ev){
+  const f=ev.target.files[0]; ev.target.value=''; if(!f) return;
+  const isCsv=/\.csv$/i.test(f.name), r=new FileReader();
+  r.onload=()=>{
+    try{
+      let rows;
+      if(!isCsv && typeof XLSX!=='undefined'){
+        const wb=XLSX.read(new Uint8Array(r.result),{type:'array'});
+        rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+      } else rows=parseCSV(typeof r.result==='string'?r.result:new TextDecoder('utf-8').decode(r.result));
+      rows=(rows||[]).filter(r2=>r2&&r2.some(c=>String(c).trim()!==''));
+      if(!rows.length){ toast('빈 파일이에요'); return; }
+      const norm=s=>String(s||'').replace(/\s|\(.*?\)/g,'').toLowerCase();
+      const head=rows[0].map(norm);
+      const find=arr=>head.findIndex(h=>arr.some(x=>norm(x)===h||(h&&h.includes(norm(x)))));
+      const iMk=find(['제조사','메이커','제조원','maker']), iBr=find(['브랜드','제품명','라인','brand']),
+            iSz=find(['사이즈','규격','size']), iNm=find(['이름','명칭','품목명','품명','name']);
+      const hasHead = iMk>=0||iBr>=0||iSz>=0||iNm>=0;
+      const body = hasHead? rows.slice(1) : rows;
+      const isFx = mKind==='fixtures';
+      const fm=(($('#maMaker')||{}).value||'').trim(), fb=(($('#maBrand')||{}).value||'').trim();
+      const out=[];
+      body.forEach(r2=>{
+        const g=i=> i>=0? String(r2[i]??'').trim() : '';
+        if(isFx){
+          const size = iSz>=0? g(iSz) : String(r2[hasHead?0:0]??'').trim();
+          if(!size) return;
+          out.push({maker:(iMk>=0?g(iMk):'')||fm, brand:(iBr>=0?g(iBr):'')||fb, size});
+        } else {
+          const name = iNm>=0? g(iNm) : String(r2[0]??'').trim();
+          if(!name) return;
+          out.push({name});
+        }
+      });
+      if(!out.length){ toast('읽을 줄이 없어요'); return; }
+      maPreview(out);
+    }catch(e){ toast('파일을 읽지 못했어요'); }
+  };
+  if(!isCsv && typeof XLSX!=='undefined') r.readAsArrayBuffer(f); else r.readAsText(f,'utf-8');
+}
+function maPreview(rows){
+  ensureMasters();
+  const seen=new Set(), uniq=[];
+  rows.forEach(d=>{ const lb=mLabel(mKind,d); if(!lb||seen.has(lb)) return; seen.add(lb); uniq.push({...d,_lb:lb}); });
+  const have=new Set(DB.masters[mKind].map(r=>mLabel(mKind,r)));
+  const fresh=uniq.filter(d=>!have.has(d._lb)), dup=uniq.length-fresh.length;
+  maPending=fresh;
+  modal(`<h3>이대로 넣을까요?</h3>
+    <div class="summary3" style="margin-bottom:10px">
+      <div class="stat"><div class="n">${uniq.length}</div><div class="l">읽은 규격</div></div>
+      <div class="stat"><div class="n" style="color:var(--ok)">${fresh.length}</div><div class="l">새로 생김</div></div>
+      <div class="stat"><div class="n" style="color:var(--sub)">${dup}</div><div class="l">이미 있음</div></div>
+    </div>
+    <div class="tiny muted" style="margin:0 2px 10px">이미 있는 건 그대로 둡니다 — 수량도 안 건드려요.</div>
+    <div style="max-height:36vh;overflow:auto;margin-bottom:12px">
+      ${uniq.map(d=>`<div class="trow"><div class="grow" style="min-width:0">
+        <span style="font-weight:700;font-size:14px;${have.has(d._lb)?'opacity:.45':''}">${esc(d._lb)}</span>
+        ${have.has(d._lb)?'<span class="pill grey">있음</span>':'<span class="pill ok">새로</span>'}
+      </div></div>`).join('')}
+    </div>
+    ${fresh.length? `<button class="btn block" onclick="maApply()">${fresh.length}개 넣기</button>`
+                  : `<div class="tiny muted" style="text-align:center;padding:6px">새로 넣을 게 없어요</div>`}`,
+    ()=>openMassAdd(maTab));
+}
+function maApply(){
+  if(!maPending || !maPending.length) return;
+  ensureMasters();
+  const K=MKINDS[mKind]; let n=0;
+  maPending.forEach(d=>{
+    const row={id:uid(), off:false}; K.keys.forEach(k=>row[k]=d[k]||'');
+    DB.masters[mKind].push(row); n++;
+  });
+  maPending=null; saveDB(); openMasters(mKind);
+  toast(`${n}개를 목록에 넣었어요 · 수량은 목록의 수량 칸에 적으세요`);
+}
+
+/* ---- 규격은 눌러서 고른다 ----------------------------------------------
+   사이즈가 거기서 거기라 매번 타이핑할 이유가 없다. 재료 목록에 잡아둔 것을
+   드롭다운으로 내려주고, 목록에 없는 걸 써야 할 때만 직접 입력으로 빠진다. */
+function pickBox(attr, opts, val, ph, style){
+  const v=String(val||'');
+  let list=(opts||[]).filter(Boolean);
+  if(v && !list.includes(v)) list=[v,...list];        // 예전에 손으로 적은 값이 사라지지 않게
+  if(!list.length) return `<input ${attr} placeholder="${esc(ph)}" value="${esc(v)}" style="${style||''}">`;
+  return `<select ${attr} style="${style||''}" onchange="pickManual(this)">
+    <option value=""${v?'':' selected'}>${esc(ph)}</option>
+    ${list.map(o=>`<option${o===v?' selected':''}>${esc(o)}</option>`).join('')}
+    <option value="__manual__">✎ 직접 입력…</option></select>`;
+}
+// 목록에 없는 걸 써야 할 때. 고르는 칸을 적는 칸으로 바꿔 끼운다.
+function pickManual(el){
+  if(el.value!=='__manual__') return;
+  const inp=document.createElement('input');
+  if(el.id) inp.id=el.id;
+  if(el.dataset.k) inp.setAttribute('data-k', el.dataset.k);
+  inp.placeholder=el.options[0].textContent;
+  inp.setAttribute('style', el.getAttribute('style')||'');
+  el.replaceWith(inp); inp.focus();
+}
+
 /* ---- 대장에 적으면 재고가 준다 ------------------------------------------
    한 번 적으면 끝나야 한다. 수정하면 바뀐 만큼만 반영한다. */
 function findVar(label){
@@ -2054,6 +2462,8 @@ function renderLedger(){
       <h2 class="sec" style="margin:0">📋 임플란트 대장</h2>
       <div class="row" style="gap:6px">
         <button class="btn sm soft" onclick="openVendors()">🏢 거래처</button>
+        <button class="btn sm soft" onclick="openUploads()">📂 파일</button>
+        <button class="btn sm soft" onclick="openClaims()">🧾 청구 대조</button>
         <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
         <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
       </div>
@@ -2138,26 +2548,28 @@ function lcRenderTeeth(){
   const box=$('#lcTeeth'); if(!box) return;
   $('#lcCnt').textContent = lcSel.length;
   if(!lcSel.length){ box.innerHTML=`<div class="tiny muted" style="padding:10px 2px">위 치식도에서 심은 치아를 눌러주세요.</div>`; return; }
+  // 규격 목록은 줄마다 다시 만들 이유가 없다 — 한 번 뽑아 돌려 쓴다
+  const oFx=lcOpts('픽스처'), oHl=lcOpts('힐링'), oAb=lcOpts('어버트'), oGf=lcOpts('골이식');
   box.innerHTML = lcSel.map(n=>{
     const d=lcTeeth[n]||{};
     return `<div class="trow" data-n="${n}">
       <span class="tno">#${n}</span>
       <div class="grow" style="min-width:0">
-        <input data-k="fx" list="fxList" placeholder="픽스처 규격" value="${esc(d.fx||'')}" style="margin-bottom:4px">
+        ${pickBox('data-k="fx"', oFx, d.fx, '픽스처 규격', 'margin-bottom:4px')}
         <div class="row" style="gap:4px">
           <input data-k="lot" placeholder="LOT" value="${esc(d.lot||'')}" style="flex:1.2">
-          <input data-k="heal" list="hlList" placeholder="힐링" value="${esc(d.heal||'')}" style="flex:1">
+          ${pickBox('data-k="heal"', oHl, d.heal, '힐링', 'flex:1')}
         </div>
         <div class="row" style="gap:4px;margin-top:4px">
           <select data-k="abT" style="flex:0 0 78px">
             <option ${d.abT!=='커스텀'?'selected':''}>기성</option>
             <option ${d.abT==='커스텀'?'selected':''}>커스텀</option></select>
-          <input data-k="ab" list="abList" placeholder="지대주 규격" value="${esc(d.ab||'')}" style="flex:1">
+          ${pickBox('data-k="ab"', oAb, d.ab, '지대주 규격', 'flex:1')}
           <label class="tiny" style="display:flex;align-items:center;gap:3px;white-space:nowrap">
             <input type="checkbox" data-k="fail" ${d.fail?'checked':''} style="width:auto;margin:0">페일</label>
         </div>
         <div class="row" style="gap:4px;margin-top:4px">
-          <input data-k="graft" list="gfList" placeholder="골이식재 (선택)" value="${esc(d.graft||'')}" style="flex:1">
+          ${pickBox('data-k="graft"', oGf, d.graft, '골이식재 (선택)', 'flex:1')}
           <input data-k="graftQty" type="number" inputmode="numeric" min="0" placeholder="병" value="${d.graftQty||''}" style="flex:0 0 56px;text-align:center">
         </div>
       </div>
@@ -2179,10 +2591,6 @@ function openCaseForm(id){
   if(c){ (c.teeth||[]).forEach(t=>{ lcSel.push(t.fdi); lcTeeth[t.fdi]={fx:t.fx,lot:t.lot,heal:t.heal,abT:t.abT,ab:t.ab,fail:t.fail}; }); lcSel.sort(fdiSort); }
   const chart=n=>`<div class="teeth">${n.map(x=>`<button type="button" data-n="${x}" class="${lcSel.includes(x)?'on':''}" onclick="lcToggle(${x})">${x}</button>`).join('')}</div>`;
   modal(`<h3>${c?'대장 수정':'새 케이스'}</h3>
-    <datalist id="fxList">${lcOpts('픽스처').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
-    <datalist id="hlList">${lcOpts('힐링').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
-    <datalist id="abList">${lcOpts('어버트').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
-    <datalist id="gfList">${lcOpts('골이식').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <div class="two">
       <label class="field"><span>차트번호 *</span><input id="lcChart" value="${c?esc(c.chart):''}" placeholder="A-1234"></label>
       <label class="field"><span>환자</span><input id="lcName" value="${c?esc(c.pname||''):''}" placeholder="김민수"></label>
@@ -2211,13 +2619,13 @@ function openCaseForm(id){
 
     <div class="card" style="box-shadow:none;background:var(--bg);margin:12px 0 4px;padding:11px 12px">
       <div class="tiny muted" style="margin-bottom:7px">선택한 치아에 <b>한 번에 넣기</b> — 같은 규격이면 여기서 채우고 LOT만 따로 적으세요</div>
-      <input id="lcBfx" list="fxList" placeholder="픽스처 규격 (예: 오스템 4.0×10)" style="margin-bottom:5px">
+      ${pickBox('id="lcBfx"', lcOpts('픽스처'), '', '픽스처 규격', 'margin-bottom:5px')}
       <div class="row" style="gap:5px;margin-bottom:5px">
-        <input id="lcBheal" list="hlList" placeholder="힐링 사이즈" style="flex:1">
+        ${pickBox('id="lcBheal"', lcOpts('힐링'), '', '힐링 사이즈', 'flex:1')}
         <select id="lcBabT" style="flex:0 0 84px"><option>기성</option><option>커스텀</option></select>
       </div>
-      <input id="lcBab" list="abList" placeholder="지대주 규격" style="margin-bottom:5px">
-      <input id="lcBgf" list="gfList" placeholder="골이식재 (선택 · 병 수는 치아마다)" style="margin-bottom:8px">
+      ${pickBox('id="lcBab"', lcOpts('어버트'), '', '지대주 규격', 'margin-bottom:5px')}
+      ${pickBox('id="lcBgf"', lcOpts('골이식'), '', '골이식재 (선택 · 병 수는 치아마다)', 'margin-bottom:8px')}
       <button class="btn soft sm block" onclick="lcApplyAll()">선택한 치아에 적용</button>
     </div>
 
@@ -4374,6 +4782,7 @@ function openMenu(){
     </div>
     <div class="tiny muted" style="margin:6px 2px 0">${DB.geo.lat!=null?`✅ 병원 위치 설정됨 · 반경 ${DB.geo.radiusM}m 이내에서만 출근`:'⚠ 병원 위치 미설정 — <b>병원에 계실 때</b> 위 버튼을 눌러 저장하세요'}. GPS는 <b>무료</b>이며, 관리자 대리 출근·공용 키오스크에는 적용되지 않아요. 카톡에서 위치가 막히면 크롬/사파리로 열어주세요.</div>
     <div class="divider"></div>
+    ${isOwner()?`<button class="btn soft block" style="margin-bottom:10px" onclick="openStocktakePick()">📋 재고 실사 &mdash; 세어보고 장부 맞추기</button>`:''}
     <div class="tiny muted" style="font-weight:800;margin:0 2px 8px">📊 리포트 내보내기 (엑셀에서 열림)</div>
     <div class="two" style="gap:8px">
       <button class="btn soft" onclick="exportInventory()">📦 재고 현황</button>
