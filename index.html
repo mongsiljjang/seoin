@@ -4556,7 +4556,7 @@ function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
    request.auth.uid 로 알아보고, uid 가 누구인지는 claims 문서가 말해준다.
    ======================================================================== */
 let fdb=null, cloudReady=false, applyingRemote=false, pushTimer=null;
-let myUid='', myClaim=null;
+let myUid='', myClaim=null, claimResolved=false;
 let unsubs=[];                 // 열어둔 구독들 — 로그인 상태가 바뀌면 닫고 다시 연다
 let pinMap={};                 // 관리자만 채워진다. 직원 기기에서는 비어 있다
 let got={shared:false, roster:false, secrets:false, people:false};   // 받아본 적 있는 문서만 되쓴다
@@ -4643,14 +4643,15 @@ function watchClaim(){
   if(!myUid) return;
   unsubs.push(refClaims().doc(myUid).onSnapshot(snap=>{
     myClaim = snap.exists ? snap.data() : null;
+    claimResolved = true;
     if(myClaim && myClaim.approved && myClaim.staffId){
       if(sessionId()!==myClaim.staffId) setSession(myClaim.staffId);
       openData();
     }else{
       closeData();
       updateSyncBadge(myClaim ? 'waiting' : 'connecting');
-      // 아직 승인 전이라도 옛 데이터는 옮겨야 하니 최초 이전만 시도한다
-      migrateIfNeeded();
+      // 여기서 옛 자료를 옮기면 안 된다. 승인받지 못한 기기가 명단을 만들어
+      // 버리면 '이미 연 병원' 이 되어 아무도 첫 관리자가 될 수 없다.
       applyRole();
     }
   }, ()=>updateSyncBadge('offline')));
@@ -4776,6 +4777,7 @@ function closeData(){
   // claim 구독(첫 개)은 남기고 데이터 구독만 닫는다
   const keep=unsubs.slice(0,1); unsubs.slice(1).forEach(f=>{ try{f();}catch(e){} }); unsubs=keep;
   cloudReady=false; pinMap={}; pendingClaims=[];
+  
   got={shared:false, roster:false, secrets:false, people:false};
 }
 
@@ -4858,6 +4860,15 @@ function isAdmin(){ return isHR(); }
 let gateState=null;
 function applyRole(){
   ensureSchema();
+  // 이 기기에 남은 기록이 아니라 서버가 인정했는지로 문을 연다.
+  // 예전에는 브라우저에 옛 자료가 있으면 승인 없이도 화면이 열렸다 —
+  // 서버에서는 아무것도 못 받는데 들어간 것처럼 보였다.
+  if(fdb && claimResolved && !(myClaim && myClaim.approved)){
+    document.body.setAttribute('data-role','staff');
+    if(myClaim){ wantSetup=false; setGate('waiting'); return; }
+    if(wantSetup){ setGate('setup'); return; }
+    setGate('login'); return;
+  }
   const u=currentUser();
   if(!u){
     document.body.setAttribute('data-role','staff');
