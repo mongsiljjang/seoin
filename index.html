@@ -2178,6 +2178,7 @@ function renderLedger(){
       <div class="row" style="gap:6px">
         <button class="btn sm soft" onclick="openVendors()">🏢 거래처</button>
         <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
+        <button class="btn sm soft" onclick="openNotePaste()">📝 수첩</button>
         <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
       </div>
     </div>
@@ -2296,6 +2297,174 @@ function lcApplyAll(){
     lcTeeth[n]={...d, fx:fx||d.fx||'', heal:heal||d.heal||'', abT:abT, ab:ab||d.ab||'', graft:gf||d.graft||''}; });
   lcRenderTeeth(); toast(`${lcSel.length}개 치아에 넣었어요 · LOT만 하나씩 적으면 돼요`);
 }
+/* ---- 수첩 줄 읽기 -------------------------------------------------------
+   실장이 수첩에 적는 그대로 받는다. 형식을 새로 강요하면 안 쓰게 된다.
+
+     박소영    보험 #46 오스템 4.0*12
+               일반 #21덴티움 2.8*20      ← 이름이 비면 위 줄과 같은 환자
+
+   순서에 기대지 않고 토큰 생김새로 가른다. 그래야 순서를 바꿔 적어도 읽힌다. */
+let noteRows=[];
+
+// 수첩은 4.0*12, 앱은 4.0×12 로 적는다. 가운데 글자만 바꾸고 숫자는 적은
+// 그대로 둔다 — 숫자로 바꿨다 되돌리면 4.0 이 4 가 되어 규격이 안 맞는다.
+function noteSpec(s){
+  const m=String(s||'').match(/^(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)$/);
+  return m? `${m[1]}×${m[2]}` : '';
+}
+
+// 8/21 · 8-21 · 2026-08-21 만 날짜로 본다. 마침표는 안 받는다 — 4.0 과 헷갈린다.
+function noteDate(tok){
+  let m=tok.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return `${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  m=tok.match(/^(\d{1,2})[\/-](\d{1,2})$/);
+  if(m) return `${new Date().getFullYear()}-${pad(+m[1])}-${pad(+m[2])}`;
+  return '';
+}
+
+// 재료 목록에서 찾는다. 글자가 다르면 숫자로 견준다 — 4.0×12 와 4×12 는
+// 사람 눈에 같은 규격인데 글자로는 다르다.
+function noteVar(brand, spec){
+  const hit=findVar((brand? brand+' ':'')+spec); if(hit) return hit;
+  const want=parseDL(spec); if(!want) return null;
+  const b=String(brand||'').trim();
+  for(const p of (DB.implants||[])) for(const v of (p.variants||[])){
+    const got=parseDL(v.label);
+    if(got && got.d===want.d && got.l===want.l && (!b || String(p.brand||'').includes(b) || b.includes(String(p.brand||''))))
+      return {p,v};
+  }
+  return null;
+}
+
+function noteParse(text){
+  const rows=[]; let lastName='';
+  String(text||'').split(/\r?\n/).forEach(raw=>{
+    const line=raw.trim(); if(!line) return;
+    // 치식과 규격을 먼저 떼어 놓는다 — '#21덴티움' 처럼 붙여 쓰기 때문에
+    // 공백만으로는 자를 수 없다.
+    const toks=line
+      .replace(/#\s*([\d,\s#]*\d)/g, ' #$1 ')
+      .replace(/(\d+(?:\.\d+)?\s*[x×X*]\s*\d+(?:\.\d+)?)/g, ' $1 ')
+      .split(/\s+/).filter(Boolean);
+
+    const r={date:'', name:'', chart:'', insur:'일반', fail:false, teeth:[], brand:'', spec:'', raw:line};
+    const rest=[]; let specAt=-1;
+    toks.forEach((t,i)=>{
+      if(t[0]==='#'){ t.slice(1).split(/[,#]+/).filter(Boolean).forEach(n=>r.teeth.push(n)); return; }
+      const sp=noteSpec(t); if(sp){ r.spec=sp; specAt=i; return; }
+      const dt=noteDate(t); if(dt){ r.date=dt; return; }
+      if(t==='보험'){ r.insur='보험'; return; }
+      if(t==='일반'||t==='비급여'){ r.insur='일반'; return; }
+      if(t==='페일'||t==='실패'){ r.fail=true; return; }
+      rest.push({t, i});
+    });
+
+    // 남은 낱말 가운데 무엇이 브랜드인가. 짐작보다 대조가 낫다 —
+    // 재료 목록에서 규격과 함께 찾아지는 쪽이 브랜드다.
+    let k=-1;
+    if(r.spec) for(let j=rest.length-1;j>=0;j--) if(noteVar(rest[j].t, r.spec)){ k=j; break; }
+    // 못 찾으면 자리로 본다. 브랜드는 규격 바로 앞에 오고 이름은 줄 앞에 온다.
+    if(k<0 && specAt>=0) rest.forEach((x,j)=>{ if(x.i<specAt && (k<0 || x.i>rest[k].i)) k=j; });
+    if(k>=0){ r.brand=rest[k].t; rest.splice(k,1); }
+
+    r.name = rest.map(x=>x.t).join(' ') || lastName;   // 이름이 비면 위 줄과 같은 환자
+    if(r.name) lastName=r.name;
+    rows.push(r);
+  });
+  return rows;
+}
+
+// 저장하기 전에 무엇이 안 맞는지 알아야 고칠 수 있다.
+function noteFx(r){ const v=noteVar(r.brand, r.spec); return v? `${v.p.brand} ${v.v.label}` : (r.brand? r.brand+' ' : '')+r.spec; }
+function noteBad(r){
+  if(!r.spec) return '규격을 못 읽었어요';
+  if(!r.teeth.length) return '치아번호가 없어요';
+  if(!noteVar(r.brand, r.spec)) return '재료 목록에 없는 규격이에요';
+  return '';
+}
+
+/* ---- 수첩 옮겨 적기 화면 -------------------------------------------------
+   폼 여섯 칸을 채우는 것보다 한 줄 치는 것이 빠르다. 사진 판독이 붙으면
+   판독 결과가 이 표로 들어오게 되어 있어서, 여기 만든 것은 그대로 쓴다. */
+let noteText='';
+function openNotePaste(){
+  modal(`<h3>📝 수첩 옮겨 적기</h3>
+    <div class="tiny muted" style="margin:-4px 2px 10px">수첩에 적은 대로 한 줄에 하나씩 넣으세요.
+      순서는 바뀌어도 되고, <b>이름을 비우면 윗줄과 같은 환자</b>로 봅니다.</div>
+    <textarea id="noteText" rows="7" spellcheck="false"
+      style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:15px;line-height:1.7;resize:vertical"
+      placeholder="박소영  보험 #46 오스템 4.0*12&#10;        일반 #21덴티움 2.8*20">${esc(noteText)}</textarea>
+    <div class="tiny muted" style="margin:8px 2px 12px">날짜를 안 적으면 오늘로 잡고, 표에서 고칠 수 있어요.</div>
+    <button class="btn block" onclick="noteRead()">읽기</button>`);
+}
+function noteRead(){
+  noteText=$('#noteText').value;
+  noteRows=noteParse(noteText);
+  if(!noteRows.length){ toast('읽을 줄이 없어요'); return; }
+  noteReview();
+}
+function noteSet(i,k,v){
+  if(k==='teeth') noteRows[i].teeth=String(v).split(/[,#\s]+/).filter(Boolean);
+  else noteRows[i][k]=v;
+  noteReview();
+}
+// 읽은 것을 그대로 저장하지 않는다. 사람이 한 번 보고 넘겨야 잘못 읽은 줄이
+// 재고를 조용히 틀어놓지 않는다.
+function noteReview(){
+  const badN=noteRows.filter(r=>noteBad(r)).length;
+  const rows=noteRows.map((r,i)=>{ const bad=noteBad(r); return `
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:10px 11px;margin-bottom:7px">
+      <div class="row wrap" style="gap:5px;margin-bottom:5px">
+        <input type="date" value="${esc(r.date||todayKey())}" onchange="noteSet(${i},'date',this.value)" style="flex:0 0 142px">
+        <input value="${esc(r.name)}" placeholder="환자" onchange="noteSet(${i},'name',this.value)" style="flex:1;min-width:90px">
+        <select onchange="noteSet(${i},'insur',this.value)" style="flex:0 0 78px">
+          <option ${r.insur==='보험'?'selected':''}>보험</option>
+          <option ${r.insur!=='보험'?'selected':''}>일반</option></select>
+      </div>
+      <div class="row wrap" style="gap:5px">
+        <input value="${esc(r.chart)}" placeholder="차트번호 (없어도 됨)" onchange="noteSet(${i},'chart',this.value)" style="flex:1;min-width:120px">
+        <input value="${esc(r.teeth.join(','))}" placeholder="치식" onchange="noteSet(${i},'teeth',this.value)" style="flex:0 0 92px">
+        <input value="${esc(r.brand)}" placeholder="브랜드" onchange="noteSet(${i},'brand',this.value)" style="flex:0 0 100px">
+        <input value="${esc(r.spec)}" placeholder="규격" onchange="noteSet(${i},'spec',this.value)" style="flex:0 0 92px">
+      </div>
+      <div class="tiny" style="margin-top:6px;color:${bad?'var(--danger)':'var(--muted)'}">
+        ${bad? '⚠ '+bad : '✓ '+esc(noteFx(r))}${r.fail?' · 페일':''}
+        <span class="muted" style="margin-left:6px">${esc(r.raw)}</span></div>
+    </div>`; }).join('');
+  modal(`<h3>읽은 결과 ${noteRows.length}줄</h3>
+    <div class="tiny muted" style="margin:-4px 2px 10px">${badN
+      ? `<b style="color:var(--danger)">${badN}줄은 재고에서 못 찾았어요.</b> 고치거나, 그대로 두면 대장에만 남고 재고는 안 깎입니다.`
+      : '모두 재고에서 찾았어요. 저장하면 그만큼 빠집니다.'}</div>
+    ${rows}
+    <div class="row" style="margin-top:10px">
+      <button class="btn block" onclick="noteSaveAll()">대장에 적고 재고 반영</button>
+    </div>`, openNotePaste);
+}
+// 보험과 일반은 케이스를 나눈다. 심평원 실사에서 섞여 있으면 소명이 안 된다.
+function noteSaveAll(){
+  if(!Array.isArray(DB.implantCases)) DB.implantCases=[];
+  const g=new Map();
+  noteRows.forEach(r=>{
+    if(!r.teeth.length || !r.spec) return;
+    const date=r.date||todayKey();
+    const key=[r.name, r.insur, date, r.chart].join('|');
+    if(!g.has(key)) g.set(key, {name:r.name, insur:r.insur, date, chart:r.chart, teeth:[]});
+    const fx=noteFx(r);
+    r.teeth.forEach(fdi=>g.get(key).teeth.push({fdi, fx, fail:!!r.fail}));
+  });
+  if(!g.size){ toast('적을 줄이 없어요 — 치아번호와 규격이 있어야 합니다'); return; }
+  let out=0, miss=0;
+  g.forEach(v=>{
+    const data={ chart:v.chart, pname:maskName(v.name), birth:'', insur:v.insur,
+      d1:v.date, d2:'', memo:'수첩', teeth:v.teeth, updatedAt:now() };
+    const rr=applyCaseStock([], '', data.teeth, data.insur, `수첩 ${v.chart||v.name||''}`.trim());
+    DB.implantCases.push(Object.assign({id:uid(), createdAt:now()}, data));
+    out+=rr.out; miss+=rr.miss;
+  });
+  noteText=''; saveDB(); closeModal(); renderLedger();
+  toast(`${g.size}건 적었어요 · 재고 ${out}개 차감${miss?` · 못 뺀 규격 ${miss}개`:''}`);
+}
+
 function openCaseForm(id){
   const c=id?caseById(id):null;
   lcEditId=id||''; lcSel=[]; lcTeeth={};
