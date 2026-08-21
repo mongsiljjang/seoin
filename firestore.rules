@@ -210,6 +210,19 @@ service cloud.firestore {
         allow write: if isOperator();
       }
 
+      // 계량기. 요금 구간을 숫자 없이 정하면 또 추측이 된다. 병원이 실제로
+      // 얼마나 쓰는지 세어 두는 자리다.
+      //
+      // 개수만 담는다 — 직원 명단도 사진도 여기 오지 않는다. 제작자가 병원
+      // 안을 못 읽는다는 원칙은 그대로다.
+      //
+      // 한도(license)와 쓴 양(usage)을 나눠 둔 이유는 하나다. 병원이 자기
+      // 한도를 늘리지 못하게 하려는 것이다 — 한도는 제작자만 쓴다.
+      match /usage/{doc} {
+        allow read:  if request.auth != null;
+        allow write: if isAdmin() || bootstrapAllowed();
+      }
+
       // 제작자가 병원에 손댄 기록. 병원도 봐야 한다 —
       // 남의 비밀번호를 초기화해 놓고 아무도 모르게 두면 안 된다.
       match /opslog/{doc} {

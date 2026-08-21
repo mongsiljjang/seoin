@@ -106,6 +106,20 @@ await ok ('병원은 그 기록을 본다',         getDoc(P(원장(),'opslog','
 await no ('병원은 그 기록을 못 고친다',    setDoc(P(원장(),'opslog','r1'), {what:'지움'}));
 await no ('제작자 문서는 앱에서 못 만든다', setDoc(D(낯선이(),'operators','stranger'), {x:1}));
 
+console.log('\n── 계량기 (한도와 쓴 양) ──');
+await reset(); await 기본세팅(async db=>{ await setDoc(P(db,'license','main'), {paidUntil:미래, maxStaff:5, maxScanPerDay:3}); });
+await ok ('관리자가 쓴 양을 적는다',       setDoc(P(원장(),'usage','main'), {staffCount:7}));
+await no ('직원은 쓴 양을 못 적는다',      setDoc(P(직원(),'usage','main'), {staffCount:1}));
+await ok ('제작자는 쓴 양을 읽는다',       getDoc(P(제작자(),'usage','main')));
+await ok ('병원도 자기 쓴 양을 읽는다',    getDoc(P(원장(),'usage','main')));
+// 여기가 나눠 둔 이유다 — 쓴 양은 병원이 적지만 한도는 못 건드린다.
+await no ('원장은 자기 한도를 못 늘린다',  setDoc(P(원장(),'license','main'), {maxScanPerDay:999}));
+await ok ('제작자는 한도를 정한다',        setDoc(P(제작자(),'license','main'), {maxStaff:15, maxScanPerDay:10}));
+await ok ('병원은 자기 한도를 읽는다',     getDoc(P(원장(),'license','main')));
+// 쓴 양에 명단이 섞여 들어가도 규칙은 못 막는다. 막는 것은 앱이고,
+// 규칙이 지키는 것은 '제작자가 명단 문서를 못 읽는다' 쪽이다.
+await no ('제작자는 그래도 명단을 못 본다', getDoc(P(제작자(),'roster','main')));
+
 console.log('\n── 복구 코드 ──');
 await reset();
 await seed(async db=>{

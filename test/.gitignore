@@ -1,0 +1,6 @@
+# 에뮬레이터를 돌리려고 만든 것들. 저장소에 담을 것은 아니다.
+node_modules/
+package-lock.json
+*-debug.log
+# README 대로 ../firestore.rules 를 복사해 온 작업본이다. 원본은 저장소 뿌리에 있다.
+firestore.rules

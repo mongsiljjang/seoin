@@ -5065,6 +5065,8 @@ function refRoster(){ return wsRef().collection('roster').doc('main'); }
 function refSecrets(){ return wsRef().collection('secrets').doc('main'); }
 function refPeople(sid){ return wsRef().collection('people').doc(sid); }
 function refMeta(){ return wsRef().collection('meta').doc('main'); }
+// 계량기 — 개수만 적는다. 요금 구간을 실측으로 정하려고 둔 자리다.
+function refUsage(){ return wsRef().collection('usage').doc('main'); }
 function refOwnerKey(){ return wsRef().collection('ownerkey').doc('main'); }
 function refUnlock(){ return wsRef().collection('unlock').doc(myUid); }
 
@@ -5493,7 +5495,10 @@ function writeAll(){
   if(booting || got.shared){ mine.shared=t; job('shared', refShared().set(Object.assign(pickShared(), stamp))); }
   if(booting || (admin && got.roster)){  mine.roster=t;  job('roster',  refRoster().set(Object.assign(pickRoster(), stamp)));
     // 문 앞 표지판 — 사람이 있는지만 적는다. 이름도 번호도 담지 않는다.
-    jobOptional('meta', refMeta().set({ hasClinic: (DB.staff||[]).length>0, updatedAt:t })); }
+    jobOptional('meta', refMeta().set({ hasClinic: (DB.staff||[]).length>0, updatedAt:t }));
+    // 계량기 — 몇 명인지만. merge 로 적어야 나중에 붙을 칸을 지우지 않는다.
+    jobOptional('usage', refUsage().set({
+      staffCount: (DB.staff||[]).filter(s=>s.active!==false).length, updatedAt:t }, {merge:true})); }
   if(booting || (admin && got.secrets)){ mine.secrets=t; job('secrets', refSecrets().set(Object.assign(pickSecrets(), stamp))); }
 
   if(admin){
