@@ -11,6 +11,20 @@
 - 정식본: `mongsiljjang/mediops-pilot` @ `main`
 - 개인 백업: `mongsiljjang/seoin` @ `claude/hospital-inventory-hr-app-fw7a9g`
 - **두 저장소의 `index.html`은 항상 동일 내용으로 유지**한다(한쪽 수정 시 다른 쪽에도 복사).
+
+### seoin 의 브랜치 — 세션마다 이름이 달라진다
+AI 세션은 저마다 `claude/…-xxxxxx` 라는 **새 이름**을 받고 거기에만 푸시할 수 있다.
+그래서 위의 백업 브랜치 이름과 실제 작업본이 자주 어긋난다. 규칙은 이렇다.
+
+1. **내용이 가장 앞선 브랜치가 작업본이다.** 이름으로 고르지 않는다.
+   `git branch -r` 로 커밋 수를 세고 `git merge-base --is-ancestor` 로 확인한다.
+2. 세션은 자기 지정 브랜치를 **작업본 위에서 시작**한다 —
+   `git checkout -B <내-브랜치> origin/<작업본>`.
+3. 세션이 끝나면 사용자가 백업 브랜치를 그리로 당긴다(조상 관계라 강제 푸시가 필요 없다).
+
+**2026-08-21 확인** — 한때 공통 조상이 없는 두 갈래가 있었으나 지금은 하나로 모였다.
+`hospital-inventory-hr-app-fw7a9g` 는 작업본의 조상이고, 옛 22커밋 갈래(`ab7fb8b`)는
+어느 브랜치에도 걸려 있지 않다. **머지할 것은 없다.**
 - 배포: GitHub Pages → https://mongsiljjang.github.io/mediops-pilot/ (실시간 공유는 Firebase Firestore)
 
 ## 개발 원칙
@@ -20,9 +34,23 @@
 - 작업은 **커밋 후 두 저장소 모두 푸시**한다(designated 브랜치 유지).
 - 앱은 서버 없는 정적 웹 + Firebase다. 문자/카톡 알림·거래처 로그인 등 **서버가 필요한 기능은 상용화 Phase로 미룬다**(현재는 인앱 알림만).
 
+## 시험
+설치 없이 `node` 로 바로 돈다. 화면 코드를 고쳤으면 셋 다 돌린다.
+
+```
+node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보험페일.mjs
+```
+
+보안규칙 시험은 에뮬레이터가 필요하다 — `test/README.md` 참고
+(`npm install --legacy-peer-deps`).
+
+세 파일 모두 **`index.html` 에서 함수를 이름으로 떼어 와 돌린다.** 흉내낸 코드를
+시험하면 앱이 고장나도 시험은 통과하기 때문이다. 함수 이름을 바꾸면 시험이 먼저 깨진다.
+
 ## 문서 위치
 - 로드맵: `docs/ROADMAP.md` · 데이터 모델: `docs/DATA_MODEL.md`
 - 노무 근거: `docs/LABOR_RULES.md` · **보험 임플란트에 하지 않기로 한 것: `docs/INSURANCE_RULES.md`**
+- 실장 통화록(요구사항 원천): `docs/CALL_2026-08-19_REQUIREMENTS.md`
 - 세션 핸드오프: `review/session-handoff-YYYY-MM-DD.md` (가장 최근 것을 먼저 읽는다)
 
 ## 세션 마무리(wrap) 규칙
