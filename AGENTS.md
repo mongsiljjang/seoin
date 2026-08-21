@@ -22,6 +22,7 @@
 
 ## 문서 위치
 - 로드맵: `docs/ROADMAP.md` · 데이터 모델: `docs/DATA_MODEL.md`
+- 노무 근거: `docs/LABOR_RULES.md` · **보험 임플란트에 하지 않기로 한 것: `docs/INSURANCE_RULES.md`**
 - 세션 핸드오프: `review/session-handoff-YYYY-MM-DD.md` (가장 최근 것을 먼저 읽는다)
 
 ## 세션 마무리(wrap) 규칙
