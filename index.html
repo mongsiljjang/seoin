@@ -247,6 +247,14 @@
   #adminBanner{background:var(--warn-soft); color:var(--warn); font-size:12.5px; font-weight:700;
     padding:9px 14px; text-align:center; cursor:pointer; display:none}
   #adminBanner.show{display:block}
+  #iabBar{background:#fff4e5; color:#8a5200; border-bottom:1px solid #f0d9b5;
+    padding:11px 14px; font-size:13px; line-height:1.65; display:none}
+  #iabBar.show{display:block}
+  #iabBar b{color:#7a4600}
+  #iabBar .row{display:flex; gap:7px; margin-top:8px; flex-wrap:wrap}
+  #iabBar button{border:1px solid #e0c493; background:#fff; color:#7a4600;
+    border-radius:9px; padding:7px 12px; font-size:12.5px; font-weight:800;
+    font-family:inherit; cursor:pointer}
 
   /* 출근 키오스크(공용 기기 모드) */
   #kiosk{position:fixed; inset:0; z-index:75; background:linear-gradient(160deg,var(--hdr1),#0a1626);
@@ -328,6 +336,7 @@
   </div>
 </header>
 <div id="adminBanner" onclick="openMenu()"></div>
+<div id="iabBar"></div>
 
 <main class="wrap">
 
@@ -5971,6 +5980,41 @@ function kioskCommit(id){
 }
 
 /* ---------- 시작 ---------- */
+/* 카톡·인스타 같은 앱 안에서 링크를 누르면 그 앱 전용 브라우저가 열린다.
+   그 브라우저는 사파리·크롬과 저장 공간이 따로라, 거기서 기기를 승인받아도
+   나중에 사파리로 들어오면 승인이 안 된 기기가 된다. 직원은 "왜 자꾸 승인하래요"
+   가 되고, 홈 화면에 추가도 안 된다. 그래서 들어오자마자 알려주고 내보낸다. */
+const IN_APP_BROWSER = /KAKAOTALK|FBAN|FBAV|FB_IAB|Instagram|Line\/|NAVER\(inapp|DaumApps|everytimeApp|kakaostory/i
+  .test(navigator.userAgent || '');
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+
+function showInAppBrowserBar(){
+  if(!IN_APP_BROWSER) return;
+  const bar = $('#iabBar'); if(!bar) return;
+  const 안내 = IS_IOS
+    ? '아래쪽 <b>공유 버튼(↑)</b> 또는 <b>⋯</b> 을 누르고 <b>Safari로 열기</b> 를 눌러주세요.'
+    : '오른쪽 아래 <b>⋮</b> 를 누르고 <b>다른 브라우저로 열기</b> 를 눌러주세요.';
+  bar.innerHTML =
+    `지금 <b>다른 앱 안의 창</b>으로 열렸어요. 이대로 쓰면 <b>다음에 또 승인을 받아야 합니다.</b><br>${안내}
+     <div class="row">
+       <button onclick="openInRealBrowser()">브라우저로 열기</button>
+       <button onclick="copyAppLink()">주소 복사</button>
+     </div>`;
+  bar.classList.add('show');
+}
+function openInRealBrowser(){
+  // 카톡 안드로이드는 이 주소를 알아듣고 기본 브라우저를 연다. 아이폰은 방법이 없어서
+  // 주소만 복사해 주고, 사파리에 직접 붙여넣게 한다.
+  if(!IS_IOS){ location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(location.href); return; }
+  copyAppLink();
+  alert('주소를 복사했어요.\n\nSafari 를 열고 주소창에 붙여넣어 주세요.');
+}
+function copyAppLink(){
+  const url = location.href;
+  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+    .then(()=>toast('주소를 복사했어요'), ()=>prompt('이 주소를 복사해 주세요', url));
+}
+
 function boot(){
   loadDB();
   $('#hospName').textContent = DB.hospName || '우리병원 관리';
@@ -5978,6 +6022,7 @@ function boot(){
   $('#attDate').value = todayKey();
   renderHome();
   applyRole();
+  showInAppBrowserBar();
   cloudInit();
   if(location.hash==='#kiosk') enterKiosk();   // 공용 기기: 바로 출근 화면
   // PWA: 오프라인/홈화면 설치 지원 (http/https로 열었을 때만)
