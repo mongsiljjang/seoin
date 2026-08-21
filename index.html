@@ -344,7 +344,8 @@
   <section class="page active" id="page-home">
     <div id="homeNotice" style="display:none"></div>
     <div id="attReminder"></div>
-    <section class="card hero admin-only" id="homeHero" style="margin-top:2px">
+    <div id="homeRecon" class="admin-only" style="margin-top:2px"></div>
+    <section class="card hero admin-only" id="homeHero" style="margin-top:10px">
       <div class="htop">
         <div><div class="hlabel">🗂️ 오늘 처리할 일</div><div class="hval" id="heroTotal">0건</div></div>
         <button class="hbtn2" onclick="openAlerts()">전체 보기</button>
@@ -746,6 +747,7 @@ function rerenderCurrent(){ (RENDER[currentTab]||renderHome)(); }
    ======================================================================== */
 function renderHome(){
   renderNoticeBanner();          // 필독 공지는 확인 전까지 맨 위에 붙어 있다
+  renderRecon();                 // 그 다음이 '오늘 틀어진 것'이다 — 세기만 하고 아무것도 안 바꾼다
   const tk = todayKey();
   const inNow = DB.attendance.filter(a=>a.date===tk && a.inAt && !a.outAt).length;
   const low = DB.inventory.filter(i=>i.qty <= i.minQty);
@@ -1405,6 +1407,144 @@ function pUse(p){ return p.variants.reduce((s,v)=>s+vUse(v),0); }
 function pPhys(p){ return p.variants.reduce((s,v)=>s+((v.phys!=null&&v.phys!=='')?parseInt(v.phys,10):(+v.qty||0)),0); }
 function pDiff(p){ return p.variants.reduce((s,v)=>{ const d=vDiff(v); return s+(d||0); },0); }
 function pHasCount(p){ return p.variants.some(v=>v.phys!=null&&v.phys!==''); }
+
+/* ---- 페일 교환 ----------------------------------------------------------
+   페일난 픽스처는 버리지 않는다. 모아뒀다가 분기마다 업체와 바꾼다 —
+   실장 말 그대로다: "페일난 것은 모아둔다 — 교환 대상이다"
+   (docs/CALL_2026-08-19_REQUIREMENTS.md 1-4장, 01:00~01:03).
+
+   재고가 움직이는 자리는 '입고 확인' 한 곳뿐이다.
+
+     페일 기록   재고 −1   이미 몸에서 나간 물건이다. 여기는 바뀐 것이 없다
+     교환 신청   변동 없음  신청은 신청일 뿐이다
+     입고 확인   재고 +N   신청한 개수를 넘겨 받을 수 없다
+
+   교환으로 들어온 것은 매입(inTot)에 넣지 않는다. 돈을 낸 것이 아닌데
+   섞으면 산 개수가 부풀어 원가가 흐려진다. 재고 개수는 맞아떨어져서
+   눈에 안 띈다 — 이 앱이 잡아내려는 바로 그 종류의 오차다.
+
+   그래서 장부 식이 한 항 늘었다:  매입 + 교환입고 − 사용 = 현재고 */
+function exReq(v){ return +v.exReq||0; }                              // 신청 누적
+function exIn(v){ return +v.exIn||0; }                                // 받은 누적
+function failOpen(v){ return Math.max(0,(+v.uFail||0)-exReq(v)); }    // 아직 신청 안 한 페일
+function failWait(v){ return Math.max(0,exReq(v)-exIn(v)); }          // 신청했는데 안 온 것
+function vBook(v){ return (+v.inTot||0)+exIn(v)-vUse(v); }            // 장부가 말하는 현재고
+function pFailOpen(p){ return (p.variants||[]).reduce((s,v)=>s+failOpen(v),0); }
+function pFailWait(p){ return (p.variants||[]).reduce((s,v)=>s+failWait(v),0); }
+function pExIn(p){ return (p.variants||[]).reduce((s,v)=>s+exIn(v),0); }
+
+// 교환 신청 — 재고를 건드리지 않는다. 페일난 개수보다 많이 신청할 수 없다.
+function claimFail(pid, vid, n){
+  const p=implantById(pid); if(!p) return 0;
+  const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return 0;
+  const take=Math.max(0,Math.min(parseInt(n,10)||0, failOpen(v)));
+  if(!take) return 0;
+  v.exReq=exReq(v)+take;
+  implantLog(p.id,v.id,'claim','fail',take,v.qty,v.qty,'페일 교환 신청');   // 앞뒤가 같다
+  return take;
+}
+// 입고 확인 — 재고가 느는 유일한 자리다. 신청하지 않은 것은 받을 수 없다.
+function receiveFail(pid, vid, n){
+  const p=implantById(pid); if(!p) return 0;
+  const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return 0;
+  const take=Math.max(0,Math.min(parseInt(n,10)||0, failWait(v)));
+  if(!take) return 0;
+  const before=+v.qty||0;
+  v.exIn=exIn(v)+take; v.qty=before+take;
+  implantLog(p.id,v.id,'in',null,take,before,v.qty,'페일 교환 입고');
+  return take;
+}
+
+/* ---- 대사 보드 ----------------------------------------------------------
+   홈의 첫 화면이 '오늘 한눈에'가 아니라 '오늘 틀어진 것'인 이유 —
+   실장이 실제로 하는 일은 관리가 아니라 더블체크다(통화록 1-2장):
+
+     "앱의 값어치는 입력을 편하게가 아니라 어디서 틀어졌는지 잡아내는 데 있다"
+
+   재고관리 앱이라고 자기를 소개하는 쪽은 오차를 앞에 내걸지 않는다.
+   자기 제품이 못 미더워 보이기 때문이다. 우리는 그게 제품이다.
+
+   이 함수들은 세기만 한다. 아무것도 바꾸지 않는다 — 보드를 여닫는 것만으로
+   재고가 움직이면 그 순간 이 화면은 믿을 수 없는 것이 된다. */
+function reconCount(){
+  let diff=0, uncounted=0, failOpenN=0, healLateN=0;
+  (DB.implants||[]).forEach(p=>(p.variants||[]).forEach(v=>{
+    const d=vDiff(v);
+    if(d===null) uncounted++; else if(d!==0) diff++;
+    failOpenN += failOpen(v);
+  }));
+  (typeof outCases==='function'? outCases() : []).forEach(c=>{ if(healLate(c)>0) healLateN++; });
+  return {diff, uncounted, failOpen:failOpenN, healLate:healLateN};
+}
+function reconRows(){
+  const n=reconCount();
+  return [
+    {k:'diff',      n:n.diff,      ko:'장부와 안 맞는 규격', sub:'실사와 어긋난 것',   go:"go('inv');setInvMode('implant')"},
+    {k:'failOpen',  n:n.failOpen,  ko:'교환 신청 안 한 페일', sub:'모아둔 것',        go:"openFailExchange()"},
+    {k:'healLate',  n:n.healLate,  ko:'안 돌아온 힐링',      sub:'회수 기한 지남',    go:"go('inv');setInvMode('ledger')"},
+    {k:'uncounted', n:n.uncounted, ko:'실사 안 한 규격',     sub:'한 번도 안 셈',     go:"go('inv');setInvMode('implant')"}
+  ];
+}
+function renderRecon(){
+  const box=$('#homeRecon'); if(!box) return;
+  const rows=reconRows(), total=rows.reduce((s,r)=>s+r.n,0);
+  box.innerHTML = `<div class="spread" style="margin:2px 2px 8px">
+      <h2 class="sec" style="margin:0">🔍 오늘 틀어진 것</h2>
+      <span class="tiny muted">${total?`모두 ${total}건`:'없음'}</span></div>
+    ${total===0
+      ? `<div class="card">${emptyBox('✅','장부와 실물이 맞습니다')}</div>`
+      : `<div class="card" style="padding:4px 0">${rows.filter(r=>r.n).map(r=>`
+        <div class="item" onclick="${r.go}" style="cursor:pointer">
+          <div class="avatar" style="background:var(--danger-soft);color:var(--danger)">${r.n}</div>
+          <div class="grow"><div class="t">${r.ko}</div><div class="d tiny muted">${r.sub}</div></div>
+          <span class="chev">›</span>
+        </div>`).join('')}</div>`}`;
+}
+
+/* ---- 페일 교환 화면 ---- */
+function openFailExchange(){
+  const list=(DB.implants||[]).filter(p=>pFailOpen(p)||pFailWait(p)||pExIn(p));
+  const body = !list.length
+    ? `<div class="card" style="box-shadow:none;background:var(--bg)">${emptyBox('📦','모아둔 페일이 없어요')}</div>`
+    : list.map(p=>`<div style="margin-bottom:14px">
+        <div class="tiny" style="font-weight:800;margin:0 2px 6px">${esc(p.brand)} ${esc(p.line||'')} · ${esc(p.part||'')}</div>
+        ${(p.variants||[]).filter(v=>failOpen(v)||failWait(v)||exIn(v)).map(v=>`
+          <div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
+            <div class="spread"><b class="tiny">${esc(v.label)}</b>
+              <div class="row wrap" style="gap:4px">
+                ${failOpen(v)?`<span class="pill danger">신청 전 ${failOpen(v)}</span>`:''}
+                ${failWait(v)?`<span class="pill warn">기다림 ${failWait(v)}</span>`:''}
+                ${exIn(v)?`<span class="pill ok">받음 ${exIn(v)}</span>`:''}</div></div>
+            <div class="row" style="gap:5px;margin-top:8px">
+              ${failOpen(v)?`<button class="btn soft sm grow" onclick="doClaimFail('${p.id}','${v.id}')">교환 신청 ${failOpen(v)}개</button>`:''}
+              ${failWait(v)?`<button class="btn sm grow" onclick="doReceiveFail('${p.id}','${v.id}')">입고 확인</button>`:''}
+            </div>
+          </div>`).join('')}
+      </div>`).join('');
+  modal(`<h3>🔄 페일 교환</h3>
+    <div class="tiny muted" style="margin:-4px 2px 12px">페일난 것은 모아뒀다가 업체와 바꿉니다.
+      <b>신청만으로는 재고가 늘지 않고</b>, 물건이 실제로 들어온 날 <b>입고 확인</b>을 눌러야 재고에 들어갑니다.</div>
+    ${body}
+    <div class="tiny muted" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      교환으로 받은 것은 매입에 넣지 않습니다 — 돈을 낸 것이 아니라서, 섞으면 산 개수가 부풀고 원가가 흐려집니다.</div>`);
+}
+function doClaimFail(pid, vid){
+  const p=implantById(pid), v=p&&(p.variants||[]).find(x=>x.id===vid); if(!v) return;
+  const n=failOpen(v);
+  if(!confirm(`${v.label} ${n}개를 교환 신청할까요?\n재고는 바뀌지 않습니다.`)) return;
+  const did=claimFail(pid,vid,n);
+  saveDB(); openFailExchange(); renderRecon();
+  toast(did?`${did}개 교환 신청 · 재고는 그대로예요`:'신청할 것이 없어요');
+}
+function doReceiveFail(pid, vid){
+  const p=implantById(pid), v=p&&(p.variants||[]).find(x=>x.id===vid); if(!v) return;
+  const max=failWait(v);
+  const raw=prompt(`${v.label} — 실제로 들어온 개수를 적어주세요 (신청 ${max}개)`, String(max));
+  if(raw===null) return;
+  const did=receiveFail(pid,vid,raw);
+  saveDB(); openFailExchange(); renderRecon(); renderInvPage();
+  toast(did?`${did}개 입고 · 재고에 들어갔어요`:'들어온 것이 없어요');
+}
 function implantLog(pid,vid,type,cat,amount,before,after,memo){
   DB.implantLogs.unshift({id:uid(),pid,vid,type,cat:cat||null,amount,before,after,memo:memo||'',at:now()});
   if(DB.implantLogs.length>1200) DB.implantLogs=DB.implantLogs.slice(0,1200);
@@ -1443,7 +1583,7 @@ function implantCard(p){
   const diff=pDiff(p), counted=pHasCount(p), ru=recentUse(p.id,30);
   const recon = p.variants.length ? `<div class="card" style="box-shadow:none;background:#f6f8fb;border:0;padding:12px;margin:10px 0 4px">
     <div class="two" style="gap:8px">
-      <div><div class="tiny muted">누적 매입</div><div style="font-weight:900;font-size:17px">${pIn(p)}<span class="tiny muted"> 개</span></div></div>
+      <div><div class="tiny muted">누적 매입${pExIn(p)?' <span class="tiny" style="color:var(--ok)">+교환 '+pExIn(p)+'</span>':''}</div><div style="font-weight:900;font-size:17px">${pIn(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">누적 사용</div><div style="font-weight:900;font-size:17px">${pUse(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">현재고(장부)</div><div style="font-weight:900;font-size:17px;color:var(--brand)">${pQty(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">실재고(실사)</div><div style="font-weight:900;font-size:17px">${counted?pPhys(p):'—'}<span class="tiny muted">${counted?' 개':''}</span></div></div>
