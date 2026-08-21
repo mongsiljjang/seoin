@@ -18,17 +18,29 @@ function grab(name){
   }
   throw new Error(name+' 의 끝을 못 찾았다');
 }
-const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog',
-                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad'];
+const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName',
+                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','noteSaveAll'];
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want);
   y?pass++:fail++; console.log(`${y?'✅':'❌'} ${name}${y?'':`  — ${JSON.stringify(want)} 여야 하는데 ${JSON.stringify(got)}`}`); };
 
 // 앱이 기대하는 바깥 것들만 최소로 채운다
+// 한 줄짜리 상수도 손으로 베끼지 않는다 — 베끼면 실물과 조용히 어긋난다.
+function grabConst(name){
+  const m = js.match(new RegExp('^const '+name+'\\s*=.*$','m'));
+  if(!m) throw new Error(`index.html 에 const ${name} 이 없다`);
+  return m[0];
+}
+
 const 판 = `
 const pad=n=>String(n).padStart(2,'0');
-const now=()=>1, uid=()=>'x';
+${grabConst('CHO')}
+const now=()=>1; let _n=0; const uid=()=>'id'+(++_n);
+const todayKey=(d=new Date())=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+let noteRows=[], noteText='';
+const saveDB=()=>{}, closeModal=()=>{}, renderLedger=()=>{}, toast=m=>{ lastToast=m; };
+let lastToast='';
 ${떼올것.map(grab).join('\n')}
 `;
 function 새판(){
@@ -36,7 +48,10 @@ function 새판(){
       {id:'v1',label:'4.0×12',qty:5,minQty:2,uNor:0,uIns:0,uFail:0},
       {id:'v2',label:'4.0×10',qty:3,minQty:2,uNor:0,uIns:0,uFail:0}]}],
     implantCases:[], implantLogs:[] };
-  const f = new Function('DB', 판 + '; return {noteParse,noteFx,noteBad,applyCaseStock};');
+  DB.implants[0].variants.push({id:'h1',label:'Ø4.5 GH3',qty:10,minQty:5,uNor:0,uIns:0,uFail:0});
+  const f = new Function('DB', 판 +
+    '; return {noteParse,noteFx,noteBad,noteLink,applyCaseStock,maskName,'
+    + 'run:t=>{noteRows=noteParse(t); noteSaveAll(); return lastToast;}};');
   return { DB, ...f(DB) };
 }
 
@@ -56,6 +71,16 @@ console.log('\n── 보내주신 두 줄 ──');
   ok('붙여 쓴 브랜드를 가른다',   r[1].brand, '덴티움');
   ok('둘째 줄 일반',              r[1].insur, '일반');
   ok('재료 목록에 없으면 알려준다', noteBad(r[1]), '재료 목록에 없는 규격이에요');
+}
+
+console.log('\n── 치식이 뒤 낱말을 먹지 않는가 ──');
+{
+  const {noteParse} = 새판();
+  // '#46 2차수술' 의 2 를 치아로 먹으면 없는 치아가 하나 생긴다.
+  ok('뒤 낱말의 숫자를 안 먹는다', noteParse('박소영 #46 2차수술')[0].teeth.join(','), '46');
+  ok('쉼표로 여럿',   noteParse('박소영 #16,17 오스템 4.0×10')[0].teeth.join(','), '16,17');
+  ok('# 로 여럿',     noteParse('박소영 #16#17 오스템 4.0×10')[0].teeth.join(','), '16,17');
+  ok('# 를 따로 붙여도', noteParse('박소영 #16 #17 오스템 4.0×10')[0].teeth.join(','), '16,17');
 }
 
 console.log('\n── 순서가 바뀌어도 · 여러 치아 · 페일 · 날짜 ──');
@@ -89,6 +114,52 @@ console.log('\n── 저장하면 재고가 빠지는가 (진짜 applyCaseStock
   ok('일반으로 세지 않는다', v.uNor, 0);
   ok('없는 규격은 안 빼고 알려준다', miss, 1);
   ok('뺀 개수', out, 1);
+}
+
+console.log('\n── 단계별 수술: 1차 → 2차 ──');
+{
+  const {DB,run,maskName} = 새판();
+  const fx=DB.implants[0].variants[0], hl=DB.implants[0].variants[2];
+  run('박소영 보험 #46 오스템 4.0*12');
+  ok('1차 — 케이스가 생긴다', DB.implantCases.length, 1);
+  ok('1차 — 픽스처가 빠진다', fx.qty, 4);
+  ok('1차 — 이름은 초성으로', DB.implantCases[0].pname, maskName('박소영'));
+
+  run('박소영 #46 2차수술 Ø4.5 GH3');
+  ok('2차 — 케이스를 새로 만들지 않는다', DB.implantCases.length, 1);   // 여기가 핵심
+  ok('2차 — 픽스처가 또 빠지지 않는다',   fx.qty, 4);
+  ok('2차 — 힐링이 빠진다',               hl.qty, 9);
+  ok('2차 — 힐링을 보험으로 센다',        hl.uIns, 1);
+  ok('2차 — 2차수술일이 찍힌다', !!DB.implantCases[0].d2, true);
+  ok('2차 — 치아에 힐링이 붙는다', DB.implantCases[0].teeth[0].heal, 'Ø4.5 GH3');
+}
+
+console.log('\n── 2차인데 1차 기록이 없으면 ──');
+{
+  const {DB,run} = 새판();
+  const hl=DB.implants[0].variants[2];
+  run('이영희 #36 2차수술 Ø4.5 GH3');
+  ok('케이스를 만들지 않는다', DB.implantCases.length, 0);
+  ok('힐링도 빼지 않는다',     hl.qty, 10);
+}
+
+console.log('\n── 힐링을 안 적어도 2차 날짜는 남는다 ──');
+{
+  const {DB,run} = 새판();
+  const hl=DB.implants[0].variants[2];
+  run('박소영 보험 #46 오스템 4.0*12');
+  run('박소영 #46 2차수술');
+  ok('2차수술일이 찍힌다',   !!DB.implantCases[0].d2, true);
+  ok('힐링은 안 빠진다',     hl.qty, 10);
+  ok('케이스는 그대로 하나', DB.implantCases.length, 1);
+}
+
+console.log('\n── 단계를 안 적어도 나간 물건으로 가른다 ──');
+{
+  const {noteParse} = 새판();
+  ok('픽스처 규격이면 1차', noteParse('박소영 #46 오스템 4.0×10')[0].stage, 1);
+  ok('힐링만 있으면 2차',   noteParse('박소영 #46 Ø4.5 GH3')[0].stage, 2);
+  ok('2차수술이라 적으면 2차', noteParse('박소영 #46 2차수술')[0].stage, 2);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);

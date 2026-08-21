@@ -2354,12 +2354,17 @@ function noteParse(text){
     const line=raw.trim(); if(!line) return;
     // 치식과 규격을 먼저 떼어 놓는다 — '#21덴티움' 처럼 붙여 쓰기 때문에
     // 공백만으로는 자를 수 없다.
+    //
+    // 치식은 반드시 두 자리로 본다(FDI). 전에는 공백도 이어지는 것으로 봐서
+    // '#46 2차수술' 의 2 까지 치아로 먹었다 — 없는 치아가 하나 생겼다.
+    // 여러 개는 쉼표나 # 로 나눠 적는다: #46,47 · #46#47 · #46 #47
     const toks=line
-      .replace(/#\s*([\d,\s#]*\d)/g, ' #$1 ')
+      .replace(/#\s*(\d{2}(?:\s*[,#]\s*\d{2})*)/g, ' #$1 ')
       .replace(/(\d+(?:\.\d+)?\s*[x×X*]\s*\d+(?:\.\d+)?)/g, ' $1 ')
       .split(/\s+/).filter(Boolean);
 
-    const r={date:'', name:'', chart:'', insur:'일반', fail:false, teeth:[], brand:'', spec:'', raw:line};
+    const r={date:'', name:'', chart:'', insur:'일반', fail:false, teeth:[],
+             brand:'', spec:'', heal:'', stage:0, raw:line};
     const rest=[]; let specAt=-1;
     toks.forEach((t,i)=>{
       if(t[0]==='#'){ t.slice(1).split(/[,#]+/).filter(Boolean).forEach(n=>r.teeth.push(n)); return; }
@@ -2368,6 +2373,7 @@ function noteParse(text){
       if(t==='보험'){ r.insur='보험'; return; }
       if(t==='일반'||t==='비급여'){ r.insur='일반'; return; }
       if(t==='페일'||t==='실패'){ r.fail=true; return; }
+      if(/^[12]차(수술)?$/.test(t)){ r.stage=+t[0]; return; }
       rest.push({t, i});
     });
 
@@ -2379,6 +2385,19 @@ function noteParse(text){
     if(k<0 && specAt>=0) rest.forEach((x,j)=>{ if(x.i<specAt && (k<0 || x.i>rest[k].i)) k=j; });
     if(k>=0){ r.brand=rest[k].t; rest.splice(k,1); }
 
+    // 2차수술 줄에는 픽스처 규격 대신 힐링이 온다. 'Ø4.5 GH3' 처럼 낱말이
+    // 갈라져 있어서, 이어진 낱말을 붙여 보며 재료 목록에 있는 것을 찾는다.
+    if(!r.spec && rest.length) outer:
+      for(let len=Math.min(4,rest.length); len>=1; len--)
+        for(let a=rest.length-len; a>=0; a--){
+          const run=rest.slice(a,a+len);
+          if(run.some((x,j)=>j && x.i!==run[j-1].i+1)) continue;   // 이어진 것만
+          const label=run.map(x=>x.t).join(' ');
+          if(findVar(label)){ r.heal=label; rest.splice(a,len); break outer; }
+        }
+    // 단계를 안 적었으면 무엇이 나갔는지로 본다. 픽스처면 1차, 힐링이면 2차다.
+    if(!r.stage) r.stage = (!r.spec && r.heal) ? 2 : 1;
+
     r.name = rest.map(x=>x.t).join(' ') || lastName;   // 이름이 비면 위 줄과 같은 환자
     if(r.name) lastName=r.name;
     rows.push(r);
@@ -2386,11 +2405,30 @@ function noteParse(text){
   return rows;
 }
 
+// 2차수술 줄은 새 케이스가 아니라 이미 있는 케이스에 붙인다.
+// 새로 만들면 픽스처가 두 번 빠진다 — 단계별 수술에서 제일 조심할 자리다.
+// 여러 건이 걸리면 고르지 않는다. 조용히 갖다 붙이면 틀렸을 때 못 찾는다.
+function noteLink(r){
+  if(r.stage!==2 || !r.name || !r.teeth.length) return null;
+  const nm=maskName(r.name);
+  const hit=(DB.implantCases||[]).filter(c=>
+    (c.pname||'')===nm && !c.d2 &&
+    r.teeth.every(f=>(c.teeth||[]).some(t=>String(t.fdi)===String(f))));
+  return hit.length===1 ? hit[0] : (hit.length ? 'many' : null);
+}
+
 // 저장하기 전에 무엇이 안 맞는지 알아야 고칠 수 있다.
 function noteFx(r){ const v=noteVar(r.brand, r.spec); return v? `${v.p.brand} ${v.v.label}` : (r.brand? r.brand+' ' : '')+r.spec; }
 function noteBad(r){
-  if(!r.spec) return '규격을 못 읽었어요';
   if(!r.teeth.length) return '치아번호가 없어요';
+  if(r.stage===2){
+    const link=noteLink(r);
+    if(link==='many') return '붙일 케이스가 여러 건이에요 — 대장에서 직접 고르세요';
+    if(!link) return '1차수술 기록을 못 찾았어요';
+    if(r.heal && !findVar(r.heal)) return '재료 목록에 없는 힐링이에요';
+    return '';                       // 힐링을 안 적었어도 2차 날짜는 남길 수 있다
+  }
+  if(!r.spec) return '규격을 못 읽었어요';
   if(!noteVar(r.brand, r.spec)) return '재료 목록에 없는 규격이에요';
   return '';
 }
@@ -2420,6 +2458,16 @@ function noteSet(i,k,v){
   else noteRows[i][k]=v;
   noteReview();
 }
+// 2차수술 줄이 어느 케이스에 붙는지 눈으로 보여준다. 조용히 갖다 붙이면
+// 틀렸을 때 찾을 방법이 없다.
+function noteLinkText(r){
+  const c=noteLink(r);
+  if(!c || c==='many') return '';
+  const who=[c.chart, c.pname].filter(Boolean).join(' ');
+  return `${esc(who)} · 1차 ${esc(c.d1||'—')} 케이스에 붙임`
+       + (r.heal? ` · 힐링 ${esc(r.heal)}` : ' · 힐링은 비움');
+}
+
 // 읽은 것을 그대로 저장하지 않는다. 사람이 한 번 보고 넘겨야 잘못 읽은 줄이
 // 재고를 조용히 틀어놓지 않는다.
 function noteReview(){
@@ -2432,18 +2480,24 @@ function noteReview(){
         <select onchange="noteSet(${i},'insur',this.value)" style="flex:0 0 78px">
           <option ${r.insur==='보험'?'selected':''}>보험</option>
           <option ${r.insur!=='보험'?'selected':''}>일반</option></select>
+        <select onchange="noteSet(${i},'stage',+this.value)" style="flex:0 0 86px">
+          <option value="1" ${r.stage!==2?'selected':''}>1차수술</option>
+          <option value="2" ${r.stage===2?'selected':''}>2차수술</option></select>
       </div>
       <div class="row wrap" style="gap:5px">
-        <input value="${esc(r.chart)}" placeholder="차트번호 (없어도 됨)" onchange="noteSet(${i},'chart',this.value)" style="flex:1;min-width:120px">
-        <input value="${esc(r.teeth.join(','))}" placeholder="치식" onchange="noteSet(${i},'teeth',this.value)" style="flex:0 0 92px">
-        <input value="${esc(r.brand)}" placeholder="브랜드" onchange="noteSet(${i},'brand',this.value)" style="flex:0 0 100px">
-        <input value="${esc(r.spec)}" placeholder="규격" onchange="noteSet(${i},'spec',this.value)" style="flex:0 0 92px">
+        <input value="${esc(r.chart)}" placeholder="차트번호 (없어도 됨)" onchange="noteSet(${i},'chart',this.value)" style="flex:1;min-width:110px">
+        <input value="${esc(r.teeth.join(','))}" placeholder="치식" onchange="noteSet(${i},'teeth',this.value)" style="flex:0 0 88px">
+        ${r.stage===2
+          ? `<input value="${esc(r.heal)}" list="hlList" placeholder="힐링 (나중에 골라도 됨)" onchange="noteSet(${i},'heal',this.value)" style="flex:0 0 196px">`
+          : `<input value="${esc(r.brand)}" placeholder="브랜드" onchange="noteSet(${i},'brand',this.value)" style="flex:0 0 96px">
+             <input value="${esc(r.spec)}" placeholder="규격" onchange="noteSet(${i},'spec',this.value)" style="flex:0 0 92px">`}
       </div>
       <div class="tiny" style="margin-top:6px;color:${bad?'var(--danger)':'var(--muted)'}">
-        ${bad? '⚠ '+bad : '✓ '+esc(noteFx(r))}${r.fail?' · 페일':''}
+        ${bad? '⚠ '+bad : (r.stage===2? '✓ '+noteLinkText(r) : '✓ '+esc(noteFx(r)))}${r.fail?' · 페일':''}
         <span class="muted" style="margin-left:6px">${esc(r.raw)}</span></div>
     </div>`; }).join('');
   modal(`<h3>읽은 결과 ${noteRows.length}줄</h3>
+    <datalist id="hlList">${lcOpts('힐링').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <div class="tiny muted" style="margin:-4px 2px 10px">${badN
       ? `<b style="color:var(--danger)">${badN}줄은 재고에서 못 찾았어요.</b> 고치거나, 그대로 두면 대장에만 남고 재고는 안 깎입니다.`
       : '모두 재고에서 찾았어요. 저장하면 그만큼 빠집니다.'}</div>
@@ -2455,8 +2509,12 @@ function noteReview(){
 // 보험과 일반은 케이스를 나눈다. 심평원 실사에서 섞여 있으면 소명이 안 된다.
 function noteSaveAll(){
   if(!Array.isArray(DB.implantCases)) DB.implantCases=[];
+  let made=0, upd=0, out=0, miss=0;
+
+  // 1차부터 적는다. 같은 붙여넣기 안에 1차와 2차가 함께 있으면
+  // 2차가 붙을 케이스가 먼저 있어야 한다.
   const g=new Map();
-  noteRows.forEach(r=>{
+  noteRows.filter(r=>r.stage!==2).forEach(r=>{
     if(!r.teeth.length || !r.spec) return;
     const date=r.date||todayKey();
     const key=[r.name, r.insur, date, r.chart].join('|');
@@ -2464,17 +2522,35 @@ function noteSaveAll(){
     const fx=noteFx(r);
     r.teeth.forEach(fdi=>g.get(key).teeth.push({fdi, fx, fail:!!r.fail}));
   });
-  if(!g.size){ toast('적을 줄이 없어요 — 치아번호와 규격이 있어야 합니다'); return; }
-  let out=0, miss=0;
   g.forEach(v=>{
     const data={ chart:v.chart, pname:maskName(v.name), birth:'', insur:v.insur,
       d1:v.date, d2:'', memo:'수첩', teeth:v.teeth, updatedAt:now() };
     const rr=applyCaseStock([], '', data.teeth, data.insur, `수첩 ${v.chart||v.name||''}`.trim());
     DB.implantCases.push(Object.assign({id:uid(), createdAt:now()}, data));
-    out+=rr.out; miss+=rr.miss;
+    out+=rr.out; miss+=rr.miss; made++;
   });
+
+  // 2차수술 줄은 이미 있는 케이스에 얹는다. 새 케이스를 만들면 픽스처가
+  // 또 빠진다. applyCaseStock 이 차이만 보므로 힐링만 빠져나간다.
+  noteRows.filter(r=>r.stage===2).forEach(r=>{
+    const c=noteLink(r);
+    if(!c || c==='many') return;
+    const before=(c.teeth||[]).map(t=>Object.assign({}, t));
+    if(r.heal) (c.teeth||[]).forEach(t=>{
+      if(r.teeth.some(f=>String(f)===String(t.fdi))) t.heal=r.heal; });
+    c.d2 = r.date||todayKey(); c.updatedAt=now();
+    const rr=applyCaseStock(before, c.insur, c.teeth, c.insur, `수첩 2차 ${c.chart||''}`.trim());
+    out+=rr.out; miss+=rr.miss; upd++;
+  });
+
+  if(!made && !upd){ toast('적을 줄이 없어요 — 치아번호와 규격을 확인해 주세요'); return; }
   noteText=''; saveDB(); closeModal(); renderLedger();
-  toast(`${g.size}건 적었어요 · 재고 ${out}개 차감${miss?` · 못 뺀 규격 ${miss}개`:''}`);
+  const bits=[];
+  if(made) bits.push(`${made}건 새로 적음`);
+  if(upd)  bits.push(`${upd}건 2차수술 반영`);
+  bits.push(`재고 ${out}개 차감`);
+  if(miss) bits.push(`못 뺀 규격 ${miss}개`);
+  toast(bits.join(' · '));
 }
 
 function openCaseForm(id){
