@@ -19,7 +19,8 @@ function grab(name){
   throw new Error(name+' 의 끝을 못 찾았다');
 }
 const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName',
-                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','noteSaveAll'];
+                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','noteSaveAll',
+                'esc','newFails','failNotice'];
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want);
@@ -41,6 +42,8 @@ const todayKey=(d=new Date())=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d
 let noteRows=[], noteText='';
 const saveDB=()=>{}, closeModal=()=>{}, renderLedger=()=>{}, toast=m=>{ lastToast=m; };
 let lastToast='';
+// 안내 창은 실물을 돌리고 modal 만 가로챈다 — 문구까지 시험에 걸리게 하려는 것이다
+let lastModal=''; const modal=h=>{ lastModal=h; };
 ${떼올것.map(grab).join('\n')}
 `;
 function 새판(){
@@ -51,7 +54,7 @@ function 새판(){
   DB.implants[0].variants.push({id:'h1',label:'Ø4.5 GH3',qty:10,minQty:5,uNor:0,uIns:0,uFail:0});
   const f = new Function('DB', 판 +
     '; return {noteParse,noteFx,noteBad,noteLink,applyCaseStock,maskName,'
-    + 'run:t=>{noteRows=noteParse(t); noteSaveAll(); return lastToast;}};');
+    + 'run:t=>{lastModal=\'\'; noteRows=noteParse(t); noteSaveAll(); return lastToast;}, 안내:()=>lastModal};');
   return { DB, ...f(DB) };
 }
 
