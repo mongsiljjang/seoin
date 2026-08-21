@@ -2131,23 +2131,35 @@ function openRecall(id){
     <label class="field"><span>회수일</span><input id="rcDate" type="date" value="${todayKey()}"></label>
     <button class="btn block" onclick="saveRecall('${id}')">회수 처리</button>`);
 }
+// 돌아온 힐링을 재고로 되돌린다. 화면과 떼어 둔 이유는 시험을 붙이기 위해서다.
+//
+// 되돌릴 때는 나갈 때 센 칸으로 되돌려야 한다 — caseTally 와 같은 규칙을 쓴다.
+// 전에는 무조건 일반에서 뺐다. 그래서 보험 케이스의 힐링을 회수하면 보험
+// 사용수가 그대로 남고 애먼 일반 사용수가 깎여, 대사가 조용히 틀어졌다.
+function recallStock(c, back){
+  const sizes=new Map();
+  (c.teeth||[]).forEach(t=>{ const k=String(t.heal||'').trim(); if(!k) return;
+    const cat = t.fail? 'uFail' : (c.insur==='보험'?'uIns':'uNor');
+    const key=k+'|'+cat; sizes.set(key,(sizes.get(key)||0)+1); });
+  let left=Math.max(0,+back||0), done=0;
+  sizes.forEach((n,key)=>{
+    if(left<=0) return;
+    const i=key.lastIndexOf('|'), label=key.slice(0,i), cat=key.slice(i+1);
+    const take=Math.min(n,left);
+    const f=findVar(label); if(!f) return;          // 재료 목록에 없으면 건드리지 않는다
+    left-=take; done+=take;
+    const {p,v}=f, before=v.qty; v.qty=before+take;
+    v[cat]=Math.max(0,(+v[cat]||0)-take);
+    implantLog(p.id,v.id,'in',null,take,before,v.qty,`힐링 회수 · ${c.chart}`);
+  });
+  return done;
+}
 function saveRecall(id){
   const c=caseById(id); if(!c) return;
   const out=healOut(c);
   const back=Math.max(0,Math.min(out,parseInt($('#rcBack').value,10)||0));
   c.recallAt=$('#rcDate').value||todayKey(); c.recallBack=back; c.recallLost=out-back;
-  // 재활용이니 돌아온 것만 재고로 되돌린다
-  const sizes=new Map();
-  (c.teeth||[]).forEach(t=>{ const k=String(t.heal||'').trim(); if(k) sizes.set(k,(sizes.get(k)||0)+1); });
-  let left=back;
-  sizes.forEach((n,label)=>{
-    if(left<=0) return;
-    const take=Math.min(n,left); left-=take;
-    const f=findVar(label); if(!f) return;
-    const {p,v}=f, before=v.qty; v.qty=before+take;
-    v.uNor=Math.max(0,(+v.uNor||0)-take);
-    implantLog(p.id,v.id,'in',null,take,before,v.qty,`힐링 회수 · ${c.chart}`);
-  });
+  recallStock(c, back);
   saveDB(); closeModal(); renderLedger();
   toast(c.recallLost? `${back}개 회수 · ${c.recallLost}개 분실` : `${back}개 모두 회수했어요`);
 }
