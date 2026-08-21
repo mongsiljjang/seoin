@@ -2,9 +2,9 @@
 
    지켜야 할 것은 셋이다. 사용자가 못 박은 그대로다.
 
-     ① 대사 보드는 재고를 건드리지 않는다 (읽기 전용)
+     ① 세는 함수는 재고를 건드리지 않는다
      ② 교환 신청은 재고를 바꾸지 않는다
-     ③ 재고는 '입고 확인' 때만 는다 — 신청 없이는 받을 수 없다
+     ③ 재고는 물건이 실제로 들어올 때만 는다 — 신청 없이는 받을 수 없다
 
    그리고 교환으로 받은 것은 매입에 섞지 않는다. 섞으면 산 개수가 부풀고
    원가가 흐려지는데 재고 개수는 맞아떨어져서 눈에 안 띈다.
@@ -27,7 +27,7 @@ function grab(name){
 }
 const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','vUse','vDiff',
                 'exReq','exIn','failOpen','failWait','vBook','pFailOpen','pFailWait','pExIn',
-                'claimFail','receiveFail','reconRows','reconCount'];
+                'claimFail','receiveFail'];
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want); y?pass++:fail++;
@@ -47,7 +47,7 @@ const healDue=c=>c.d2? tms(c.d2)+14*DAY_MS : null;
 const healLate=c=>{ const d=healDue(c); return d? Math.floor((tms('2026-09-30')-d)/DAY_MS):0; };
 const outCases=()=>(DB.implantCases||[]).filter(isOut);
 ${떼올것.map(grab).join('\n')}
-return {claimFail,receiveFail,failOpen,failWait,vBook,vUse,pFailOpen,pFailWait,pExIn,applyCaseStock,reconRows,reconCount};`)(DB);
+return {claimFail,receiveFail,failOpen,failWait,vBook,vUse,pFailOpen,pFailWait,pExIn,applyCaseStock};`)(DB);
   return { DB, p:DB.implants[0], v:DB.implants[0].variants[0], ...f };
 }
 const 장부맞나 = v => (+v.inTot||0) + (+v.exIn||0) - ((+v.uNor||0)+(+v.uIns||0)+(+v.uFail||0)) === v.qty;
@@ -125,20 +125,16 @@ console.log('\n── 없는 규격·엉뚱한 값 ──');
   ok('아무것도 안 바뀌었다', [v.qty, v.exReq, v.exIn], [10, undefined, undefined]);
 }
 
-console.log('\n── 대사 보드는 읽기만 한다 ──');
+console.log('\n── 세는 함수는 아무것도 바꾸지 않는다 ──');
 {
-  const {DB, v, p, applyCaseStock, reconRows, reconCount} = 새판();
+  const {DB, v, p, applyCaseStock, failOpen, failWait, pFailOpen, pFailWait, pExIn, vBook} = 새판();
   applyCaseStock([], '', [{fdi:'46',fx:'오스템 4.0×12',fail:true}], '일반', 'a');
-  v.phys = 7;                                   // 실사에서 7개로 셌다 (장부는 9)
   const 찍기 = () => JSON.stringify(DB.implants);
   const 전 = 찍기();
-  const rows = reconRows(), n = reconCount();
-  ok('보드를 그려도 재고가 안 바뀐다', 찍기(), 전);
-  ok('오차 있는 규격을 센다',          n.diff, 1);
-  ok('실사 안 한 규격을 센다',         n.uncounted, 1);
-  ok('교환 신청 안 한 페일을 센다',    n.failOpen, 1);
-  ok('네 줄 다 있다',                  rows.length, 4);
-  ok('다시 그려도 안 바뀐다',          (reconRows(), reconCount(), 찍기()), 전);
+  const 본것 = [failOpen(v), failWait(v), pFailOpen(p), pFailWait(p), pExIn(p), vBook(v)];
+  ok('세어도 재고가 안 바뀐다',   찍기(), 전);
+  ok('여러 번 세도 값이 같다',    [failOpen(v), failWait(v), pFailOpen(p), pFailWait(p), pExIn(p), vBook(v)], 본것);
+  ok('장부가 현재고와 같다',      vBook(v), v.qty);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
