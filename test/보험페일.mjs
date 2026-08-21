@@ -45,6 +45,7 @@ let noteRows=[], noteText='';
 const saveDB=()=>{}, closeModal=()=>{}, renderLedger=()=>{}, toast=m=>{ lastToast=m; };
 let lastToast='';
 let lastModal=''; const modal=h=>{ lastModal=h; };
+let toastShown=true; const $=sel=>sel==='#toast'?{classList:{remove(){ toastShown=false; }}}:null;
 ${떼올것.map(grab).join('\n')}
 `;
 function 새판(){
@@ -53,7 +54,7 @@ function 새판(){
       {id:'h1',label:'Ø4.5 GH3',qty:10,minQty:5,uNor:0,uIns:0,uFail:0}]}],
     implantCases:[], implantLogs:[] };
   const f = new Function('DB', 판 +
-    '; return {newFails, failNotice, 안내:()=>lastModal,'
+    '; return {newFails, failNotice, 안내:()=>lastModal, 토스트:()=>toastShown,'
     + 'run:t=>{lastModal=\'\'; noteRows=noteParse(t); noteSaveAll(); return lastToast;}};');
   return { DB, fx:DB.implants[0].variants[0], hl:DB.implants[0].variants[1], ...f(DB) };
 }
@@ -96,6 +97,12 @@ console.log('\n── 안내 문구 — 판정이 아니라 물음이다 ──'
   ok('차트번호를 보여준다',         h.includes('1234'), true);
   ok('수가·금액은 말하지 않는다',   /원|수가|점수|본인부담/.test(h), false);
   ok('개수·연령을 판정하지 않는다', /65세|평생|2개까지/.test(h), false);
+}
+{
+  const {failNotice, 안내, 토스트} = 새판();
+  failNotice(['46'], '1234', '1건 새로 적음 · 재고 1개 차감');
+  ok('저장 요약을 안내 안으로 들인다', 안내().includes('1건 새로 적음'), true);
+  ok('겹치는 토스트를 걷어낸다', 토스트(), false);
 }
 
 console.log('\n── 수첩: 1차 수술 줄 ──');

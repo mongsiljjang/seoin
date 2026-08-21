@@ -2129,8 +2129,13 @@ function newFails(oldT, oldIns, newT, newIns){
 }
 
 // 문구는 판정이 아니라 물음이다. 대신 결정해 주지 않는다.
-function failNotice(fdis, chart){
+//
+// 저장 요약(토스트)을 안내 안으로 들여온 이유 — 토스트는 화면 아래 84px 에
+// 고정인데 이 안내도 아래에서 올라오는 창이라, 둘이 겹쳐 정작 중요한
+// '3단계 뒤에는 안 된다' 를 덮었다. 브라우저로 열어보고서야 보였다.
+function failNotice(fdis, chart, summary){
   if(!fdis || !fdis.length) return;
+  const t=$('#toast'); if(t) t.classList.remove('show');
   const teeth = fdis.map(n=>'#'+esc(n)).join(' ');
   modal(`<h3>보험 임플란트 페일</h3>
     <div class="tiny muted" style="margin:-6px 2px 12px">${esc(chart||'')} · 치아 ${teeth}</div>
@@ -2142,6 +2147,7 @@ function failNotice(fdis, chart){
       재시술 급여는 시술중지 등록 → 재등록을 거쳐야 인정됩니다.
       앱은 청구를 대신 판단하지 않습니다 — 순서가 있다는 것만 알립니다.
     </div>
+    ${summary? `<div class="tiny muted" style="margin:-6px 2px 14px;padding-top:10px;border-top:1px solid var(--line)">${esc(summary)}</div>`:''}
     <button class="btn block" onclick="closeModal()">확인했습니다</button>`);
 }
 
@@ -2597,7 +2603,7 @@ function noteSaveAll(){
   bits.push(`재고 ${out}개 차감`);
   if(miss) bits.push(`못 뺀 규격 ${miss}개`);
   toast(bits.join(' · '));
-  failNotice(nf, '수첩');
+  failNotice(nf, '수첩', bits.join(' · '));
 }
 
 function openCaseForm(id){
@@ -2676,8 +2682,8 @@ function saveCase(id){
   if(r.out) bits.push(`재고 ${r.out}개 차감`);
   if(r.back) bits.push(`${r.back}개 되돌림`);
   toast(bits.join(' · '));
-  if(r.miss) setTimeout(()=>toast(`⚠️ 재고에 없는 규격 ${r.miss}개는 못 뺐어요 — 재료 목록에서 '재고에 등록'을 눌러주세요`),1600);
-  failNotice(nf, chart);
+  if(r.miss && !nf.length) setTimeout(()=>toast(`⚠️ 재고에 없는 규격 ${r.miss}개는 못 뺐어요 — 재료 목록에서 '재고에 등록'을 눌러주세요`),1600);
+  failNotice(nf, chart, bits.join(' · ') + (r.miss?` · 재고에 없는 규격 ${r.miss}개는 못 뺐어요`:''));
 }
 function delCase(id){
   if(!isOwner()){ toast('삭제는 최고관리자만 할 수 있어요'); return; }

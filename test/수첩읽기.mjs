@@ -44,6 +44,7 @@ const saveDB=()=>{}, closeModal=()=>{}, renderLedger=()=>{}, toast=m=>{ lastToas
 let lastToast='';
 // 안내 창은 실물을 돌리고 modal 만 가로챈다 — 문구까지 시험에 걸리게 하려는 것이다
 let lastModal=''; const modal=h=>{ lastModal=h; };
+let toastShown=true; const $=sel=>sel==='#toast'?{classList:{remove(){ toastShown=false; }}}:null;
 ${떼올것.map(grab).join('\n')}
 `;
 function 새판(){
