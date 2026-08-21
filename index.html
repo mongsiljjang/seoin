@@ -4841,10 +4841,11 @@ function openMenu(){
     <div class="setnote">급여 열쇠 ${DB.payLock? `<b style="color:var(--ok)">설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
 
     <div class="divider"></div>
-    ${sechead('📱 기기 · 출근 체크', '<b>기기 승인</b> — 직원 폰마다 한 번씩 승인해야 데이터가 내려갑니다. 승인 안 한 기기는 아무것도 못 봅니다.<br><br><b>공용 기기 출근 체크</b> — 데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면 직원이 <b>이름 + 개인 PIN</b> 으로 출퇴근을 찍습니다(개인폰 로그인 불필요). 주소 뒤에 <b>#kiosk</b> 를 붙여 북마크하면 바로 열립니다. 나갈 땐 관리자 PIN.')}
+    ${sechead('📱 기기 · 출근 체크', '<b>기기 승인</b> — 직원 폰마다 한 번씩 승인해야 데이터가 내려갑니다. 승인 안 한 기기는 아무것도 못 봅니다.<br><br><b>공용 기기 출근 체크</b> — 데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면 직원이 <b>이름 + 개인 PIN</b> 으로 출퇴근을 찍습니다(개인폰 로그인 불필요). <b>공용 기기 주소 복사</b> 를 눌러 그 기기에 붙여넣고 북마크해 두세요. 나갈 땐 관리자 PIN.')}
     <div class="setrow">
       <button class="btn soft sm" onclick="openDeviceClaims()">기기 승인${pendingClaims.length?` <span class="pill pend">${pendingClaims.length}</span>`:''}</button>
       <button class="btn soft sm" onclick="closeModal(); enterKiosk()">🖥️ 출근 체크 화면</button>
+      <button class="btn soft sm" onclick="copyKioskLink()">공용 기기 주소 복사</button>
     </div>
 
     <div class="divider"></div>
@@ -6008,6 +6009,14 @@ function openInRealBrowser(){
   if(!IS_IOS){ location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(location.href); return; }
   copyAppLink();
   alert('주소를 복사했어요.\n\nSafari 를 열고 주소창에 붙여넣어 주세요.');
+}
+// 데스크 태블릿에 띄울 주소. '#kiosk 를 붙이세요' 라고 적어두면 아무도 안 붙인다.
+function copyKioskLink(){
+  const url = location.origin + location.pathname
+            + (WS_ID==='clinic' ? '' : '?h='+encodeURIComponent(WS_ID)) + '#kiosk';
+  (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+    .then(()=>toast('복사했어요 — 공용 기기에 붙여넣고 북마크하세요'),
+          ()=>prompt('이 주소를 공용 기기에 붙여넣으세요', url));
 }
 function copyAppLink(){
   const url = location.href;
