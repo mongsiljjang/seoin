@@ -26,7 +26,7 @@ function grab(name){
   throw new Error(name+' 의 끝을 못 찾았다');
 }
 const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','vUse','vDiff',
-                'exReq','exIn','failOpen','failWait','vBook','pFailOpen','pFailWait','pExIn',
+                'exReq','exIn','failOpen','failWait','vAdj','vBook','pFailOpen','pFailWait','pExIn',
                 'claimFail','receiveFail'];
 
 let pass=0, fail=0;
@@ -47,10 +47,11 @@ const healDue=c=>c.d2? tms(c.d2)+14*DAY_MS : null;
 const healLate=c=>{ const d=healDue(c); return d? Math.floor((tms('2026-09-30')-d)/DAY_MS):0; };
 const outCases=()=>(DB.implantCases||[]).filter(isOut);
 ${떼올것.map(grab).join('\n')}
-return {claimFail,receiveFail,failOpen,failWait,vBook,vUse,pFailOpen,pFailWait,pExIn,applyCaseStock};`)(DB);
+return {claimFail,receiveFail,failOpen,failWait,vAdj,vBook,vUse,pFailOpen,pFailWait,pExIn,applyCaseStock};`)(DB);
   return { DB, p:DB.implants[0], v:DB.implants[0].variants[0], ...f };
 }
-const 장부맞나 = v => (+v.inTot||0) + (+v.exIn||0) - ((+v.uNor||0)+(+v.uIns||0)+(+v.uFail||0)) === v.qty;
+// 매입 + 교환입고 + 보정 − 사용 = 현재고
+const 장부맞나 = v => (+v.inTot||0) + (+v.exIn||0) + (+v.adj||0) - ((+v.uNor||0)+(+v.uIns||0)+(+v.uFail||0)) === v.qty;
 
 console.log('\n── 페일이 나면 재고는 이미 빠져 있다 ──');
 {
