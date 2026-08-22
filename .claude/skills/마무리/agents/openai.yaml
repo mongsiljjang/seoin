@@ -1,0 +1,7 @@
+interface:
+  display_name: "마무리"
+  short_description: "실측·검증하고 커밋한 뒤, 다음 세션이 첫 행동을 바로 할 수 있게 넘긴다"
+  default_prompt: "이번 세션을 마무리하고, 커밋하고, 다음 세션이 바로 이어갈 수 있는 핸드오프를 남겨줘."
+
+policy:
+  allow_implicit_invocation: false
