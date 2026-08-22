@@ -1633,14 +1633,14 @@ function matrixHtml(p,parsed){
   const dias=g.bs, lens=g.ss;
   const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
   let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 실재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 실재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
-  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th>${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
-  dias.forEach(d=>{ t+=`<tr><td class="rowh">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
+  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th title="눌러서 빼기" onclick="dropAxis('${p.id}','s',${l})" style="cursor:pointer">${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
+  dias.forEach(d=>{ t+=`<tr><td class="rowh" title="눌러서 빼기" onclick="dropAxis('${p.id}','b',${d})" style="cursor:pointer">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
     if(!c) return `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
     const df=vDiff(c.v);
     const dot = df!=null&&df!==0?`<span style="position:absolute;top:3px;right:4px;width:8px;height:8px;border-radius:50%;background:${df<0?'var(--danger)':'var(--warn)'}"></span>`:'';
     return `<td><div class="cell ${vState(c.v)}" style="position:relative" onclick="openVariant('${p.id}','${c.v.id}')">${dot}${c.v.qty}<span class="u">개</span></div></td>`;
   }).join('')+`<td></td></tr>`; });
-  t+=`<tr><td class="rowh"><button type="button" class="chip" onclick="addAxis('${p.id}','b')" title="${ax.b} 더하기">＋</button></td><td colspan="${lens.length+1}" class="tiny muted" style="text-align:left;padding-left:8px">특수 사이즈는 ＋로 눈금을 더하세요</td></tr>`;
+  t+=`<tr><td class="rowh"><button type="button" class="chip" onclick="addAxis('${p.id}','b')" title="${ax.b} 더하기">＋</button></td><td colspan="${lens.length+1}" class="tiny muted" style="text-align:left;padding-left:8px">＋로 눈금을 더하고, ${ax.b}·${ax.s} 숫자를 누르면 그 줄을 뺍니다</td></tr>`;
   t+=`</table></div><div class="legend2"><span><i class="ok"></i>충분</span><span><i class="low"></i>부족</span><span><i class="zero"></i>품절</span></div>`;
   if(others.length) t+=`<div class="tiny muted" style="margin:12px 2px 4px">기타 규격</div>`+variantRows(p,others.map(x=>x.v));
   return t;
@@ -1687,22 +1687,47 @@ const SPEC_AXIS = {
    등록된 규격이 있으면 그쪽이 이긴다. 이건 빈 표를 여는 시작점일 뿐이다.
    근거는 docs/IMPLANT_SPECS.md — 오스템 TS III 길이가 확인된 값이다. */
 const SPEC_SEED = {
-  '픽스처':     {bs:[3.5,4.0,4.5,5.0],     ss:[7,8.5,10,11.5,13]},
-  '힐링캡':     {bs:[4.0,4.5,5.0,5.5,6.0], ss:[2,3,4,5,6]},
-  '어버트먼트': {bs:[4.0,4.5,5.0,5.5,6.0], ss:[1,2,3,4,5]}
+  '픽스처':     {bs:[3.0,3.5,3.8,4.0,4.5,5.0,5.5], ss:[6,7,8.5,10,11.5,13,15]},
+  '힐링캡':     {bs:[4.0,4.5,5.0,5.5,6.0,6.5],     ss:[2,3,4,5,6,7]},
+  '어버트먼트': {bs:[4.0,4.5,5.0,5.5,6.0,6.5],     ss:[1,2,3,4,5,6]}
 };
 // 표의 눈금 — 병원이 쓰는 것 + 손으로 더한 것 + (아무것도 없으면) 시작점
 function gridAxes(p){
   const useB=new Set(), useS=new Set();
   (p.variants||[]).forEach(v=>{ const dl=parseDL(v.label); if(dl){ useB.add(dl.d); useS.add(dl.l); } });
+  const 걸린B=new Set(useB), 걸린S=new Set(useS);   // 규격이 실제로 있는 눈금
   (p.axisB||[]).forEach(n=>useB.add(+n));
   (p.axisS||[]).forEach(n=>useS.add(+n));
   // 시작점은 바닥이지 대체품이 아니다. 규격 하나를 넣었다고 표가 한 줄로
   // 쪼그라들면 나머지를 눌러 넣을 자리가 없어진다 — 표를 쓰는 이유가 사라진다.
   const seed=SPEC_SEED[p.part];
   if(seed){ seed.bs.forEach(n=>useB.add(n)); seed.ss.forEach(n=>useS.add(n)); }
+  // 사용자가 뺀 눈금은 뺀다. 다만 규격이 걸려 있으면 빼지 않는다 —
+  // 눈금이 사라지면 그 줄의 재고가 화면에서 통째로 안 보이게 된다.
+  (p.axisHideB||[]).forEach(n=>{ if(!걸린B.has(+n)) useB.delete(+n); });
+  (p.axisHideS||[]).forEach(n=>{ if(!걸린S.has(+n)) useS.delete(+n); });
   const num=(a,b)=>a-b;
   return { bs:[...useB].sort(num), ss:[...useS].sort(num) };
+}
+// 이 눈금에 걸린 규격이 있는가 — 있으면 눈금을 못 뺀다
+function axisHasVariants(p, which, n){
+  return (p.variants||[]).some(v=>{ const dl=parseDL(v.label);
+    return dl && (which==='b'? dl.d : dl.l)===+n; });
+}
+// 눈금 빼기. 규격이 걸려 있으면 규격을 먼저 지우게 한다.
+function dropAxis(pid, which, n){
+  const p=implantById(pid), ax=specAxis(p.part);
+  const 무엇 = which==='b'? ax.b : ax.s;
+  if(axisHasVariants(p, which, n)){
+    toast(`${무엇} ${specNum(n)} 에 규격이 있어요 — 그 칸들을 먼저 지워주세요`); return;
+  }
+  if(!confirm(`${무엇} ${specNum(n)} 줄을 표에서 뺄까요?\n등록된 규격이 없어서 지워도 잃는 것은 없어요.`)) return;
+  const add = which==='b'? 'axisHideB' : 'axisHideS';
+  const man = which==='b'? 'axisB' : 'axisS';
+  if(Array.isArray(p[man])) p[man]=p[man].filter(x=>+x!==+n);
+  if(!Array.isArray(p[add])) p[add]=[];
+  if(!p[add].includes(+n)) p[add].push(+n);
+  saveDB(); renderImplant(); toast(`${무엇} ${specNum(n)} 을 표에서 뺐어요`);
 }
 // 눈금 하나를 더한다. 특수 사이즈는 여기로 들어와 표에 자리를 얻는다.
 function addAxis(pid, which){
@@ -1715,6 +1740,8 @@ function addAxis(pid, which){
   const key = which==='b'? 'axisB' : 'axisS';
   if(!Array.isArray(p[key])) p[key]=[];
   if(!p[key].includes(n)) p[key].push(n);
+  const hide = which==='b'? 'axisHideB' : 'axisHideS';   // 뺐던 것을 다시 넣는 길
+  if(Array.isArray(p[hide])) p[hide]=p[hide].filter(x=>+x!==n);
   saveDB(); renderImplant(); toast(`${무엇} ${specNum(n)} 을 표에 더했어요`);
 }
 function specAxis(part){ return SPEC_AXIS[part] || {b:'두께', s:'길이', bMin:0.5, bMax:30, sMin:0.5, sMax:30}; }
@@ -1805,17 +1832,13 @@ function delImplant(id){
   DB.implants=DB.implants.filter(p=>p.id!==id); currentImplantId=null;
   saveDB(); closeModal(); renderImplant(); toast('삭제되었습니다');
 }
-// 자주 쓰는 두께는 이미 등록된 것에서 뽑는다. 4.0·3.5 를 매번 치지 않게.
-function usedDias(p){
-  const set=new Set();
-  (p.variants||[]).forEach(v=>{ const dl=parseDL(v.label); if(dl) set.add(dl.d); });
-  return [...set].sort((a,b)=>a-b);
-}
 function openVariantForm(pid, editVid, preset){
   const p=implantById(pid); const v=editVid?p.variants.find(x=>x.id===editVid):null;
   const ax=specAxis(p.part), two=hasAxis(p.part);
   const cur = v? parseDL(v.label) : (preset? parseDL(preset) : null);
-  const dias = usedDias(p);
+  // 칩은 표와 같은 눈금을 쓴다. 등록된 것만 뽑으면 처음엔 두세 개밖에 안 뜬다.
+  const dias = two ? gridAxes(p).bs : [];
+  const lens = two ? gridAxes(p).ss : [];
   // × 는 화면에 인쇄된 글자다. 손으로 넣는 것은 숫자뿐이다.
   const specField = two
     ? `<div class="field"><span>규격 * <span class="tiny muted">숫자만 넣으면 돼요</span></span>
@@ -1826,7 +1849,10 @@ function openVariantForm(pid, editVid, preset){
           <input id="vS" inputmode="decimal" placeholder="${ax.s}" value="${cur?specNum(cur.l):''}" style="flex:1;text-align:center;font-size:18px;font-weight:800">
         </div>
         <div class="tiny muted" style="margin-top:5px">왼쪽이 ${ax.b}, 오른쪽이 ${ax.s} 예요. <b>3010</b> 처럼 붙여 쳐도 알아서 갈라집니다.</div>
-        ${dias.length?`<div class="chips" style="margin-top:7px">${dias.map(d=>`<button type="button" class="chip" onclick="$('#vB').value='${specNum(d)}';$('#vS').focus()">${specNum(d)}</button>`).join('')}</div>`:''}
+        ${dias.length?`<div class="tiny muted" style="margin-top:8px">${ax.b}</div>
+          <div class="chips" style="margin-top:3px">${dias.map(d=>`<button type="button" class="chip" onclick="$('#vB').value='${specNum(d)}'">${specNum(d)}</button>`).join('')}</div>`:''}
+        ${lens.length?`<div class="tiny muted" style="margin-top:7px">${ax.s}</div>
+          <div class="chips" style="margin-top:3px">${lens.map(l=>`<button type="button" class="chip" onclick="$('#vS').value='${specNum(l)}'">${specNum(l)}</button>`).join('')}</div>`:''}
        </div>
        <input id="vLabel" type="hidden" value="${v?esc(v.label):(preset||'')}">`
     : `<label class="field"><span>규격 *</span><input id="vLabel" value="${v?esc(v.label):(preset||'')}" placeholder="예: Ø4.5 GH3"></label>`;
@@ -1870,7 +1896,25 @@ function saveVariant(pid,vid){
     p.variants.push(nv); if(qty>0) implantLog(pid,nv.id,'in',null,qty,0,qty,'초기 등록'); }
   saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
 }
-function delVariant(pid,vid){ const p=implantById(pid); p.variants=p.variants.filter(x=>x.id!==vid); saveDB(); closeModal(); renderImplant(); toast('삭제되었습니다'); }
+// 기록이 남은 규격이 조용히 사라지면 대사가 통째로 어긋난다.
+// 잘못 만든 빈 칸은 그냥 지우고, 움직인 적 있는 칸은 무엇을 잃는지 보여준다.
+function variantTouched(v){
+  return (+v.qty||0)!==0 || (+v.inTot||0)!==0 || vUse(v)!==0 || vOpen(v)!==0 || vAdj(v)!==0 || exIn(v)!==0;
+}
+function delVariant(pid,vid){
+  const p=implantById(pid); const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return;
+  if(variantTouched(v)){
+    const 잃는것=[
+      (+v.qty||0)? `현재고 ${v.qty}개` : '',
+      (+v.inTot||0)? `매입 ${v.inTot}개` : '',
+      vUse(v)? `사용 ${vUse(v)}개` : '',
+      vOpen(v)? `이월 ${vOpen(v)}개` : ''
+    ].filter(Boolean).join(' · ');
+    if(!confirm(`${v.label} 에는 ${잃는것} 기록이 있어요.\n지우면 이 숫자들이 대사에서 빠집니다. 그래도 지울까요?`)) return;
+  }
+  p.variants=p.variants.filter(x=>x.id!==vid);
+  saveDB(); closeModal(); renderImplant(); toast(`${v.label} 을 지웠어요`);
+}
 function openVariant(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid); if(!v) return;
   const diff=vDiff(v);

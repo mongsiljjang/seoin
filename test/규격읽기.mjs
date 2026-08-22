@@ -28,8 +28,8 @@ if(!SEED) throw new Error('index.html 에 const SPEC_SEED 가 없다');
 
 const f = new Function(`${SPEC[0]}
 ${SEED[0]}
-${['parseDL','specAxis','hasAxis','specNum','dlLabel','sameSpec','specGuess','gridAxes'].map(grab).join('\n')}
-return {parseDL,specAxis,hasAxis,specNum,dlLabel,sameSpec,specGuess,gridAxes,SPEC_SEED};`)();
+${['parseDL','specAxis','hasAxis','specNum','dlLabel','sameSpec','specGuess','gridAxes','axisHasVariants'].map(grab).join('\n')}
+return {parseDL,specAxis,hasAxis,specNum,dlLabel,sameSpec,specGuess,gridAxes,axisHasVariants,SPEC_SEED};`)();
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want); y?pass++:fail++;
@@ -156,6 +156,37 @@ console.log('\n── 표(인박스)가 입력 수단이다 ──');
   ok('골이식재도 아니다',           f.hasAxis('골이식'),     false);
   const g = f.gridAxes({part:'골이식', variants:[]});
   ok('두 축이 아니면 눈금도 없다', [g.bs.length, g.ss.length], [0,0]);
+}
+
+console.log('\n── 잘못 만든 눈금을 뺄 수 있다 ──');
+{
+  const 특수 = {part:'픽스처', variants:[], axisB:[3.8], axisS:[15], axisHideB:[3.8]};
+  ok('뺀 눈금은 안 나온다',   f.gridAxes(특수).bs.includes(3.8), false);
+  ok('안 뺀 것은 그대로',     f.gridAxes(특수).ss.includes(15),  true);
+}
+{
+  const 씨앗도 = {part:'픽스처', variants:[], axisHideB:[3.0], axisHideS:[6]};
+  ok('시작 눈금도 뺄 수 있다', f.gridAxes(씨앗도).bs.includes(3.0), false);
+  ok('둘째 축도 뺄 수 있다',   f.gridAxes(씨앗도).ss.includes(6),   false);
+}
+{
+  // 규격이 걸린 눈금이 사라지면 그 줄의 재고가 화면에서 통째로 안 보인다
+  const 걸림 = {part:'픽스처', variants:[{label:'3.8×13'}], axisHideB:[3.8], axisHideS:[13]};
+  ok('규격이 걸린 두께는 안 빠진다', f.gridAxes(걸림).bs.includes(3.8), true);
+  ok('규격이 걸린 길이도 안 빠진다', f.gridAxes(걸림).ss.includes(13), true);
+  ok('걸렸는지 알 수 있다',          f.axisHasVariants(걸림,'b',3.8), true);
+  ok('안 걸린 것도 안다',            f.axisHasVariants(걸림,'b',4.0), false);
+  ok('둘째 축도 본다',               f.axisHasVariants(걸림,'s',13),  true);
+}
+
+console.log('\n── 칩과 표가 같은 눈금을 쓴다 ──');
+{
+  // 등록된 것만 뽑으면 처음엔 두세 개밖에 안 뜬다. 실제로 그랬다.
+  const 하나 = {part:'픽스처', variants:[{label:'3.8×13'}]};
+  ok('두께 칩이 세 개보다 많다', f.gridAxes(하나).bs.length > 3, true);
+  ok('길이 칩도 세 개보다 많다', f.gridAxes(하나).ss.length > 3, true);
+  ok('쓰던 3.8 도 들어 있다',    f.gridAxes(하나).bs.includes(3.8), true);
+  ok('usedDias 는 없앴다',       /usedDias/.test(html), false);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
