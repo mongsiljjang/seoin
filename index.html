@@ -1548,8 +1548,9 @@ function implantCard(p){
     <div class="tiny muted" style="margin-top:8px">최근 30일 사용 <b>${ru.total}개</b> (일반 ${ru.normal}·보험 ${ru.insurance}·페일 ${ru.fail})</div>
   </div>` : '';
   const parsed=p.variants.map(v=>({v,dl:parseDL(v.label)}));
-  const useMatrix=hasAxis(p.part) && parsed.some(x=>x.dl);
-  const body = p.variants.length ? (useMatrix?matrixHtml(p,parsed):variantRows(p,p.variants)) : emptyBox('📐','규격을 추가하세요');
+  const useMatrix=hasAxis(p.part);
+  const body = useMatrix ? matrixHtml(p,parsed)
+             : (p.variants.length ? variantRows(p,p.variants) : emptyBox('📐','규격을 추가하세요'));
   const bulk = hasAxis(p.part) ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
   const stk = p.variants.length ? `<button class="btn soft sm grow" onclick="openStocktake('${p.id}')">📋 재고 실사</button>` : '';
   // 바꿀 페일이 생겼을 때만 문을 낸다 — 늘 떠 있으면 눈에 안 들어온다
@@ -1584,17 +1585,18 @@ function saveStocktake(pid,reconcile){
 }
 function matrixHtml(p,parsed){
   const fx=parsed.filter(x=>x.dl), others=parsed.filter(x=>!x.dl);
-  const dias=[...new Set(fx.map(x=>x.dl.d))].sort((a,b)=>a-b);
-  const lens=[...new Set(fx.map(x=>x.dl.l))].sort((a,b)=>a-b);
+  const ax=specAxis(p.part), g=gridAxes(p);
+  const dias=g.bs, lens=g.ss;
   const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
-  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>칸을 누르면</b> 그 규격의 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용(일반·보험·페일)</b> · 실재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 실재고 오차 표시. <span class="muted">(가로 = 길이 mm, 세로 = 지름 Ø)</span></div>`;
-  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th>${l}</th>`).join('')}</tr>`;
-  dias.forEach(d=>{ t+=`<tr><td class="rowh">Ø${d}</td>`+lens.map(l=>{ const c=at(d,l);
+  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 실재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 실재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
+  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th>${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
+  dias.forEach(d=>{ t+=`<tr><td class="rowh">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
     if(!c) return `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
     const df=vDiff(c.v);
     const dot = df!=null&&df!==0?`<span style="position:absolute;top:3px;right:4px;width:8px;height:8px;border-radius:50%;background:${df<0?'var(--danger)':'var(--warn)'}"></span>`:'';
     return `<td><div class="cell ${vState(c.v)}" style="position:relative" onclick="openVariant('${p.id}','${c.v.id}')">${dot}${c.v.qty}<span class="u">개</span></div></td>`;
-  }).join('')+`</tr>`; });
+  }).join('')+`<td></td></tr>`; });
+  t+=`<tr><td class="rowh"><button type="button" class="chip" onclick="addAxis('${p.id}','b')" title="${ax.b} 더하기">＋</button></td><td colspan="${lens.length+1}" class="tiny muted" style="text-align:left;padding-left:8px">특수 사이즈는 ＋로 눈금을 더하세요</td></tr>`;
   t+=`</table></div><div class="legend2"><span><i class="ok"></i>충분</span><span><i class="low"></i>부족</span><span><i class="zero"></i>품절</span></div>`;
   if(others.length) t+=`<div class="tiny muted" style="margin:12px 2px 4px">기타 규격</div>`+variantRows(p,others.map(x=>x.v));
   return t;
@@ -1632,9 +1634,45 @@ const PARTS=['픽스처','어버트먼트','힐링캡','커버스크류','기타
 const SPEC_AXIS = {
   '픽스처':      {b:'두께', s:'길이',     bMin:2,   bMax:8,  sMin:4,   sMax:20},
   '힐링캡':      {b:'두께', s:'잇몸높이', bMin:2,   bMax:10, sMin:0.5, sMax:12},
-  '어버트먼트':  {b:'두께', s:'높이',     bMin:2,   bMax:10, sMin:0.5, sMax:20},
-  '커버스크류':  {b:'두께', s:'높이',     bMin:1,   bMax:10, sMin:0.5, sMax:12}
+  '어버트먼트':  {b:'두께', s:'높이',     bMin:2,   bMax:10, sMin:0.5, sMax:20}
 };
+// 커버스크류는 없다. 픽스처에 딸려 오고, 요즘은 커버 없이 힐링이 바로
+// 들어가는 경우도 많다(사용자 확인). 따로 셀 물건이 아니다.
+
+/* 표를 처음 펼칠 때 깔아 둘 눈금. 병원이 실제로 쓰는 것이 정답이므로
+   등록된 규격이 있으면 그쪽이 이긴다. 이건 빈 표를 여는 시작점일 뿐이다.
+   근거는 docs/IMPLANT_SPECS.md — 오스템 TS III 길이가 확인된 값이다. */
+const SPEC_SEED = {
+  '픽스처':     {bs:[3.5,4.0,4.5,5.0],     ss:[7,8.5,10,11.5,13]},
+  '힐링캡':     {bs:[4.0,4.5,5.0,5.5,6.0], ss:[2,3,4,5,6]},
+  '어버트먼트': {bs:[4.0,4.5,5.0,5.5,6.0], ss:[1,2,3,4,5]}
+};
+// 표의 눈금 — 병원이 쓰는 것 + 손으로 더한 것 + (아무것도 없으면) 시작점
+function gridAxes(p){
+  const useB=new Set(), useS=new Set();
+  (p.variants||[]).forEach(v=>{ const dl=parseDL(v.label); if(dl){ useB.add(dl.d); useS.add(dl.l); } });
+  (p.axisB||[]).forEach(n=>useB.add(+n));
+  (p.axisS||[]).forEach(n=>useS.add(+n));
+  // 시작점은 바닥이지 대체품이 아니다. 규격 하나를 넣었다고 표가 한 줄로
+  // 쪼그라들면 나머지를 눌러 넣을 자리가 없어진다 — 표를 쓰는 이유가 사라진다.
+  const seed=SPEC_SEED[p.part];
+  if(seed){ seed.bs.forEach(n=>useB.add(n)); seed.ss.forEach(n=>useS.add(n)); }
+  const num=(a,b)=>a-b;
+  return { bs:[...useB].sort(num), ss:[...useS].sort(num) };
+}
+// 눈금 하나를 더한다. 특수 사이즈는 여기로 들어와 표에 자리를 얻는다.
+function addAxis(pid, which){
+  const p=implantById(pid), ax=specAxis(p.part);
+  const 무엇 = which==='b'? ax.b : ax.s;
+  const raw=prompt(`표에 더할 ${무엇}(mm)`, '');
+  if(raw===null) return;
+  const n=parseFloat(String(raw).replace(/[^0-9.]/g,''));
+  if(!isFinite(n)||n<=0){ toast('숫자로 적어주세요'); return; }
+  const key = which==='b'? 'axisB' : 'axisS';
+  if(!Array.isArray(p[key])) p[key]=[];
+  if(!p[key].includes(n)) p[key].push(n);
+  saveDB(); renderImplant(); toast(`${무엇} ${specNum(n)} 을 표에 더했어요`);
+}
 function specAxis(part){ return SPEC_AXIS[part] || {b:'두께', s:'길이', bMin:0.5, bMax:30, sMin:0.5, sMax:30}; }
 
 // 붙여 친 숫자가 한 가지로만 읽히면 그 자리에서 두 칸으로 갈라 놓는다.

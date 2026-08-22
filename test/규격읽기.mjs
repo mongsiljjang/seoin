@@ -23,10 +23,13 @@ function grab(name){
 // 상수도 손으로 베끼지 않는다 — 베끼면 실물과 조용히 어긋난다
 const SPEC = js.match(/^const SPEC_AXIS = \{[\s\S]*?\n\};/m);
 if(!SPEC) throw new Error('index.html 에 const SPEC_AXIS 가 없다');
+const SEED = js.match(/^const SPEC_SEED = \{[\s\S]*?\n\};/m);
+if(!SEED) throw new Error('index.html 에 const SPEC_SEED 가 없다');
 
 const f = new Function(`${SPEC[0]}
-${['parseDL','specAxis','hasAxis','specNum','dlLabel','sameSpec','specGuess'].map(grab).join('\n')}
-return {parseDL,specAxis,hasAxis,specNum,dlLabel,sameSpec,specGuess};`)();
+${SEED[0]}
+${['parseDL','specAxis','hasAxis','specNum','dlLabel','sameSpec','specGuess','gridAxes'].map(grab).join('\n')}
+return {parseDL,specAxis,hasAxis,specNum,dlLabel,sameSpec,specGuess,gridAxes,SPEC_SEED};`)();
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want); y?pass++:fail++;
@@ -116,6 +119,44 @@ console.log('\n── 기존 이름을 깨지 않는다 ──');
 ok('Ø4.5 GH3 은 두 축이 아니다', f.parseDL('Ø4.5 GH3'), null);
 ok('Ø3.5×8.5 는 그대로 읽힌다',  f.parseDL('Ø3.5×8.5'), {d:3.5,l:8.5});
 ok('4.0×12 도 그대로 읽힌다',    f.parseDL('4.0×12'),   {d:4,l:12});
+
+console.log('\n── 표(인박스)가 입력 수단이다 ──');
+{
+  const 빈것 = {part:'픽스처', variants:[]};
+  const g = f.gridAxes(빈것);
+  ok('규격이 없어도 눈금이 깔린다', [g.bs.length>0, g.ss.length>0], [true,true]);
+  ok('픽스처 길이 시작점',          g.ss, f.SPEC_SEED['픽스처'].ss);
+}
+{
+  // 규격 하나를 넣었다고 표가 한 줄로 쪼그라들면 나머지를 눌러 넣을 수 없다.
+  // 브라우저에서 잡은 결함이다 — 시작점은 바닥이지 대체품이 아니다.
+  const 하나 = {part:'픽스처', variants:[{label:'4×10'}]};
+  const g = f.gridAxes(하나);
+  ok('규격을 넣어도 눈금이 안 줄어든다', g.ss.length >= f.SPEC_SEED['픽스처'].ss.length, true);
+  ok('넣은 길이도 눈금에 있다',          g.ss.includes(10), true);
+  ok('넣은 두께도 눈금에 있다',          g.bs.includes(4),  true);
+}
+{
+  // 특수 사이즈는 눈금을 더해 표 안으로 들인다
+  const 특수 = {part:'픽스처', variants:[], axisB:[3.8], axisS:[15]};
+  const g = f.gridAxes(특수);
+  ok('더한 두께가 눈금에 들어간다', g.bs.includes(3.8), true);
+  ok('더한 길이도 들어간다',        g.ss.includes(15),  true);
+  ok('눈금은 작은 수부터 늘어선다', g.bs, [...g.bs].sort((a,b)=>a-b));
+}
+{
+  const 힐링 = {part:'힐링캡', variants:[]};
+  const g = f.gridAxes(힐링);
+  ok('힐링도 표를 쓴다',        g.bs.length>0, true);
+  ok('힐링 둘째 축은 잇몸높이', f.specAxis('힐링캡').s, '잇몸높이');
+}
+{
+  // 커버스크류는 픽스처에 딸려 온다 — 따로 셀 물건이 아니다
+  ok('커버스크류는 두 축이 아니다', f.hasAxis('커버스크류'), false);
+  ok('골이식재도 아니다',           f.hasAxis('골이식'),     false);
+  const g = f.gridAxes({part:'골이식', variants:[]});
+  ok('두 축이 아니면 눈금도 없다', [g.bs.length, g.ss.length], [0,0]);
+}
 
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
 process.exit(fail?1:0);
