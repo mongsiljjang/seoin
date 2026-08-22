@@ -1548,9 +1548,9 @@ function implantCard(p){
     <div class="tiny muted" style="margin-top:8px">최근 30일 사용 <b>${ru.total}개</b> (일반 ${ru.normal}·보험 ${ru.insurance}·페일 ${ru.fail})</div>
   </div>` : '';
   const parsed=p.variants.map(v=>({v,dl:parseDL(v.label)}));
-  const useMatrix=(p.part==='픽스처') && parsed.some(x=>x.dl);
+  const useMatrix=hasAxis(p.part) && parsed.some(x=>x.dl);
   const body = p.variants.length ? (useMatrix?matrixHtml(p,parsed):variantRows(p,p.variants)) : emptyBox('📐','규격을 추가하세요');
-  const bulk = p.part==='픽스처' ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
+  const bulk = hasAxis(p.part) ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
   const stk = p.variants.length ? `<button class="btn soft sm grow" onclick="openStocktake('${p.id}')">📋 재고 실사</button>` : '';
   // 바꿀 페일이 생겼을 때만 문을 낸다 — 늘 떠 있으면 눈에 안 들어온다
   const fx = (pFailOpen(p)||pFailWait(p)) ? `<button class="btn soft sm grow" onclick="openFailExchange()">🔄 페일 교환${pFailOpen(p)?` <b>${pFailOpen(p)}</b>`:''}</button>` : '';
@@ -1614,6 +1614,83 @@ function variantRows(p,vars){
   }).join('');
 }
 const PARTS=['픽스처','어버트먼트','힐링캡','커버스크류','기타'];
+
+/* ---- 규격 두 축 ---------------------------------------------------------
+   × 를 손으로 치는 게 일이라 칸을 둘로 나눴다. 화면의 × 는 인쇄된 글자이고
+   손으로 넣는 것은 숫자뿐이다.
+
+   일반 치과는 픽스처를 두께와 길이로만 고른다(사용자 확인). 잇몸높이는
+   힐링 쪽 축이다.
+
+   범위는 막으려고 두는 것이 아니다. 붙여 쓴 숫자를 읽을 때 불가능한 해석을
+   지우는 데 쓴다 — 임플란트에 두께 30mm 는 없으니 '3010' 은 3.0×10 하나만
+   남는다. 짐작이 아니라 나머지가 물리적으로 불가능해서 남은 것이다.
+   후보가 둘 이상이면 고르게 하고, 범위를 벗어나도 막지 않는다.
+   모르는 기준으로 막으면 양치기가 된다 — 보험 안내와 같은 원칙이다.
+
+   조사 근거는 docs/IMPLANT_SPECS.md 에 적었다. 값은 넉넉하게 잡았다. */
+const SPEC_AXIS = {
+  '픽스처':      {b:'두께', s:'길이',     bMin:2,   bMax:8,  sMin:4,   sMax:20},
+  '힐링캡':      {b:'두께', s:'잇몸높이', bMin:2,   bMax:10, sMin:0.5, sMax:12},
+  '어버트먼트':  {b:'두께', s:'높이',     bMin:2,   bMax:10, sMin:0.5, sMax:20},
+  '커버스크류':  {b:'두께', s:'높이',     bMin:1,   bMax:10, sMin:0.5, sMax:12}
+};
+function specAxis(part){ return SPEC_AXIS[part] || {b:'두께', s:'길이', bMin:0.5, bMax:30, sMin:0.5, sMax:30}; }
+
+// 붙여 친 숫자가 한 가지로만 읽히면 그 자리에서 두 칸으로 갈라 놓는다.
+// 확인 창을 띄우지 않는 이유 — × 치는 마찰을 없애려고 만든 기능에 마찰을
+// 새로 붙일 수 없다. 대신 갈라진 결과가 칸에 그대로 보이므로 조용하지 않다.
+function specSplit(part){
+  const B=$('#vB'), S=$('#vS'); if(!B||!S) return;
+  const raw=B.value.trim(); if(!raw) return;
+  const ax=specAxis(part), n=parseFloat(raw);
+  // 첫 칸에 적힌 것이 두께로 말이 되면 손대지 않는다. 3.5 를 치는 중일 뿐이다.
+  if(isFinite(n) && String(n)===raw && n>=ax.bMin && n<=ax.bMax) return;
+  const g=specGuess(raw, part);
+  if(g.length!==1) return;                        // 여럿이거나 못 읽으면 손대지 않는다
+  // 둘째 칸에 값이 남아 있어도 덮는다. '3010' 은 두께가 될 수 없으므로
+  // 그대로 두면 3010×12 같은 이름이 조용히 만들어진다 — 실제로 그랬다.
+  B.value=specNum(g[0].b); S.value=specNum(g[0].s);
+}
+function hasAxis(part){ return !!SPEC_AXIS[part]; }
+
+// 숫자를 사람이 적던 대로 되돌린다. 4 → '4', 4.50 → '4.5'
+function specNum(n){ return String(parseFloat(n)); }
+// 규격 이름은 언제나 같은 모양으로 만든다 — 모양이 갈리면 재고가 갈린다
+function dlLabel(b, s){
+  const B=specNum(b); if(!isFinite(parseFloat(B))) return '';
+  if(s===''||s==null) return B;
+  const S=specNum(s); return isFinite(parseFloat(S)) ? `${B}×${S}` : B;
+}
+// 두 규격이 같은 것인가 — '4×12' 와 '4.0×12' 는 같다. 글자로 비교하면 갈린다.
+function sameSpec(a, b){
+  const x=parseDL(a), y=parseDL(b);
+  if(x&&y) return x.d===y.d && x.l===y.l;
+  return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+}
+// 붙여 쓴 숫자에서 가능한 읽기를 모두 낸다. 고르는 것은 사람이 한다.
+function specGuess(text, part){
+  const t=String(text||'').trim(); if(!t) return [];
+  const ax=specAxis(part);
+  const 맞나=(b,s)=> b>=ax.bMin&&b<=ax.bMax && s>=ax.sMin&&s<=ax.sMax;
+  // 구분자가 있으면 읽을 것도 없다
+  const m=t.match(/^\s*(?:Ø|ø|D)?\s*(\d+(?:\.\d+)?)\s*(?:[x×X*,\-\s/]+)\s*(\d+(?:\.\d+)?)\s*(?:mm)?\s*$/);
+  if(m) return [{b:+m[1], s:+m[2], sure:true}];
+  const d=t.replace(/[^0-9]/g,''); if(d.length<2) return [];
+  const out=[], seen=new Set();
+  for(let i=1;i<d.length;i++){
+    const L=d.slice(0,i), R=d.slice(i);
+    // 앞은 두께다. 2자리면 소수점을 넣어 본다(30 → 3.0), 그대로도 본다.
+    const bs = L.length===2 ? [+L, +(L[0]+'.'+L[1])] : [+L];
+    const ss = R.length===2 ? [+R, +(R[0]+'.'+R[1])] : [+R];
+    bs.forEach(b=>ss.forEach(s=>{
+      if(!맞나(b,s)) return;
+      const k=specNum(b)+'|'+specNum(s); if(seen.has(k)) return;
+      seen.add(k); out.push({b,s,sure:false});
+    }));
+  }
+  return out;
+}
 function openImplantForm(edit){
   const p=edit?implantById(edit):null;
   modal(`<h3>${p?'임플란트 제품 수정':'임플란트 제품 추가'}</h3>
@@ -1646,10 +1723,33 @@ function delImplant(id){
   DB.implants=DB.implants.filter(p=>p.id!==id); currentImplantId=null;
   saveDB(); closeModal(); renderImplant(); toast('삭제되었습니다');
 }
+// 자주 쓰는 두께는 이미 등록된 것에서 뽑는다. 4.0·3.5 를 매번 치지 않게.
+function usedDias(p){
+  const set=new Set();
+  (p.variants||[]).forEach(v=>{ const dl=parseDL(v.label); if(dl) set.add(dl.d); });
+  return [...set].sort((a,b)=>a-b);
+}
 function openVariantForm(pid, editVid, preset){
   const p=implantById(pid); const v=editVid?p.variants.find(x=>x.id===editVid):null;
+  const ax=specAxis(p.part), two=hasAxis(p.part);
+  const cur = v? parseDL(v.label) : (preset? parseDL(preset) : null);
+  const dias = usedDias(p);
+  // × 는 화면에 인쇄된 글자다. 손으로 넣는 것은 숫자뿐이다.
+  const specField = two
+    ? `<div class="field"><span>규격 * <span class="tiny muted">숫자만 넣으면 돼요</span></span>
+        <div class="row" style="gap:6px;align-items:center">
+          <input id="vB" inputmode="decimal" placeholder="${ax.b}" value="${cur?specNum(cur.d):''}"
+            oninput="specSplit('${p.part}')" style="flex:1;text-align:center;font-size:18px;font-weight:800">
+          <b class="muted" style="font-size:18px">×</b>
+          <input id="vS" inputmode="decimal" placeholder="${ax.s}" value="${cur?specNum(cur.l):''}" style="flex:1;text-align:center;font-size:18px;font-weight:800">
+        </div>
+        <div class="tiny muted" style="margin-top:5px">왼쪽이 ${ax.b}, 오른쪽이 ${ax.s} 예요. <b>3010</b> 처럼 붙여 쳐도 알아서 갈라집니다.</div>
+        ${dias.length?`<div class="chips" style="margin-top:7px">${dias.map(d=>`<button type="button" class="chip" onclick="$('#vB').value='${specNum(d)}';$('#vS').focus()">${specNum(d)}</button>`).join('')}</div>`:''}
+       </div>
+       <input id="vLabel" type="hidden" value="${v?esc(v.label):(preset||'')}">`
+    : `<label class="field"><span>규격 *</span><input id="vLabel" value="${v?esc(v.label):(preset||'')}" placeholder="예: Ø4.5 GH3"></label>`;
   modal(`<h3>${v?'규격 수정':'규격 추가'} · ${esc(p.brand)} ${esc(p.line||'')}</h3>
-    <label class="field"><span>규격 *</span><input id="vLabel" value="${v?esc(v.label):(preset||'')}" placeholder="${p.part==='픽스처'?'예: 4.0×10':'예: Ø4.5 GH3'}"></label>
+    ${specField}
     <div class="two">
       <label class="field"><span>현재 수량</span><input id="vQty" type="number" inputmode="numeric" value="${v?v.qty:0}"></label>
       <label class="field"><span>최소 수량</span><input id="vMin" type="number" inputmode="numeric" value="${v?(v.minQty||0):2}"></label>
@@ -1659,13 +1759,29 @@ function openVariantForm(pid, editVid, preset){
       ${v?`<button class="btn danger" onclick="delVariant('${pid}','${v.id}')">삭제</button>`:''}</div>`);
 }
 function saveVariant(pid,vid){
-  const p=implantById(pid); const label=$('#vLabel').value.trim(); if(!label){ toast('규격을 입력하세요'); return; }
+  const p=implantById(pid);
+  let label;
+  if(hasAxis(p.part) && $('#vB')){
+    const b=$('#vB').value.trim(), sv=$('#vS').value.trim();
+    // 한 칸에 붙여 썼으면 읽어 본다. 물리적으로 가능한 읽기가 하나뿐일 때만 넣는다.
+    if(b && !sv){
+      const g=specGuess(b, p.part);
+      if(g.length===1){ label=dlLabel(g[0].b,g[0].s); }
+      else if(g.length>1){ toast(`${g.map(x=>dlLabel(x.b,x.s)).join(' 인가요, ')} 인가요? 두 칸에 나눠 적어주세요`); return; }
+      else { toast(`${specAxis(p.part).s}도 적어주세요`); return; }
+    } else label=dlLabel(b, sv);
+    if(!label){ toast('규격을 숫자로 적어주세요'); return; }
+  } else {
+    label=$('#vLabel').value.trim();
+  }
+  if(!label){ toast('규격을 입력하세요'); return; }
   const qty=Math.max(0,parseInt($('#vQty').value,10)||0);
   const data={ label, qty, minQty:Math.max(0,parseInt($('#vMin').value,10)||0), lot:$('#vLot').value.trim() };
   if(vid){ const v=p.variants.find(x=>x.id===vid);
     if(qty!==v.qty) implantLog(pid,vid,'adjust',null,qty-v.qty,v.qty,qty,'규격 수정');
     Object.assign(v, data); }
-  else { if(p.variants.find(x=>x.label===label)){ toast('이미 있는 규격이에요'); return; }
+  else { const dup=p.variants.find(x=>sameSpec(x.label,label));
+    if(dup){ toast(`이미 ${dup.label} 로 있어요`); return; }
     const nv={id:uid(), ...data, inTot:qty, uNor:0, uIns:0, uFail:0, phys:null, physAt:null};
     p.variants.push(nv); if(qty>0) implantLog(pid,nv.id,'in',null,qty,0,qty,'초기 등록'); }
   saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
@@ -1748,10 +1864,11 @@ function doVariantAdjust(pid,vid,type){
   if(type==='out' && v.qty<=(+v.minQty||0)) setTimeout(()=>toast(`⚠️ ${v.label} ${v.qty===0?'품절':'재고 부족'} (${v.qty}개)`),1300);
 }
 function openBulkVariants(pid){
+  const ax=specAxis(implantById(pid).part);
   modal(`<h3>규격 일괄 추가</h3>
-    <div class="tiny muted" style="margin-bottom:12px">지름과 길이를 쉼표로 나눠 입력하면 조합이 한 번에 만들어져요. (이미 있는 규격은 건너뜀)</div>
-    <label class="field"><span>지름(mm)</span><input id="blD" placeholder="3.5, 4.0, 4.5, 5.0"></label>
-    <label class="field"><span>길이(mm)</span><input id="blL" placeholder="7, 8.5, 10, 11.5, 13"></label>
+    <div class="tiny muted" style="margin-bottom:12px">${ax.b}와 ${ax.s}를 쉼표로 나눠 적으면 조합이 한 번에 만들어져요. ×는 안 쳐도 돼요. (이미 있는 규격은 건너뜀)</div>
+    <label class="field"><span>${ax.b}(mm)</span><input id="blD" inputmode="decimal" placeholder="3.5, 4.0, 4.5, 5.0"></label>
+    <label class="field"><span>${ax.s}(mm)</span><input id="blL" inputmode="decimal" placeholder="7, 8.5, 10, 11.5, 13"></label>
     <label class="field"><span>규격별 최소수량</span><input id="blMin" type="number" inputmode="numeric" value="2"></label>
     <button class="btn block" onclick="doBulkVariants('${pid}')">추가</button>`);
 }
@@ -1762,7 +1879,9 @@ function doBulkVariants(pid){
   const min=Math.max(0,parseInt($('#blMin').value,10)||0);
   if(!ds.length||!ls.length){ toast('지름과 길이를 입력하세요'); return; }
   let added=0;
-  ds.forEach(d=>ls.forEach(l=>{ const label=`${d}×${l}`; if(!p.variants.find(v=>v.label===label)){ p.variants.push({id:uid(),label,qty:0,minQty:min,lot:''}); added++; } }));
+  ds.forEach(d=>ls.forEach(l=>{ const label=dlLabel(d,l);
+    if(label && !p.variants.find(v=>sameSpec(v.label,label))){
+      p.variants.push({id:uid(),label,qty:0,minQty:min,lot:'',inTot:0,uNor:0,uIns:0,uFail:0,phys:null,physAt:null}); added++; } }));
   saveDB(); closeModal(); renderImplant(); toast(`${added}개 규격을 추가했어요`);
 }
 
