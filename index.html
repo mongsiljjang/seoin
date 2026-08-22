@@ -1427,29 +1427,34 @@ function exReq(v){ return +v.exReq||0; }                              // 신청 
 function exIn(v){ return +v.exIn||0; }                                // 받은 누적
 function failOpen(v){ return Math.max(0,(+v.uFail||0)-exReq(v)); }    // 아직 신청 안 한 페일
 function failWait(v){ return Math.max(0,exReq(v)-exIn(v)); }          // 신청했는데 안 온 것
-function vAdj(v){ return +v.adj||0; }                                  // 손으로 고친 누적(±)
-function vBook(v){ return (+v.inTot||0)+exIn(v)+vAdj(v)-vUse(v); }    // 장부가 말하는 현재고
+function vOpen(v){ return +v.opening||0; }                            // 0번 칸 — 이월재고
+function vAdj(v){ return +v.adj||0; }                                  // 실사 보정 누적(±) · 화면에 안 낸다
+function vBook(v){ return vOpen(v)+(+v.inTot||0)+exIn(v)+vAdj(v)-vUse(v); }
+function pOpen(p){ return (p.variants||[]).reduce((s,v)=>s+vOpen(v),0); }
 function pAdj(p){ return (p.variants||[]).reduce((s,v)=>s+vAdj(v),0); }
 
-/* ---- 보정 --------------------------------------------------------------
-   매입도 사용도 아닌데 재고가 움직인 몫이다. 실사 보정, 목록에서 수량을
-   손으로 고친 것, 규격 수정에서 개수를 바꾼 것이 여기로 들어온다.
+/* ---- 이월재고와 보정 ----------------------------------------------------
+   장부 식:  이월 + 매입 + 교환입고 + 보정 − 사용 = 현재고
 
-   따로 칸을 둔 이유 — 전에는 이런 것들이 아무 데도 안 남았다. 그래서
-   '누적 매입 50 · 사용 0' 인데 현재고가 65 가 되는 일이 생겼다. 15개가
-   어디서 왔는지 화면 어디에도 없었다. 매입에 얹으면 사지도 않은 것이
-   매입으로 잡혀 원가가 흐려지고, 그것도 결국 숨기는 것이다.
+   **이월재고(0번 칸)** 는 통화록 1-1장에서 실장이 번호까지 붙여 말한 칸이다
+   — 전월에서 넘어온 것, 양도양수, 패키지 잔량. 앱을 쓰기 전부터 선반에
+   있던 물건이 여기 들어간다. 지금까지 이 칸이 없어서 다섯 칸이 네 칸이었고,
+   갈 곳 없는 재고가 아무 데도 안 잡혀 '매입 50 · 사용 0 인데 현재고 65'
+   같은 일이 생겼다.
 
-   조용히 늘어난 재고를 잡아내는 것이 이 앱이 하는 일인데, 정작 앱이
-   그것을 저지르고 있었다.
+   **보정** 은 실사에서 맞춘 몫이다. 값은 남기되 **요약 화면에는 내지 않는다.**
+   재고 앱이 화면에 '손으로 몇 개 고쳤음'을 띄우면, 그건 병원에 도움이 되는
+   정보가 아니라 남에게 보여줄 때 불리해지는 문서가 된다. 필요한 사람은
+   기록(implantLogs)에서 본다.
 
-   장부 식:  매입 + 교환입고 + 보정 − 사용 = 현재고 */
+   매입에 얹지 않는 이유는 그대로다 — 사지도 않은 것이 매입으로 잡히면
+   원가가 흐려지고, 그것도 결국 숨기는 것이다. */
 function bumpAdj(v, delta){ if(delta) v.adj=vAdj(v)+delta; }
+function bumpOpen(v, delta){ if(delta) v.opening=vOpen(v)+delta; }
 
-/* 보정 칸이 없던 시절에 어긋난 몫을 한 번만 끌어온다.
-   지우는 것이 아니라 이름을 붙이는 것이다 — 15개가 어디서 왔는지는 이제
-   알 수 없지만, '설명 안 되는 15개가 있다'는 사실은 남겨야 한다.
-   기록에도 남겨서 나중에 왜 생겼는지 물을 수 있게 한다. */
+/* 0번 칸이 없던 시절에 갈 곳 없던 재고를 한 번만 이월로 옮긴다.
+   앱을 쓰기 전부터 선반에 있던 물건이라 이월재고가 맞는 자리다.
+   재고 숫자와 매입은 한 개도 안 움직인다. */
 function backfillAdj(){
   if(!DB || DB.adjBackfilledAt) return;             // 한 번만
   if(!Array.isArray(DB.implantLogs)) DB.implantLogs=[];   // 기록 자리가 없으면 만들고 간다.
@@ -1458,12 +1463,11 @@ function backfillAdj(){
   (DB.implants||[]).forEach(p=>(p.variants||[]).forEach(v=>{
     const gap=(+v.qty||0)-vBook(v);
     if(!gap) return;
-    bumpAdj(v, gap); touched++;
-    implantLog(p.id, v.id, 'adjust', null, gap, +v.qty||0, +v.qty||0,
-      '이전 기록 정리 — 매입·사용으로 설명 안 되던 몫');
+    bumpOpen(v, gap); touched++;
+    implantLog(p.id, v.id, 'open', null, gap, +v.qty||0, +v.qty||0, '이월재고 등록');
   }));
   DB.adjBackfilledAt = now();
-  if(touched) setTimeout(()=>toast(`장부를 정리했어요 · 설명 안 되던 ${touched}개 규격을 보정으로 옮겼어요`), 900);
+  if(touched) setTimeout(()=>toast(`${touched}개 규격의 이월재고를 잡았어요`), 900);
 }
 function pFailOpen(p){ return (p.variants||[]).reduce((s,v)=>s+failOpen(v),0); }
 function pFailWait(p){ return (p.variants||[]).reduce((s,v)=>s+failWait(v),0); }
@@ -1576,8 +1580,8 @@ function implantCard(p){
     <div class="two" style="gap:8px">
       <div><div class="tiny muted">누적 매입${pExIn(p)?' <span class="tiny" style="color:var(--ok)">+교환 '+pExIn(p)+'</span>':''}</div><div style="font-weight:900;font-size:17px">${pIn(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">누적 사용</div><div style="font-weight:900;font-size:17px">${pUse(p)}<span class="tiny muted"> 개</span></div></div>
-      ${pAdj(p)?`<div><div class="tiny muted">손으로 고침</div><div style="font-weight:900;font-size:17px;color:var(--warn)">${pAdj(p)>0?'+':''}${pAdj(p)}<span class="tiny muted"> 개</span></div></div>
-      <div><div class="tiny muted">&nbsp;</div><div class="tiny muted" style="line-height:1.5">매입도 사용도 아닌 몫이에요</div></div>`:''}
+      ${pOpen(p)?`<div><div class="tiny muted">이월재고</div><div style="font-weight:900;font-size:17px">${pOpen(p)}<span class="tiny muted"> 개</span></div></div>
+      <div><div class="tiny muted">&nbsp;</div><div class="tiny muted" style="line-height:1.5">전월 이월 · 양도양수</div></div>`:''}
       <div><div class="tiny muted">현재고(장부)</div><div style="font-weight:900;font-size:17px;color:var(--brand)">${pQty(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">실재고(실사)</div><div style="font-weight:900;font-size:17px">${counted?pPhys(p):'—'}<span class="tiny muted">${counted?' 개':''}</span></div></div>
     </div>
@@ -1878,7 +1882,7 @@ function openVariant(pid,vid){
         <div class="tiny muted">현재고(장부) · ${esc(p.part||'')} · 최소 ${v.minQty||0}${v.lot?' · LOT '+esc(v.lot):''}</div></div></div>
       <div class="divider" style="margin:10px 0"></div>
       <div class="two" style="gap:8px">
-        <div><div class="tiny muted">누적 매입(입고)</div><div style="font-weight:800">${+v.inTot||0}개${exIn(v)?` <span class="tiny" style="color:var(--ok)">+교환 ${exIn(v)}</span>`:''}${vAdj(v)?` <span class="tiny" style="color:var(--warn)">손으로 ${vAdj(v)>0?'+':''}${vAdj(v)}</span>`:''}</div></div>
+        <div><div class="tiny muted">누적 매입(입고)</div><div style="font-weight:800">${+v.inTot||0}개${exIn(v)?` <span class="tiny" style="color:var(--ok)">+교환 ${exIn(v)}</span>`:''}${vOpen(v)?` <span class="tiny muted">· 이월 ${vOpen(v)}</span>`:''}</div></div>
         <div><div class="tiny muted">누적 사용</div><div style="font-weight:800">${vUse(v)}개</div></div>
       </div>
       <div class="row wrap" style="gap:6px;margin-top:8px">
