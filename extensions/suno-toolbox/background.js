@@ -29,6 +29,7 @@ function flushPending() {
       type: "CONVERT_BATCH",
       tabId: job.tabId,
       tracks: job.tracks,
+      folder: job.folder,
     });
   }
 }
@@ -73,7 +74,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function startBatch(tracks, tabId) {
   if (!tracks.length) return { ok: false, reason: "empty" };
-  pending.push({ tracks, tabId });
+  // 저장 폴더는 서비스워커에서 읽어 오프스크린에 넘긴다 (offscreen 은 chrome.storage 접근 불가)
+  const { sunoFolder } = await chrome.storage.local.get({ sunoFolder: "Suno" });
+  pending.push({ tracks, tabId, folder: sunoFolder });
   const has = await chrome.offscreen.hasDocument?.();
   if (has) {
     flushPending();            // 이미 로드된 오프스크린 → 바로 전달

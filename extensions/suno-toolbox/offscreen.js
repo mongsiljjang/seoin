@@ -95,10 +95,9 @@ async function convertOne(track, tabId, index, total, folder) {
   });
 }
 
-async function runBatch(tracks, tabId) {
+async function runBatch(tracks, tabId, folderRaw) {
   const total = tracks.length;
-  const { sunoFolder } = await chrome.storage.local.get({ sunoFolder: "Suno" });
-  const folder = sanitizeFolder(sunoFolder);
+  const folder = sanitizeFolder(folderRaw);
   for (let i = 0; i < total; i++) {
     try {
       await convertOne(tracks[i], tabId, i, total, folder);
@@ -113,7 +112,7 @@ function send(m) { chrome.runtime.sendMessage(m).catch(() => {}); }
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.target !== "offscreen") return;
-  if (msg.type === "CONVERT_BATCH") runBatch(msg.tracks || [], msg.tabId);
+  if (msg.type === "CONVERT_BATCH") runBatch(msg.tracks || [], msg.tabId, msg.folder);
   else if (msg.type === "REVOKE" && msg.blobUrl) URL.revokeObjectURL(msg.blobUrl);
 });
 
