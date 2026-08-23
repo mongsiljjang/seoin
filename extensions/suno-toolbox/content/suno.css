@@ -34,6 +34,12 @@
   padding: 9px 14px; border-bottom: 1px solid #eee; color: #555;
 }
 #stb-panel .stb-toolbar label { display: flex; align-items: center; gap: 6px; cursor: pointer; color: #1a1a22; }
+#stb-panel .stb-selbtns { display: flex; gap: 6px; }
+#stb-panel .stb-selbtns button {
+  border: 1px solid #d9d5f2; background: #f3f1fd; color: #4a35c0;
+  border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+#stb-panel .stb-selbtns button:hover { background: #e9e5fb; }
 #stb-panel .stb-list { overflow-y: auto; flex: 1; min-height: 60px; }
 #stb-panel .stb-row {
   display: flex; align-items: center; gap: 9px;
@@ -57,6 +63,8 @@
   #stb-panel { background: #1e1e26; color: #ececf2; }
   #stb-panel .stb-toolbar { border-color: #33333f; color: #b9b9c6; }
   #stb-panel .stb-toolbar label { color: #ececf2; }
+  #stb-panel .stb-selbtns button { background: #2c2740; border-color: #3d3560; color: #c9bdff; }
+  #stb-panel .stb-selbtns button:hover { background: #363050; }
   #stb-panel .stb-row { border-color: #2a2a34; }
   #stb-panel .stb-row:hover { background: #26232f; }
   #stb-panel .stb-foot { border-color: #33333f; }

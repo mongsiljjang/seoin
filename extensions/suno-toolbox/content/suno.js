@@ -73,6 +73,8 @@
 
   // ---------- UI ----------
   let panel, listEl, statusEl, barEl, countBadge, tracks = [];
+  const selected = new Set();   // 선택한 곡 id (다시 스캔해도 유지)
+  let initialized = false;      // 처음 열 때 한 번만 전체 선택
 
   function launcher() {
     const b = document.createElement("button");
@@ -102,7 +104,10 @@
         </div>
       </div>
       <div class="stb-toolbar">
-        <label><input type="checkbox" id="stb-all" /> 전체 선택</label>
+        <div class="stb-selbtns">
+          <button id="stb-all" type="button">전체 선택</button>
+          <button id="stb-clear" type="button">전체 해제</button>
+        </div>
         <span id="stb-sel">0곡 선택</span>
       </div>
       <div id="stb-list" class="stb-list"></div>
@@ -119,14 +124,20 @@
     panel.querySelector("#stb-close").addEventListener("click", () => (panel.style.display = "none"));
     panel.querySelector("#stb-rescan").addEventListener("click", renderList);
     panel.querySelector("#stb-go").addEventListener("click", startDownload);
-    panel.querySelector("#stb-all").addEventListener("change", (e) => {
-      listEl.querySelectorAll('input[type="checkbox"]').forEach((c) => (c.checked = e.target.checked));
-      updateSel();
+    panel.querySelector("#stb-all").addEventListener("click", () => {
+      tracks.forEach((t) => selected.add(t.id));   // 지금 목록 전부 선택
+      syncChecks();
+    });
+    panel.querySelector("#stb-clear").addEventListener("click", () => {
+      selected.clear();                            // 전체 해제
+      syncChecks();
     });
   }
 
   function renderList() {
     tracks = collectTracks();
+    // 처음 열 땐 편하게 전체 선택, 그 뒤 다시 스캔은 기존 선택 유지
+    if (!initialized) { tracks.forEach((t) => selected.add(t.id)); initialized = true; }
     listEl.innerHTML = "";
     if (!tracks.length) {
       listEl.innerHTML =
@@ -134,24 +145,34 @@
       updateSel();
       return;
     }
-    tracks.forEach((t, i) => {
+    tracks.forEach((t) => {
       const row = document.createElement("label");
       row.className = "stb-row";
-      row.innerHTML =
-        `<input type="checkbox" data-i="${i}" checked />` +
-        `<span class="stb-title"></span>`;
+      row.innerHTML = `<input type="checkbox" /><span class="stb-title"></span>`;
+      const cb = row.querySelector("input");
+      cb.checked = selected.has(t.id);
+      cb.addEventListener("change", () => {
+        if (cb.checked) selected.add(t.id); else selected.delete(t.id);
+        updateSel();
+      });
       row.querySelector(".stb-title").textContent = t.title;
-      row.querySelector("input").addEventListener("change", updateSel);
       listEl.appendChild(row);
     });
     updateSel();
   }
 
-  function selectedIdx() {
-    return [...listEl.querySelectorAll('input[type="checkbox"]:checked')].map((c) => +c.dataset.i);
+  // selected Set 을 화면 체크박스에 반영
+  function syncChecks() {
+    const cbs = listEl.querySelectorAll('input[type="checkbox"]');
+    cbs.forEach((cb, i) => { if (tracks[i]) cb.checked = selected.has(tracks[i].id); });
+    updateSel();
+  }
+
+  function chosenTracks() {
+    return tracks.filter((t) => selected.has(t.id));
   }
   function updateSel() {
-    const n = selectedIdx().length;
+    const n = chosenTracks().length;
     panel.querySelector("#stb-sel").textContent = n + "곡 선택";
     panel.querySelector("#stb-go").disabled = n === 0;
   }
@@ -168,8 +189,7 @@
   let doneCount = 0, totalCount = 0, errCount = 0;
 
   function startDownload() {
-    const idx = selectedIdx();
-    const chosen = idx.map((i) => tracks[i]);
+    const chosen = chosenTracks();
     if (!chosen.length) return;
     doneCount = 0; errCount = 0; totalCount = chosen.length;
     setBar(0);
