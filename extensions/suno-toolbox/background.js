@@ -6,10 +6,9 @@ const OFFSCREEN = "offscreen.html";
 let creating = null;               // 오프스크린 생성 중복 방지
 const downloadToBlob = new Map();  // downloadId -> blobUrl (완료 후 해제)
 let activeJobs = 0;
+let pending = [];                  // 오프스크린이 준비되기 전 대기 중인 작업
 
 async function ensureOffscreen() {
-  const has = await chrome.offscreen.hasDocument?.();
-  if (has) return;
   if (creating) { await creating; return; }
   creating = chrome.offscreen.createDocument({
     url: OFFSCREEN,
@@ -17,6 +16,21 @@ async function ensureOffscreen() {
     justification: "오디오 파일을 디코딩하여 WAV로 변환합니다.",
   });
   try { await creating; } finally { creating = null; }
+}
+
+// 대기 중인 작업들을 오프스크린으로 전달
+function flushPending() {
+  const jobs = pending;
+  pending = [];
+  for (const job of jobs) {
+    activeJobs++;
+    chrome.runtime.sendMessage({
+      target: "offscreen",
+      type: "CONVERT_BATCH",
+      tabId: job.tabId,
+      tracks: job.tracks,
+    });
+  }
 }
 
 async function closeOffscreenIfIdle() {
@@ -38,6 +52,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // 오프스크린 문서가 로드되어 준비됨 → 대기 작업 전달
+  if (msg.type === "OFFSCREEN_READY") {
+    flushPending();
+    return;
+  }
+
   // 오프스크린 → 곡 1개 변환 완료 (WAV blob URL 준비됨)
   if (msg.type === "TRACK_READY") {
     handleTrackReady(msg);
@@ -53,14 +73,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function startBatch(tracks, tabId) {
   if (!tracks.length) return { ok: false, reason: "empty" };
-  await ensureOffscreen();
-  activeJobs++;
-  chrome.runtime.sendMessage({
-    target: "offscreen",
-    type: "CONVERT_BATCH",
-    tabId,
-    tracks,
-  });
+  pending.push({ tracks, tabId });
+  const has = await chrome.offscreen.hasDocument?.();
+  if (has) {
+    flushPending();            // 이미 로드된 오프스크린 → 바로 전달
+  } else {
+    await ensureOffscreen();   // 새로 생성 → OFFSCREEN_READY 때 flush
+  }
   return { ok: true, count: tracks.length };
 }
 

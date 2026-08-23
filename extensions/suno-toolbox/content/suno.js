@@ -43,7 +43,7 @@
       const m = src.match(UUID);
       if (!m) return;
       const id = m[0].toLowerCase();
-      const title = (img.getAttribute("alt") || "").trim();
+      const title = (img.getAttribute("alt") || "").replace(/\s*artwork\s*$/i, "").trim();
       const cur = map.get(id) || { id, title: "", url: null };
       if (title && (!cur.title || title.length > cur.title.length)) cur.title = title;
       map.set(id, cur);

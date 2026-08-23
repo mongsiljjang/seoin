@@ -69,9 +69,16 @@ function sanitizeFolder(folder) {
 
 async function convertOne(track, tabId, index, total, folder) {
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title });
-  const res = await fetch(track.url, { credentials: "omit" });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  const arr = await res.arrayBuffer();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 90000); // 90초 시간제한
+  let arr;
+  try {
+    const res = await fetch(track.url, { credentials: "omit", signal: ctrl.signal });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    arr = await res.arrayBuffer();
+  } finally {
+    clearTimeout(timer);
+  }
 
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "convert", title: track.title });
   const audioBuffer = await ctx().decodeAudioData(arr.slice(0));
@@ -109,3 +116,6 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "CONVERT_BATCH") runBatch(msg.tracks || [], msg.tabId);
   else if (msg.type === "REVOKE" && msg.blobUrl) URL.revokeObjectURL(msg.blobUrl);
 });
+
+// 로드 완료 → 백그라운드에 준비됐다고 알림 (대기 작업 받기)
+chrome.runtime.sendMessage({ type: "OFFSCREEN_READY" }).catch(() => {});
