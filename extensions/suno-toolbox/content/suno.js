@@ -72,9 +72,41 @@
   }
 
   // ---------- UI ----------
-  let panel, listEl, statusEl, barEl, countBadge, tracks = [];
-  const selected = new Set();   // 선택한 곡 id (다시 스캔해도 유지)
-  let initialized = false;      // 처음 열 때 한 번만 전체 선택
+  let panel, listEl, statusEl, barEl, countBadge;
+  const allTracks = new Map();  // id -> {id,title,url}  (스크롤하며 누적)
+  let tracks = [];              // 렌더용 배열 (allTracks 값)
+  const selected = new Set();   // 선택한 곡 id
+  let selectAllMode = false;    // 전체 선택 상태면 새로 뜬 곡도 자동 선택
+  let opened = false;           // 패널을 한 번이라도 열었나
+  let lastUrl = location.href;
+
+  // 현재 화면에서 찾은 곡을 누적 목록에 병합. 새로 추가된 개수 반환.
+  function mergeScan() {
+    const found = collectTracks();
+    let added = 0;
+    for (const t of found) {
+      const cur = allTracks.get(t.id);
+      if (!cur) {
+        allTracks.set(t.id, t);
+        added++;
+        if (selectAllMode) selected.add(t.id); // 전체선택 중이면 새 곡도 포함
+      } else {
+        if (t.url && !cur.url) cur.url = t.url;
+        if (t.title && (!cur.title || t.title.length > cur.title.length)) cur.title = t.title;
+      }
+    }
+    tracks = [...allTracks.values()];
+    return added;
+  }
+
+  // 다른 플레이리스트로 이동하면 누적 목록 초기화
+  function resetIfNavigated() {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      allTracks.clear(); selected.clear(); tracks = [];
+      selectAllMode = false; opened = false;
+    }
+  }
 
   function launcher() {
     const b = document.createElement("button");
@@ -88,8 +120,8 @@
   }
 
   function refreshCount() {
-    const n = collectTracks().length;
-    if (countBadge) countBadge.textContent = n ? n : "";
+    mergeScan();
+    if (countBadge) countBadge.textContent = allTracks.size ? allTracks.size : "";
   }
 
   function buildPanel() {
@@ -113,7 +145,7 @@
       <div id="stb-list" class="stb-list"></div>
       <div class="stb-foot">
         <div id="stb-bar" class="stb-bar"><i></i></div>
-        <div id="stb-status" class="stb-status">내가 만든 곡을 골라 한 번에 WAV로 저장합니다.</div>
+        <div id="stb-status" class="stb-status">Suno 목록을 아래로 스크롤하면 곡이 쌓여요. 다 나오면 저장하세요.</div>
         <button id="stb-go" class="stb-go">선택 곡 WAV로 저장</button>
         <button id="stb-stop" class="stb-stop" hidden>■ 중단</button>
       </div>`;
@@ -127,23 +159,32 @@
     panel.querySelector("#stb-go").addEventListener("click", startDownload);
     panel.querySelector("#stb-stop").addEventListener("click", stopDownload);
     panel.querySelector("#stb-all").addEventListener("click", () => {
-      tracks.forEach((t) => selected.add(t.id));   // 지금 목록 전부 선택
+      selectAllMode = true;
+      tracks.forEach((t) => selected.add(t.id));   // 지금까지 찾은 곡 전부 선택
       syncChecks();
     });
     panel.querySelector("#stb-clear").addEventListener("click", () => {
+      selectAllMode = false;
       selected.clear();                            // 전체 해제
       syncChecks();
     });
   }
 
+  // 목록 갱신(누적 스캔 + 렌더)
   function renderList() {
-    tracks = collectTracks();
-    // 처음 열 땐 편하게 전체 선택, 그 뒤 다시 스캔은 기존 선택 유지
-    if (!initialized) { tracks.forEach((t) => selected.add(t.id)); initialized = true; }
+    resetIfNavigated();
+    mergeScan();
+    if (!opened) { opened = true; selectAllMode = true; tracks.forEach((t) => selected.add(t.id)); }
+    renderRows();
+  }
+
+  // tracks 배열을 화면에 그림
+  function renderRows() {
+    if (!listEl) return;
     listEl.innerHTML = "";
     if (!tracks.length) {
       listEl.innerHTML =
-        '<div class="stb-empty">곡을 찾지 못했어요.<br>내 라이브러리/플레이리스트 페이지에서 곡이 화면에 보이도록 스크롤한 뒤 ↻ 를 눌러주세요.</div>';
+        '<div class="stb-empty">곡을 찾지 못했어요.<br>내 라이브러리/플레이리스트에서 곡이 보이도록 <b>천천히 스크롤</b>해 주세요. 스크롤할수록 곡이 쌓여요.</div>';
       updateSel();
       return;
     }
@@ -154,7 +195,8 @@
       const cb = row.querySelector("input");
       cb.checked = selected.has(t.id);
       cb.addEventListener("change", () => {
-        if (cb.checked) selected.add(t.id); else selected.delete(t.id);
+        if (cb.checked) selected.add(t.id);
+        else { selected.delete(t.id); selectAllMode = false; }
         updateSel();
       });
       row.querySelector(".stb-title").textContent = t.title;
@@ -175,7 +217,7 @@
   }
   function updateSel() {
     const n = chosenTracks().length;
-    panel.querySelector("#stb-sel").textContent = n + "곡 선택";
+    panel.querySelector("#stb-sel").textContent = `${n} / ${tracks.length}곡 선택`;
     panel.querySelector("#stb-go").disabled = n === 0;
   }
 
@@ -257,8 +299,17 @@
   // 초기화 (SPA 대응: 잠시 후 실행)
   const boot = () => { if (!document.getElementById("stb-launch")) launcher(); };
   setTimeout(boot, 1200);
-  // 페이지 이동/DOM 변화 시 카운트 갱신
+
+  // 스크롤/DOM 변화 시 곡을 누적하고, 패널이 열려 있으면 목록을 갱신
+  function onDomChange() {
+    const before = allTracks.size;
+    resetIfNavigated();
+    mergeScan();
+    if (countBadge) countBadge.textContent = allTracks.size ? allTracks.size : "";
+    const panelOpen = panel && panel.style.display !== "none" && panel.style.display !== "";
+    if (panelOpen && allTracks.size !== before) renderRows();
+  }
   let t;
-  new MutationObserver(() => { clearTimeout(t); t = setTimeout(refreshCount, 800); })
+  new MutationObserver(() => { clearTimeout(t); t = setTimeout(onDomChange, 500); })
     .observe(document.body, { childList: true, subtree: true });
 })();
