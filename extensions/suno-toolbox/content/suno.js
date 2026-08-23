@@ -115,6 +115,7 @@
         <div id="stb-bar" class="stb-bar"><i></i></div>
         <div id="stb-status" class="stb-status">내가 만든 곡을 골라 한 번에 WAV로 저장합니다.</div>
         <button id="stb-go" class="stb-go">선택 곡 WAV로 저장</button>
+        <button id="stb-stop" class="stb-stop" hidden>■ 중단</button>
       </div>`;
     document.body.appendChild(panel);
     listEl = panel.querySelector("#stb-list");
@@ -124,6 +125,7 @@
     panel.querySelector("#stb-close").addEventListener("click", () => (panel.style.display = "none"));
     panel.querySelector("#stb-rescan").addEventListener("click", renderList);
     panel.querySelector("#stb-go").addEventListener("click", startDownload);
+    panel.querySelector("#stb-stop").addEventListener("click", stopDownload);
     panel.querySelector("#stb-all").addEventListener("click", () => {
       tracks.forEach((t) => selected.add(t.id));   // 지금 목록 전부 선택
       syncChecks();
@@ -186,7 +188,15 @@
   }
 
   // ---------- 다운로드 ----------
-  let doneCount = 0, totalCount = 0, errCount = 0;
+  let doneCount = 0, totalCount = 0, errCount = 0, downloading = false;
+
+  // 다운로드 중 UI 전환 (진행 중이면 저장 숨기고 중단 표시)
+  function setBusy(on) {
+    downloading = on;
+    panel.querySelector("#stb-go").hidden = on;
+    panel.querySelector("#stb-stop").hidden = !on;
+    panel.querySelectorAll(".stb-selbtns button, #stb-rescan").forEach((b) => (b.disabled = on));
+  }
 
   function startDownload() {
     const chosen = chosenTracks();
@@ -194,16 +204,22 @@
     doneCount = 0; errCount = 0; totalCount = chosen.length;
     setBar(0);
     statusEl.textContent = `0 / ${totalCount} 준비 중…`;
-    panel.querySelector("#stb-go").disabled = true;
+    setBusy(true);
     chrome.runtime.sendMessage(
       { type: "SUNO_DOWNLOAD", tracks: chosen.map((t) => ({ id: t.id, title: t.title, url: t.url })) },
       (resp) => {
         if (chrome.runtime.lastError || !resp || !resp.ok) {
           statusEl.textContent = "시작 실패: " + (chrome.runtime.lastError?.message || resp?.reason || "알 수 없음");
-          panel.querySelector("#stb-go").disabled = false;
+          setBusy(false);
         }
       }
     );
+  }
+
+  function stopDownload() {
+    statusEl.textContent = "중단하는 중…";
+    panel.querySelector("#stb-stop").disabled = true;
+    chrome.runtime.sendMessage({ type: "SUNO_CANCEL" });
   }
 
   function setBar(p) { barEl.querySelector("i").style.width = Math.round(p * 100) + "%"; }
@@ -221,10 +237,15 @@
       statusEl.textContent = `오류: ${msg.title || ""} – ${msg.error || ""}`;
     } else if (msg.type === "BATCH_DONE") {
       // 남은 진행률 보정은 다운로드 이벤트로 처리되지 않으므로 여기서 마무리
-      setBar(1);
-      const okN = totalCount - errCount;
-      statusEl.textContent = `완료: ${okN}곡 저장${errCount ? `, ${errCount}곡 실패` : ""} → 다운로드 폴더/Suno`;
-      panel.querySelector("#stb-go").disabled = false;
+      const okN = Math.max(0, (msg.saved != null ? msg.saved : totalCount - errCount));
+      if (msg.cancelled) {
+        statusEl.textContent = `중단됨: ${okN}곡 저장, 나머지 취소`;
+      } else {
+        setBar(1);
+        statusEl.textContent = `완료: ${okN}곡 저장${errCount ? `, ${errCount}곡 실패` : ""} → 저장 폴더 확인`;
+      }
+      panel.querySelector("#stb-stop").disabled = false;
+      setBusy(false);
     }
   });
 

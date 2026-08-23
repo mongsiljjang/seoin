@@ -67,9 +67,13 @@ function sanitizeFolder(folder) {
   return f; // 비어 있으면 "" (다운로드 폴더 루트에 저장)
 }
 
+let cancelled = false;
+let currentCtrl = null;
+
 async function convertOne(track, tabId, index, total, folder) {
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title });
   const ctrl = new AbortController();
+  currentCtrl = ctrl;
   const timer = setTimeout(() => ctrl.abort(), 90000); // 90초 시간제한
   let arr;
   try {
@@ -78,6 +82,7 @@ async function convertOne(track, tabId, index, total, folder) {
     arr = await res.arrayBuffer();
   } finally {
     clearTimeout(timer);
+    currentCtrl = null;
   }
 
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "convert", title: track.title });
@@ -98,14 +103,19 @@ async function convertOne(track, tabId, index, total, folder) {
 async function runBatch(tracks, tabId, folderRaw) {
   const total = tracks.length;
   const folder = sanitizeFolder(folderRaw);
+  cancelled = false;
+  let saved = 0;
   for (let i = 0; i < total; i++) {
+    if (cancelled) break;
     try {
       await convertOne(tracks[i], tabId, i, total, folder);
+      saved++;
     } catch (e) {
+      if (cancelled) break;   // 중단으로 인한 abort 는 오류로 표시하지 않음
       send({ type: "TRACK_ERROR", tabId, index: i, total, error: String(e && e.message || e), title: tracks[i].title });
     }
   }
-  send({ type: "BATCH_DONE", tabId, total });
+  send({ type: "BATCH_DONE", tabId, total, saved, cancelled });
 }
 
 function send(m) { chrome.runtime.sendMessage(m).catch(() => {}); }
@@ -113,6 +123,7 @@ function send(m) { chrome.runtime.sendMessage(m).catch(() => {}); }
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.target !== "offscreen") return;
   if (msg.type === "CONVERT_BATCH") runBatch(msg.tracks || [], msg.tabId, msg.folder);
+  else if (msg.type === "CANCEL") { cancelled = true; if (currentCtrl) currentCtrl.abort(); }
   else if (msg.type === "REVOKE" && msg.blobUrl) URL.revokeObjectURL(msg.blobUrl);
 });
 

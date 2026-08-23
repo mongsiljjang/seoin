@@ -58,6 +58,12 @@
 }
 #stb-panel .stb-go:hover:not(:disabled) { background: #5533cf; }
 #stb-panel .stb-go:disabled { opacity: .45; cursor: not-allowed; }
+#stb-panel .stb-stop {
+  width: 100%; border: 0; border-radius: 10px; padding: 11px;
+  background: #e0483d; color: #fff; font-weight: 700; font-size: 13.5px; cursor: pointer;
+}
+#stb-panel .stb-stop:hover:not(:disabled) { background: #cc3a30; }
+#stb-panel .stb-stop:disabled { opacity: .5; cursor: default; }
 
 @media (prefers-color-scheme: dark) {
   #stb-panel { background: #1e1e26; color: #ececf2; }

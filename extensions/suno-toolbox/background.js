@@ -53,6 +53,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // 다운로드 중단
+  if (msg.type === "SUNO_CANCEL") {
+    pending = [];  // 아직 시작 안 한 작업 버림
+    chrome.runtime.sendMessage({ target: "offscreen", type: "CANCEL" });
+    return;
+  }
+
   // 오프스크린 문서가 로드되어 준비됨 → 대기 작업 전달
   if (msg.type === "OFFSCREEN_READY") {
     flushPending();
