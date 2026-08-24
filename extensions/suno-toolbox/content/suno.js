@@ -377,6 +377,8 @@
 
   // 스크롤/DOM 변화 시 곡을 누적하고, 패널이 열려 있으면 목록을 갱신
   function onDomChange() {
+    // Suno 가 다시 그리며 버튼을 지웠으면 다시 붙인다 (자동 복구)
+    if (!document.getElementById("stb-launch")) { launcher(); return; }
     const before = allTracks.size;
     resetIfNavigated();
     mergeScan();
