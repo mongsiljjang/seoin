@@ -71,6 +71,28 @@ let cancelled = false;
 let currentCtrl = null;
 let cancelTrigger = null;   // 진행 중 배치를 즉시 중단시키는 신호
 
+// 변환은 빠른데 저장(디스크 기록)은 느려서, 큰 WAV blob 이 메모리에 쌓이면 막힌다.
+// "저장 대기 중인 blob" 수를 제한해 메모리를 일정하게 유지한다.
+let pendingBlobs = 0;
+let revokeWaiters = [];
+function releaseSlot() {
+  pendingBlobs = Math.max(0, pendingBlobs - 1);
+  const w = revokeWaiters.shift();
+  if (w) w();
+}
+function waitForSlot(max) {
+  if (pendingBlobs < max || cancelled) return Promise.resolve();
+  return new Promise((res) => {
+    const w = () => { clearTimeout(t); res(); };
+    const t = setTimeout(() => {
+      const i = revokeWaiters.indexOf(w); if (i >= 0) revokeWaiters.splice(i, 1);
+      res(); // 25초 안에 저장 신호가 없어도 진행 (교착 방지)
+    }, 25000);
+    revokeWaiters.push(w);
+  });
+}
+function flushWaiters() { const ws = revokeWaiters; revokeWaiters = []; ws.forEach((w) => w()); }
+
 async function convertOne(track, tabId, index, total, folder) {
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title });
   const ctrl = new AbortController();
@@ -95,6 +117,7 @@ async function convertOne(track, tabId, index, total, folder) {
   const blobUrl = URL.createObjectURL(blob);
 
   const name = sanitize(track.title) + ".wav";
+  pendingBlobs++;   // 저장(다운로드 완료)될 때까지 메모리에 남아있는 blob
   send({
     type: "TRACK_READY",
     tabId, index, total,
@@ -122,6 +145,8 @@ async function runBatch(tracks, tabId, folderRaw) {
   let saved = 0;
   for (let i = 0; i < total; i++) {
     if (cancelled) break;
+    await waitForSlot(4);   // 저장 대기 blob 이 너무 많으면 잠깐 대기 (메모리 조절)
+    if (cancelled) break;
     let done = false, lastErr = null;
     // 최대 2번 시도 (걸리면 재시도, 그래도 안 되면 건너뜀)
     for (let attempt = 0; attempt < 2 && !done && !cancelled; attempt++) {
@@ -148,10 +173,12 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "CONVERT_BATCH") runBatch(msg.tracks || [], msg.tabId, msg.folder);
   else if (msg.type === "CANCEL") {
     cancelled = true;
+    pendingBlobs = 0;
+    flushWaiters();                       // 대기 중인 슬롯 해제
     if (currentCtrl) { try { currentCtrl.abort(); } catch (_) {} }
     if (cancelTrigger) cancelTrigger();   // 현재 곡 기다리지 않고 즉시 중단
   }
-  else if (msg.type === "REVOKE" && msg.blobUrl) URL.revokeObjectURL(msg.blobUrl);
+  else if (msg.type === "REVOKE" && msg.blobUrl) { URL.revokeObjectURL(msg.blobUrl); releaseSlot(); }
 });
 
 // 서비스워커가 안 자게 keep-alive 포트를 열고 주기적으로 신호를 보낸다
