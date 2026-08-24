@@ -268,13 +268,21 @@
     updateSel();
   }
 
-  // 저장 완료 표시 (초록 ✓)
+  // 저장 완료 표시 (초록 ✓) + 자동 체크 해제 → 다시 저장하면 남은 곡만 이어받기
   function markDone(id) {
     if (!id || downloadedIds.has(id)) return;
     downloadedIds.add(id);
-    if (!listEl) return;
-    const row = listEl.querySelector('.stb-row[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
-    if (row) row.classList.add("stb-done");
+    selected.delete(id);        // 받은 곡은 선택에서 빼둔다
+    selectAllMode = false;
+    if (listEl) {
+      const row = listEl.querySelector('.stb-row[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+      if (row) {
+        row.classList.add("stb-done");
+        const cb = row.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = false;
+      }
+    }
+    if (panel) updateSel();
   }
 
   // selected Set 을 화면 체크박스에 반영
