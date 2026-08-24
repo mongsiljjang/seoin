@@ -56,6 +56,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 다운로드 중단
   if (msg.type === "SUNO_CANCEL") {
     pending = [];  // 아직 시작 안 한 작업 버림
+    // 진행 중인 다운로드도 취소
+    for (const id of downloadToBlob.keys()) { chrome.downloads.cancel(id).catch(() => {}); }
     chrome.runtime.sendMessage({ target: "offscreen", type: "CANCEL" });
     return;
   }

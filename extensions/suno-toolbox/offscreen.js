@@ -69,12 +69,13 @@ function sanitizeFolder(folder) {
 
 let cancelled = false;
 let currentCtrl = null;
+let cancelTrigger = null;   // 진행 중 배치를 즉시 중단시키는 신호
 
 async function convertOne(track, tabId, index, total, folder) {
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title });
   const ctrl = new AbortController();
   currentCtrl = ctrl;
-  const timer = setTimeout(() => ctrl.abort(), 45000); // 45초 시간제한
+  const timer = setTimeout(() => ctrl.abort(), 30000); // 30초 시간제한
   let arr;
   try {
     const res = await fetch(track.url, { credentials: "omit", signal: ctrl.signal });
@@ -113,6 +114,9 @@ async function runBatch(tracks, tabId, folderRaw) {
   const total = tracks.length;
   const folder = sanitizeFolder(folderRaw);
   cancelled = false;
+  // 중단 신호: 이 promise 가 거부되면 현재 곡 처리를 기다리지 않고 즉시 빠져나온다
+  const cancelP = new Promise((_, rej) => { cancelTrigger = () => rej(new Error("취소됨")); });
+  cancelP.catch(() => {});
   let saved = 0;
   for (let i = 0; i < total; i++) {
     if (cancelled) break;
@@ -120,7 +124,7 @@ async function runBatch(tracks, tabId, folderRaw) {
     // 최대 2번 시도 (걸리면 재시도, 그래도 안 되면 건너뜀)
     for (let attempt = 0; attempt < 2 && !done && !cancelled; attempt++) {
       try {
-        await withTimeout(convertOne(tracks[i], tabId, i, total, folder), 60000);
+        await Promise.race([withTimeout(convertOne(tracks[i], tabId, i, total, folder), 35000), cancelP]);
         done = true; saved++;
       } catch (e) {
         lastErr = e;
@@ -131,6 +135,7 @@ async function runBatch(tracks, tabId, folderRaw) {
       send({ type: "TRACK_ERROR", tabId, index: i, total, error: String(lastErr && lastErr.message || lastErr), title: tracks[i].title });
     }
   }
+  cancelTrigger = null;
   send({ type: "BATCH_DONE", tabId, total, saved, cancelled });
 }
 
@@ -139,7 +144,11 @@ function send(m) { chrome.runtime.sendMessage(m).catch(() => {}); }
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.target !== "offscreen") return;
   if (msg.type === "CONVERT_BATCH") runBatch(msg.tracks || [], msg.tabId, msg.folder);
-  else if (msg.type === "CANCEL") { cancelled = true; if (currentCtrl) currentCtrl.abort(); }
+  else if (msg.type === "CANCEL") {
+    cancelled = true;
+    if (currentCtrl) { try { currentCtrl.abort(); } catch (_) {} }
+    if (cancelTrigger) cancelTrigger();   // 현재 곡 기다리지 않고 즉시 중단
+  }
   else if (msg.type === "REVOKE" && msg.blobUrl) URL.revokeObjectURL(msg.blobUrl);
 });
 
