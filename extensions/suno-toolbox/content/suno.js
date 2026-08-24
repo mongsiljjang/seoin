@@ -187,32 +187,41 @@
     });
   }
 
+  // 어떤 요소가 속한 "곡 한 개짜리 행"에서 곡 id 를 찾아 담는다.
+  // (이미지/링크가 여러 개면 목록 컨테이너로 보고 중단 → 엉뚱한 곡 선택 방지)
+  function addIdFromRow(startEl, ids) {
+    let el = startEl;
+    for (let up = 0; up < 8 && el; up++) {
+      if (el.querySelectorAll) {
+        const imgs = el.querySelectorAll('img[src*="suno.ai"]');
+        if (imgs.length === 1) {
+          const m = (imgs[0].getAttribute("src") || "").match(UUID);
+          if (m) { ids.add(m[0].toLowerCase()); return true; }
+        }
+        const links = el.querySelectorAll('a[href*="/song/"]');
+        if (links.length === 1) {
+          const m = (links[0].getAttribute("href") || "").match(/\/song\/([0-9a-f-]{16,})/i);
+          if (m) { ids.add(m[1].toLowerCase()); return true; }
+        }
+        if (imgs.length > 1 || links.length > 1) return false; // 목록 컨테이너
+      }
+      el = el.parentElement;
+    }
+    return false;
+  }
+
   // Suno 화면에서 체크(선택)된 곡의 id 수집 (best-effort)
   function detectSunoSelectedIds() {
     const ids = new Set();
-    document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-      if (!cb.checked) return;
-      if (cb.closest("#stb-panel")) return;   // 내 패널 체크박스는 제외
-      let el = cb;
-      for (let up = 0; up < 6 && el; up++) {
-        el = el.parentElement;
-        if (!el) break;
-        const img = el.querySelector('img[src*="suno.ai"]');
-        if (img) { const m = (img.getAttribute("src") || "").match(UUID); if (m) { ids.add(m[0].toLowerCase()); return; } }
-        const a = el.querySelector('a[href*="/song/"]');
-        if (a) { const m = (a.getAttribute("href") || "").match(/\/song\/([0-9a-f-]{16,})/i); if (m) { ids.add(m[1].toLowerCase()); return; } }
-      }
+    // 1) 진짜 <input type=checkbox> 체크됨
+    document.querySelectorAll('input[type="checkbox"]:checked').forEach((cb) => {
+      if (!cb.closest("#stb-panel")) addIdFromRow(cb.parentElement, ids);
     });
-    // 커스텀 체크박스(aria-checked) 대응
-    document.querySelectorAll('[role="checkbox"][aria-checked="true"], [aria-selected="true"]').forEach((node) => {
+    // 2) 커스텀 체크박스: aria-checked=true, data-state=checked, data-checked=true, aria-selected=true
+    const sel = '[aria-checked="true"], [data-state="checked"], [data-checked="true"], [aria-selected="true"]';
+    document.querySelectorAll(sel).forEach((node) => {
       if (node.closest("#stb-panel")) return;
-      let el = node;
-      for (let up = 0; up < 6 && el; up++) {
-        const img = el.querySelector && el.querySelector('img[src*="suno.ai"]');
-        if (img) { const m = (img.getAttribute("src") || "").match(UUID); if (m) { ids.add(m[0].toLowerCase()); break; } }
-        el = el.parentElement;
-        if (!el) break;
-      }
+      addIdFromRow(node, ids);
     });
     return ids;
   }
