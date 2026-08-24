@@ -396,7 +396,10 @@
           <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
         </div>
       </div>
-      <button class="btn block" style="margin-bottom:11px" onclick="openCountSheet()">📋 재고 세기 &mdash; 남은 개수만 적으면 끝</button>
+      <div class="row" style="gap:6px;margin-bottom:11px">
+        <button class="btn grow" onclick="openCountSheet()">📋 재고 세기</button>
+        <button class="btn soft grow" onclick="openOrderList()">🛒 주문 목록<span id="orderCnt"></span></button>
+      </div>
       <div class="seg" id="invFilter">
         <button class="on" data-f="all" onclick="setInvFilter('all')">전체</button>
         <button data-f="pin" onclick="setInvFilter('pin')">자주</button>
@@ -528,6 +531,7 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
   if(!Array.isArray(DB.duties)) DB.duties=[];        // 담당 분야 — 병원이 직접 만든다
   if(!Array.isArray(DB.vendors)) DB.vendors=[];      // 거래처 · 영업사원 연락처
+  if(!Array.isArray(DB.orderReqs)) DB.orderReqs=[];  // 주문 체크 — 재고를 건드리지 않는다
   if(!DB.hosp || typeof DB.hosp!=='object') DB.hosp={headcount:null};   // 상시 근로자 수
   if(!Array.isArray(DB.docTypes)) DB.docTypes=[];    // 신청 유형 — 병원이 직접 늘린다
   if(!Array.isArray(DB.docForms)) DB.docForms=[];    // 양식 보관함
@@ -1128,6 +1132,7 @@ function renderInv(){
     </div>`;
   }).join('');
   bindRowGestures();
+  const oc=$('#orderCnt'); if(oc){ const n=openReqs().length; oc.textContent=n?` ${n}`:''; }
   refreshBell();
 }
 
@@ -1237,6 +1242,9 @@ function openItemDetail(id){
       <button class="btn warn grow" onclick="quickAdjust('${it.id}','out')">－ 출고</button>
       <button class="btn soft grow" onclick="countOne('${it.id}')">📋 세기</button>
     </div>
+    <button class="btn soft block" style="margin:-6px 0 14px${reqFor('gen',it.id)?';color:var(--warn)':''}"
+      onclick="openOrderReq('gen','${it.id}',${jarg(it.name)},${jarg(it.vendor||'')},()=>openItemDetail('${it.id}'))">
+      🛒 ${reqFor('gen',it.id)?`주문 필요 체크됨 · ${reqFor('gen',it.id).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
     ${(()=>{ const f=forecast(it), oc=orderCycle(it); if(!f&&!oc) return `<div class="hint" style="margin:10px 0 4px">📋 <b>재고 세기</b>를 두 번 하면 하루 평균 사용량과 주문 시점이 계산돼요.</div>`;
       const rows=[]; if(f){ rows.push(['하루 평균 사용', `${num1(f.daily)}${esc(it.unit)}`]);
         rows.push(['주문 시점', f.left<=0?'지금':`${f.left}일 뒤 (${mdy(f.at)})`]);
@@ -1395,6 +1403,154 @@ let currentImplantId=null;
 const implantById=id=>DB.implants.find(p=>p.id===id);
 function parseDL(label){ const m=String(label||'').match(/^\s*(?:Ø|ø|D)?\s*(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)\s*$/); return m?{d:parseFloat(m[1]),l:parseFloat(m[2])}:null; }
 function vState(v){ return v.qty===0?'zero':(v.qty<=(+v.minQty||0)?'low':'ok'); }
+
+/* ---- 주문 체크 -----------------------------------------------------------
+   재고가 떨어져 가는 걸 아는 사람은 그 물건을 마지막으로 만진 사람이다.
+   그 사람이 그 자리에서 "주문해야겠네"를 누르면, 실장은 모인 목록을 보고
+   담당 영업사원에게 카톡으로 주문한다 (통화록 1-6장 — 주문 단위는
+   거래처가 아니라 담당자다. 거래처 전산 연동은 대표가 거절했고, 이것은
+   그 조건을 하나도 안 건드린다).
+
+   체크도 주문도 재고를 건드리지 않는다. 재고가 움직이는 자리는
+   물건이 실제로 들어와 ＋입고를 누를 때 하나뿐이다 — 페일 교환과 같은 원칙.
+
+   같은 품목을 여러 명이 누르면 한 줄로 모으고 몇 명인지 센다.
+   여러 줄로 늘어놓으면 지저분하고, 몇 명이 눌렀는지가 급한 정도를 말해준다. */
+function reqKey(kind, refId){ return kind+'|'+refId; }
+// onclick 속성 안에 넣는 문자열. JSON.stringify 는 큰따옴표를 내서 속성을
+// 끊어 버린다 — 실제로 화면에 코드가 그대로 보였다. 브라우저로 열어보고 잡았다.
+function jarg(v){ return "'"+String(v==null?'':v)
+  .replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'\\x3c')+"'"; }
+function reqFor(kind, refId){
+  return (DB.orderReqs||[]).find(r=>r.status!=='done' && reqKey(r.kind,r.refId)===reqKey(kind,refId));
+}
+// 체크. 같은 사람이 또 누르면 이름만 안 겹치게 한다 — 두 번 세면 급한 정도가 부풀려진다.
+function addReq(kind, refId, label, vendor, who, memo){
+  if(!Array.isArray(DB.orderReqs)) DB.orderReqs=[];
+  let r=reqFor(kind, refId);
+  if(!r){ r={id:uid(), kind, refId, label, vendor:vendor||'', status:'open', reqs:[]}; DB.orderReqs.push(r); }
+  const mine=r.reqs.find(x=>x.by===who);
+  if(mine){ if(memo) mine.memo=memo; mine.at=now(); }
+  else r.reqs.push({by:who, at:now(), memo:memo||''});
+  return r;
+}
+// 내 체크만 뺀다. 남의 체크는 못 뺀다 — 세 명이 눌렀는데 한 명이 다 지우면 신호가 사라진다.
+function dropReq(kind, refId, who){
+  const r=reqFor(kind, refId); if(!r) return false;
+  const n=r.reqs.length;
+  r.reqs=r.reqs.filter(x=>x.by!==who);
+  if(!r.reqs.length) DB.orderReqs=DB.orderReqs.filter(x=>x.id!==r.id);
+  return r.reqs.length<n;
+}
+function openReqs(){ return (DB.orderReqs||[]).filter(r=>r.status==='open'); }
+// 주문함 — 카톡으로 보냈다는 표시일 뿐, 재고는 그대로다
+function markOrdered(id, who){
+  const r=(DB.orderReqs||[]).find(x=>x.id===id); if(!r) return false;
+  r.status='ordered'; r.orderedAt=now(); r.orderedBy=who||''; return true;
+}
+// 물건이 오면 목록에서 치운다. 입고는 기존 ＋입고가 한다 — 여기서 재고를 만지지 않는다.
+function clearOrdered(id){
+  const before=(DB.orderReqs||[]).length;
+  DB.orderReqs=(DB.orderReqs||[]).filter(x=>x.id!==id);
+  return DB.orderReqs.length<before;
+}
+// 지금 재고·최소를 그 자리에서 읽는다 — 체크 시점 숫자를 저장하면 곧 낡는다
+function reqStock(r){
+  if(r.kind==='gen'){ const it=(DB.inventory||[]).find(i=>i.id===r.refId);
+    return it? {qty:it.qty, min:it.minQty, unit:it.unit||'개'} : null; }
+  const [pid,vid]=String(r.refId).split('|');
+  const p=(DB.implants||[]).find(x=>x.id===pid);
+  const v=p&&(p.variants||[]).find(x=>x.id===vid);
+  return v? {qty:+v.qty||0, min:+v.minQty||0, unit:'개'} : null;
+}
+// 카톡에 그대로 붙일 글. 거래처(담당)별로 한 장씩 — 통화록: 주문 단위는 담당자다.
+/* ---- 주문 체크 화면 ---- */
+function openOrderReq(kind, refId, label, vendor, backFn){
+  const me=currentUser(); if(!me){ toast('로그인한 사람만 체크할 수 있어요'); return; }
+  const r=reqFor(kind, refId);
+  const mine=r&&r.reqs.find(x=>x.by===me.name);
+  const others=r? r.reqs.filter(x=>x.by!==me.name) : [];
+  modal(`<h3>🛒 주문 필요 · ${esc(label)}</h3>
+    ${others.length?`<div class="tiny muted" style="margin:-4px 2px 10px">먼저 체크한 사람 — ${others.map(x=>esc(x.by)).join(' · ')}</div>`:''}
+    <div class="tiny muted" style="margin:-2px 2px 12px">체크해 두면 실장님이 보고 주문해요. <b>재고는 바뀌지 않아요.</b></div>
+    <label class="field"><span>메모 (선택)</span><input id="orMemo" placeholder="예: 한 통 남았어요" value="${mine?esc(mine.memo||''):''}"></label>
+    <div class="row">
+      <button class="btn block" onclick="doOrderReq('${kind}','${esc(refId)}')">${mine?'메모 고치기':'주문 필요 체크'}</button>
+      ${mine?`<button class="btn soft" onclick="doDropReq('${kind}','${esc(refId)}')">내 체크 빼기</button>`:''}
+    </div>`, backFn);
+  window.__orLabel=label; window.__orVendor=vendor||''; window.__orBack=backFn||null;
+}
+function doOrderReq(kind, refId){
+  const me=currentUser(); if(!me) return;
+  addReq(kind, refId, window.__orLabel, window.__orVendor, me.name, $('#orMemo').value.trim());
+  saveDB(); const b=window.__orBack; closeModal(); if(b) b();
+  toast('체크했어요 · 실장님 주문 목록에 올라가요');
+}
+function doDropReq(kind, refId){
+  const me=currentUser(); if(!me) return;
+  dropReq(kind, refId, me.name);
+  saveDB(); const b=window.__orBack; closeModal(); if(b) b();
+  toast('내 체크를 뺐어요');
+}
+
+/* ---- 주문 목록 (실장용) ---- */
+function openOrderList(){
+  const open=openReqs(), ordered=(DB.orderReqs||[]).filter(r=>r.status==='ordered');
+  // 담당(거래처)별로 묶는다 — 카톡이 담당자에게 한 장씩 나가기 때문이다
+  const g=new Map();
+  open.forEach(r=>{ const k=r.vendor||'거래처 미지정'; if(!g.has(k)) g.set(k,[]); g.get(k).push(r); });
+  const admin=isAdmin();
+  const 줄 = r=>{ const st=reqStock(r);
+    const who=r.reqs.map(x=>esc(x.by)).join(' · ');
+    const memos=r.reqs.filter(x=>x.memo).map(x=>`"${esc(x.memo)}"`).join(' · ');
+    return `<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
+      <div class="spread"><b class="tiny">${esc(r.label)}</b>
+        ${r.reqs.length>1?`<span class="pill warn">${r.reqs.length}명 체크</span>`:''}</div>
+      <div class="tiny muted" style="margin-top:3px">${who} 체크${st?` · 남은 것 ${st.qty}${st.unit}`:''}</div>
+      ${memos?`<div class="tiny" style="margin-top:3px">${memos}</div>`:''}
+      ${admin?`<div class="row" style="gap:5px;margin-top:8px">
+        <button class="btn sm grow" onclick="doMarkOrdered('${r.id}')">주문했어요</button>
+      </div>`:''}
+    </div>`; };
+  const body = !open.length && !ordered.length
+    ? `<div class="card" style="box-shadow:none;background:var(--bg)">${emptyBox('🛒','체크된 품목이 없어요')}</div>`
+    : [...g.entries()].map(([vendor,rs])=>`<div style="margin-bottom:14px">
+        <div class="spread" style="margin:0 2px 6px"><b class="tiny">${esc(vendor)}</b>
+          ${admin?`<button class="btn soft xs" onclick="copyKakao('${esc(vendor)}')">카톡용 글 복사</button>`:''}</div>
+        ${rs.map(줄).join('')}
+      </div>`).join('')
+      + (ordered.length?`<div class="tiny muted" style="margin:12px 2px 6px">주문 넣은 것 — 물건이 오면 ＋입고로 받고 정리하세요</div>
+        ${ordered.map(r=>`<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px;opacity:.75">
+          <div class="spread"><span class="tiny">${esc(r.label)}</span>
+            <span class="row" style="gap:5px"><span class="tiny muted">${esc(r.orderedBy||'')} 주문</span>
+            ${admin?`<button class="btn soft xs" onclick="doClearOrdered('${r.id}')">정리</button>`:''}</span></div>
+        </div>`).join('')}`:'');
+  modal(`<h3>🛒 주문 목록</h3>
+    <div class="tiny muted" style="margin:-4px 2px 12px">직원들이 체크한 것이 실시간으로 모여요.
+      담당자별 <b>카톡용 글</b>을 복사해 붙여넣으면 주문 끝. <b>재고는 물건이 와서 ＋입고할 때만 움직여요.</b></div>
+    ${body}`);
+}
+function doMarkOrdered(id){
+  const me=currentUser();
+  markOrdered(id, me?me.name:'');
+  saveDB(); openOrderList(); toast('주문한 것으로 표시했어요 · 재고는 그대로예요');
+}
+function doClearOrdered(id){ clearOrdered(id); saveDB(); openOrderList(); toast('정리했어요'); }
+function copyKakao(vendor){
+  const key = vendor==='거래처 미지정'? '' : vendor;
+  const entries=openReqs().filter(r=>(r.vendor||'')===key || (vendor==='거래처 미지정'&&!r.vendor));
+  const txt=kakaoText(key, entries);
+  const done=()=>toast('복사했어요 · 카톡에 붙여넣으세요');
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,()=>prompt('길게 눌러 복사하세요', txt));
+  else prompt('길게 눌러 복사하세요', txt);
+}
+
+function kakaoText(vendor, entries){
+  const 병원=DB.hospName||'우리병원';
+  const lines=entries.map(r=>{ const st=reqStock(r);
+    return `- ${r.label}${st?` (남은 것 ${st.qty}${st.unit}${st.min?` · 평소 ${st.min}${st.unit} 유지`:''})`:''}`; });
+  return `[${병원} 주문]${vendor?` ${vendor}`:''}\n${lines.join('\n')}\n부탁드립니다!`;
+}
 /* 임플란트 재고 대사(입고·사용·현재고·실재고·오차) */
 const USE_CATS=[{k:'normal',ko:'일반',cls:'info'},{k:'insurance',ko:'보험',cls:'pend'},{k:'fail',ko:'페일',cls:'danger'}];
 function catKo(k){ const c=USE_CATS.find(x=>x.k===k); return c?c.ko:'일반'; }
@@ -1862,6 +2018,9 @@ function openVariantForm(pid, editVid, preset){
       <label class="field"><span>현재 수량</span><input id="vQty" type="number" inputmode="numeric" value="${v?v.qty:0}"></label>
       <label class="field"><span>최소 수량</span><input id="vMin" type="number" inputmode="numeric" value="${v?(v.minQty||0):2}"></label>
     </div>
+    ${v?'':`<label class="field"><span>이 수량은 어디서 왔나요?</span>
+      <select id="vOrigin"><option value="in">이번에 산 것 (매입)</option><option value="open">전부터 있던 것 (이월재고)</option></select></label>
+    <div class="tiny muted" style="margin:-6px 2px 12px">앱을 쓰기 전부터 선반에 있던 물건이면 <b>이월재고</b>예요. 매입에 섞이면 산 개수가 부풀어요.</div>`}
     <label class="field"><span>LOT / 제조번호 (선택)</span><input id="vLot" value="${v?esc(v.lot||''):''}"></label>
     <div class="row"><button class="btn block" onclick="saveVariant('${pid}','${v?v.id:''}')">${v?'저장':'추가'}</button>
       ${v?`<button class="btn danger" onclick="delVariant('${pid}','${v.id}')">삭제</button>`:''}</div>`);
@@ -1892,8 +2051,11 @@ function saveVariant(pid,vid){
     Object.assign(v, data); }
   else { const dup=p.variants.find(x=>sameSpec(x.label,label));
     if(dup){ toast(`이미 ${dup.label} 로 있어요`); return; }
-    const nv={id:uid(), ...data, inTot:qty, uNor:0, uIns:0, uFail:0, phys:null, physAt:null};
-    p.variants.push(nv); if(qty>0) implantLog(pid,nv.id,'in',null,qty,0,qty,'초기 등록'); }
+    // 첫 수량이 매입인지 이월인지는 사람이 안다 — 통화록 1-1장의 0번 칸.
+    const asOpen = $('#vOrigin') && $('#vOrigin').value==='open';
+    const nv={id:uid(), ...data, inTot:asOpen?0:qty, opening:asOpen?qty:0, uNor:0, uIns:0, uFail:0, phys:null, physAt:null};
+    p.variants.push(nv);
+    if(qty>0) implantLog(pid,nv.id, asOpen?'open':'in', null, qty, 0, qty, asOpen?'이월재고 등록':'초기 등록'); }
   saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
 }
 // 기록이 남은 규격이 조용히 사라지면 대사가 통째로 어긋난다.
@@ -1937,6 +2099,9 @@ function openVariant(pid,vid){
       <button class="btn warn grow" onclick="adjustVariant('${pid}','${vid}','out')">－ 사용</button></div>
     <div class="row" style="margin-bottom:8px"><button class="btn soft grow" onclick="setPhysical('${pid}','${vid}')">📋 실재고 입력</button>
       ${diff!=null&&diff!==0?`<button class="btn warn grow" onclick="reconcileVariant('${pid}','${vid}')">현재고를 실재고로 맞추기</button>`:''}</div>
+    <button class="btn soft block" style="margin-bottom:8px${reqFor('imp',pid+'|'+vid)?';color:var(--warn)':''}"
+      onclick="openOrderReq('imp','${pid}|${vid}',${jarg(p.brand+' '+(p.line||'')+' '+v.label)},${jarg(p.vendor||'')},()=>openVariant('${pid}','${vid}'))">
+      🛒 ${reqFor('imp',pid+'|'+vid)?`주문 필요 체크됨 · ${reqFor('imp',pid+'|'+vid).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
     <button class="btn soft block" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>`);
 }
 function setPhysical(pid,vid){
@@ -5707,7 +5872,7 @@ let booting=false;             // 최초 이전 중에만 전부 쓸 수 있다
 let legacyDoc=null;            // 옛 단일 문서 — 옮기고 나면 읽기만 한다
 
 const B_SHARED = ['version','hospName','inventory','invLogs','purchases','attendance','leaves',
-  'implants','implantLogs','implantCases','masters','notices','duties','vendors','hosp',
+  'implants','implantLogs','implantCases','masters','notices','duties','vendors','orderReqs','hosp',
   'docTypes','docForms','geo','members','prefs','payLock','lastBackupAt'];
 const B_PERSON = ['contracts','payslips','resignations','docReqs'];
 
