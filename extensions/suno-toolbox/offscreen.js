@@ -152,5 +152,19 @@ chrome.runtime.onMessage.addListener((msg) => {
   else if (msg.type === "REVOKE" && msg.blobUrl) URL.revokeObjectURL(msg.blobUrl);
 });
 
+// 서비스워커가 안 자게 keep-alive 포트를 열고 주기적으로 신호를 보낸다
+let kaPort = null;
+function keepAlive() {
+  try {
+    kaPort = chrome.runtime.connect({ name: "keepalive" });
+    kaPort.onDisconnect.addListener(() => { kaPort = null; });
+  } catch (_) { kaPort = null; }
+}
+keepAlive();
+setInterval(() => {
+  if (!kaPort) keepAlive();
+  try { kaPort && kaPort.postMessage({ ping: 1 }); } catch (_) { kaPort = null; }
+}, 20000);
+
 // 로드 완료 → 백그라운드에 준비됐다고 알림 (대기 작업 받기)
 chrome.runtime.sendMessage({ type: "OFFSCREEN_READY" }).catch(() => {});

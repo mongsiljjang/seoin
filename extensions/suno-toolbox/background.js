@@ -42,6 +42,13 @@ async function closeOffscreenIfIdle() {
   }
 }
 
+// 긴 다운로드 중 서비스워커가 잠들어 파이프라인이 끊기지 않도록 keep-alive 포트 유지
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "keepalive") return;
+  port.onMessage.addListener(() => {});   // 메시지가 올 때마다 유휴 타이머 리셋
+  port.onDisconnect.addListener(() => {});
+});
+
 // 콘텐츠 스크립트 → 여기
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
