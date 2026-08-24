@@ -175,7 +175,13 @@
       mergeScan();
       const sunoIds = detectSunoSelectedIds();
       if (!sunoIds.size) {
-        statusEl.textContent = "Suno에서 체크한 곡이 없어요. 곡 옆 체크박스를 먼저 선택하세요.";
+        // 진단: Suno 체크가 어떤 방식인지 개수 표시 (콘솔 없이 바로 보기)
+        const q = (s) => { try { return document.querySelectorAll(s).length; } catch (_) { return "?"; } };
+        const inChk = [...document.querySelectorAll('input[type="checkbox"]:checked')].filter((e) => !e.closest("#stb-panel")).length;
+        statusEl.textContent =
+          `체크 못 찾음 → input:${inChk} / aria-checked:${q('[aria-checked="true"]')} / ` +
+          `data-state=checked:${q('[data-state="checked"]')} / role=checkbox:${q('[role="checkbox"]')} / ` +
+          `aria-selected:${q('[aria-selected="true"]')} (이 숫자 캡처해 주세요)`;
         return;
       }
       selectAllMode = false;
