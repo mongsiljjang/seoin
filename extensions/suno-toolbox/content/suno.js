@@ -76,6 +76,8 @@
   const allTracks = new Map();  // id -> {id,title,url}  (스크롤하며 누적)
   let tracks = [];              // 렌더용 배열 (allTracks 값)
   const selected = new Set();   // 선택한 곡 id
+  const downloadedIds = new Set(); // 이번 세션에 저장 완료한 곡 (초록 ✓ 표시)
+  let lastChosen = null;        // 마지막으로 다운로드 시작한 곡 배열(순서)
   let selectAllMode = false;    // 전체 선택 상태면 새로 뜬 곡도 자동 선택
   let opened = false;           // 패널을 한 번이라도 열었나
   let lastUrl = location.href;
@@ -190,7 +192,8 @@
     }
     tracks.forEach((t) => {
       const row = document.createElement("label");
-      row.className = "stb-row";
+      row.className = "stb-row" + (downloadedIds.has(t.id) ? " stb-done" : "");
+      row.dataset.id = t.id;
       row.innerHTML = `<input type="checkbox" /><span class="stb-title"></span>`;
       const cb = row.querySelector("input");
       cb.checked = selected.has(t.id);
@@ -203,6 +206,15 @@
       listEl.appendChild(row);
     });
     updateSel();
+  }
+
+  // 저장 완료 표시 (초록 ✓)
+  function markDone(id) {
+    if (!id || downloadedIds.has(id)) return;
+    downloadedIds.add(id);
+    if (!listEl) return;
+    const row = listEl.querySelector('.stb-row[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+    if (row) row.classList.add("stb-done");
   }
 
   // selected Set 을 화면 체크박스에 반영
@@ -244,6 +256,7 @@
     const chosen = chosenTracks();
     if (!chosen.length) return;
     doneCount = 0; errCount = 0; totalCount = chosen.length;
+    lastChosen = chosen;
     setBar(0);
     statusEl.textContent = `0 / ${totalCount} 준비 중…`;
     setBusy(true);
@@ -272,6 +285,8 @@
       const label = msg.phase === "download" ? "받는 중" : "변환 중";
       const frac = msg.phase === "download" ? msg.index : msg.index + 0.5;
       if (msg.total) setBar(frac / msg.total);
+      // 변환 단계까지 왔으면 그 곡은 저장되는 것 → ✓ 표시
+      if (msg.phase === "convert" && lastChosen && lastChosen[msg.index]) markDone(lastChosen[msg.index].id);
       statusEl.textContent = `${label}: ${msg.title || ""} (${msg.index + 1}/${msg.total})`;
     } else if (msg.type === "TRACK_ERROR") {
       errCount++;

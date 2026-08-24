@@ -74,7 +74,7 @@ async function convertOne(track, tabId, index, total, folder) {
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title });
   const ctrl = new AbortController();
   currentCtrl = ctrl;
-  const timer = setTimeout(() => ctrl.abort(), 90000); // 90초 시간제한
+  const timer = setTimeout(() => ctrl.abort(), 45000); // 45초 시간제한
   let arr;
   try {
     const res = await fetch(track.url, { credentials: "omit", signal: ctrl.signal });
@@ -100,6 +100,15 @@ async function convertOne(track, tabId, index, total, folder) {
   });
 }
 
+// 곡 하나가 걸려도 전체가 멈추지 않도록 전체 시간제한
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("시간 초과")), ms);
+    promise.then((v) => { clearTimeout(timer); resolve(v); },
+                 (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 async function runBatch(tracks, tabId, folderRaw) {
   const total = tracks.length;
   const folder = sanitizeFolder(folderRaw);
@@ -107,12 +116,19 @@ async function runBatch(tracks, tabId, folderRaw) {
   let saved = 0;
   for (let i = 0; i < total; i++) {
     if (cancelled) break;
-    try {
-      await convertOne(tracks[i], tabId, i, total, folder);
-      saved++;
-    } catch (e) {
-      if (cancelled) break;   // 중단으로 인한 abort 는 오류로 표시하지 않음
-      send({ type: "TRACK_ERROR", tabId, index: i, total, error: String(e && e.message || e), title: tracks[i].title });
+    let done = false, lastErr = null;
+    // 최대 2번 시도 (걸리면 재시도, 그래도 안 되면 건너뜀)
+    for (let attempt = 0; attempt < 2 && !done && !cancelled; attempt++) {
+      try {
+        await withTimeout(convertOne(tracks[i], tabId, i, total, folder), 60000);
+        done = true; saved++;
+      } catch (e) {
+        lastErr = e;
+        if (currentCtrl) { try { currentCtrl.abort(); } catch (_) {} } // 멈춘 요청 강제 종료
+      }
+    }
+    if (!done && !cancelled) {
+      send({ type: "TRACK_ERROR", tabId, index: i, total, error: String(lastErr && lastErr.message || lastErr), title: tracks[i].title });
     }
   }
   send({ type: "BATCH_DONE", tabId, total, saved, cancelled });

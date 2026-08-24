@@ -47,6 +47,8 @@
 }
 #stb-panel .stb-row:hover { background: #faf9ff; }
 #stb-panel .stb-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#stb-panel .stb-row.stb-done .stb-title { color: #22a06b; }
+#stb-panel .stb-row.stb-done .stb-title::after { content: " ✓"; font-weight: 700; }
 #stb-panel .stb-empty { padding: 22px 16px; color: #888; text-align: center; line-height: 1.6; }
 #stb-panel .stb-foot { padding: 12px 14px; border-top: 1px solid #eee; }
 #stb-panel .stb-bar { height: 6px; background: #eee; border-radius: 999px; overflow: hidden; margin-bottom: 8px; }
