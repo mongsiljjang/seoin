@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "내 도구함 – 수노 일괄 다운로드 · 메모",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "메모/할일·현재 페이지 저장, 그리고 Suno에서 내가 만든 곡을 골라 한 번에 WAV로 저장합니다.",
   "action": {
     "default_popup": "popup/popup.html",

@@ -194,38 +194,39 @@
   }
 
   // Suno 화면에서 체크(선택)된 곡의 id 수집.
-  // DOM 구조 대신 "화면 세로 위치(같은 줄)"로 체크 요소와 곡을 매칭 → 구조 변화에 강함.
+  // 곡 커버 "바로 왼쪽"에 있는 작은 체크박스만 그 곡의 것으로 인정 → 오탐 방지.
   function detectSunoSelectedIds() {
-    // 1) 현재 화면 곡들의 세로 중심 위치 (커버 이미지 / 곡 링크 기준)
+    // 1) 곡 커버 위치 (세로 중심 + 왼쪽 x)
     const rows = [];
     const pushRow = (id, r) => {
-      if (!r || (!r.height && !r.width)) return;
-      rows.push({ id: id.toLowerCase(), y: r.top + r.height / 2 });
+      if (!r || !r.height) return;
+      rows.push({ id: id.toLowerCase(), cy: r.top + r.height / 2, left: r.left });
     };
     document.querySelectorAll('img[src*="suno.ai"]').forEach((img) => {
       const m = (img.getAttribute("src") || "").match(UUID);
       if (m) pushRow(m[0], img.getBoundingClientRect());
     });
-    document.querySelectorAll('a[href*="/song/"]').forEach((a) => {
-      const m = (a.getAttribute("href") || "").match(/\/song\/([0-9a-f-]{16,})/i);
-      if (m) pushRow(m[1], a.getBoundingClientRect());
-    });
 
-    // 2) 체크된 요소들의 세로 중심 위치 (진짜 체크박스 우선, 없으면 커스텀)
-    const centers = [];
+    // 2) 체크된 요소 (진짜 체크박스 우선)
+    const checks = [];
     const collect = (sel) => document.querySelectorAll(sel).forEach((n) => {
       if (n.closest("#stb-panel")) return;
       const r = n.getBoundingClientRect();
-      if (r.height || r.width) centers.push(r.top + r.height / 2);
+      if (r.width > 0 && r.width <= 80 && r.height > 0 && r.height <= 80) checks.push(r); // 작은 요소만(체크박스)
     });
     collect('input[type="checkbox"]:checked');
-    if (!centers.length) { collect('[aria-checked="true"]'); collect('[aria-selected="true"]'); collect('[data-state="checked"]'); }
+    if (!checks.length) { collect('[role="checkbox"][aria-checked="true"]'); collect('[aria-checked="true"]'); }
 
-    // 3) 같은 줄(±40px)에서 가장 가까운 곡을 매칭
+    // 3) "같은 줄(±22px) + 커버 바로 왼쪽(간격 0~220px)" 조건을 모두 만족할 때만 매칭
     const ids = new Set();
-    centers.forEach((cy) => {
-      let best = null, bestD = 40;
-      for (const s of rows) { const d = Math.abs(s.y - cy); if (d < bestD) { bestD = d; best = s.id; } }
+    checks.forEach((c) => {
+      const cy = c.top + c.height / 2, cRight = c.right;
+      let best = null, bestGap = 221;
+      for (const s of rows) {
+        if (Math.abs(s.cy - cy) > 22) continue;      // 같은 줄이 아님
+        const gap = s.left - cRight;                  // 체크박스가 커버 왼쪽에 있어야
+        if (gap >= -15 && gap < bestGap) { bestGap = gap; best = s.id; }
+      }
       if (best) ids.add(best);
     });
     return ids;
