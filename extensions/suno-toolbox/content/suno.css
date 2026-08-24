@@ -1,5 +1,5 @@
 #stb-launch {
-  position: fixed; right: 18px; bottom: 18px; z-index: 2147483000;
+  position: fixed; right: 18px; bottom: 96px; z-index: 2147483000;
   display: flex; align-items: center; gap: 7px;
   background: #633ce8; color: #fff; border: 0; border-radius: 999px;
   padding: 10px 15px; font: 600 13px/1 system-ui, sans-serif;
@@ -13,7 +13,7 @@
 }
 
 #stb-panel {
-  position: fixed; right: 18px; bottom: 74px; z-index: 2147483000;
+  position: fixed; right: 18px; bottom: 150px; z-index: 2147483000;
   width: 340px; max-height: 70vh; display: none; flex-direction: column;
   background: #fff; color: #1a1a22; border-radius: 14px; overflow: hidden;
   box-shadow: 0 14px 44px rgba(0,0,0,.32);
