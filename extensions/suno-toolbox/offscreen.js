@@ -87,7 +87,14 @@ async function convertOne(track, tabId, index, total, folder) {
   }
 
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "convert", title: track.title });
-  const audioBuffer = await ctx().decodeAudioData(arr.slice(0));
+  // 곡마다 새 AudioContext 를 쓰고 바로 닫아 메모리/리소스를 즉시 반납한다
+  const actx = new (self.AudioContext || self.webkitAudioContext)();
+  let audioBuffer;
+  try {
+    audioBuffer = await actx.decodeAudioData(arr);
+  } finally {
+    actx.close().catch(() => {});
+  }
   const wav = encodeWAV(audioBuffer);
   const blob = new Blob([wav], { type: "audio/wav" });
   const blobUrl = URL.createObjectURL(blob);

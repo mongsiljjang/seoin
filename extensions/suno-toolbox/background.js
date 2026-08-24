@@ -20,6 +20,7 @@ async function ensureOffscreen() {
 
 // 대기 중인 작업들을 오프스크린으로 전달
 function flushPending() {
+  cancelOffscreenClose();   // 새 배치가 시작되면 예약된 닫기 취소
   const jobs = pending;
   pending = [];
   for (const job of jobs) {
@@ -34,12 +35,19 @@ function flushPending() {
   }
 }
 
-async function closeOffscreenIfIdle() {
-  if (activeJobs > 0) return;
-  if (downloadToBlob.size > 0) return;
-  if (await chrome.offscreen.hasDocument?.()) {
-    await chrome.offscreen.closeDocument().catch(() => {});
-  }
+// 오프스크린은 "배치가 끝났다(BATCH_DONE)"고 알려온 뒤에만, 그것도 잠시 뒤에 닫는다.
+// (다운로드 완료 이벤트로 닫으면, 워커 재시작 시 작업 중인데도 닫혀버려 멈춤)
+let closeTimer = null;
+function cancelOffscreenClose() { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; } }
+function scheduleOffscreenClose() {
+  cancelOffscreenClose();
+  closeTimer = setTimeout(async () => {
+    closeTimer = null;
+    if (activeJobs > 0) return;                 // 새 배치가 도는 중이면 닫지 않음
+    if (await chrome.offscreen.hasDocument?.()) {
+      await chrome.offscreen.closeDocument().catch(() => {});
+    }
+  }, 15000); // 마지막 다운로드가 마무리될 시간을 준다
 }
 
 // 긴 다운로드 중 서비스워커가 잠들어 파이프라인이 끊기지 않도록 keep-alive 포트 유지
@@ -60,12 +68,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // 다운로드 중단
+  // 다운로드 중단 (강력): 큐 비우고, 진행 중 다운로드 취소하고, 변환 부품을 즉시 종료
   if (msg.type === "SUNO_CANCEL") {
-    pending = [];  // 아직 시작 안 한 작업 버림
-    // 진행 중인 다운로드도 취소
-    for (const id of downloadToBlob.keys()) { chrome.downloads.cancel(id).catch(() => {}); }
-    chrome.runtime.sendMessage({ target: "offscreen", type: "CANCEL" });
+    hardCancel(sender.tab && sender.tab.id);
     return;
   }
 
@@ -83,10 +88,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 오프스크린 → 진행/오류 상황을 원래 탭으로 중계
   if (msg.type === "TRACK_PROGRESS" || msg.type === "TRACK_ERROR" || msg.type === "BATCH_DONE") {
     if (msg.tabId != null) chrome.tabs.sendMessage(msg.tabId, msg).catch(() => {});
-    if (msg.type === "BATCH_DONE") { activeJobs = Math.max(0, activeJobs - 1); closeOffscreenIfIdle(); }
+    if (msg.type === "BATCH_DONE") { activeJobs = Math.max(0, activeJobs - 1); if (activeJobs === 0) scheduleOffscreenClose(); }
     return;
   }
 });
+
+// 강력 중단: 큐/다운로드 정리 + 오프스크린 문서 종료(진행 중 변환 즉시 중단)
+async function hardCancel(tabId) {
+  pending = [];
+  cancelOffscreenClose();
+  for (const id of downloadToBlob.keys()) { chrome.downloads.cancel(id).catch(() => {}); }
+  downloadToBlob.clear();
+  chrome.runtime.sendMessage({ target: "offscreen", type: "CANCEL" }).catch(() => {}); // 우선 정중히
+  activeJobs = 0;
+  if (await chrome.offscreen.hasDocument?.()) { await chrome.offscreen.closeDocument().catch(() => {}); } // 그리고 확실히
+  if (tabId != null) chrome.tabs.sendMessage(tabId, { type: "BATCH_DONE", cancelled: true }).catch(() => {});
+}
 
 async function startBatch(tracks, tabId) {
   if (!tracks.length) return { ok: false, reason: "empty" };
@@ -133,7 +150,7 @@ chrome.downloads.onChanged.addListener((delta) => {
     if (blobUrl) {
       chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl });
       downloadToBlob.delete(delta.id);
-      closeOffscreenIfIdle();
+      // 여기서는 오프스크린을 닫지 않는다 (작업 중 오닫힘 방지). 닫기는 BATCH_DONE 이후에만.
     }
   }
 });

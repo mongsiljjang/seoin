@@ -354,10 +354,10 @@
       statusEl.textContent = `오류: ${msg.title || ""} – ${msg.error || ""}`;
     } else if (msg.type === "BATCH_DONE") {
       // 남은 진행률 보정은 다운로드 이벤트로 처리되지 않으므로 여기서 마무리
-      const okN = Math.max(0, (msg.saved != null ? msg.saved : totalCount - errCount));
       if (msg.cancelled) {
-        statusEl.textContent = `중단됨: ${okN}곡 저장, 나머지 취소`;
+        statusEl.textContent = "중단됨 — 받던 곡까지 저장됐어요";
       } else {
+        const okN = Math.max(0, (msg.saved != null ? msg.saved : totalCount - errCount));
         setBar(1);
         statusEl.textContent = `완료: ${okN}곡 저장${errCount ? `, ${errCount}곡 실패` : ""} → 저장 폴더 확인`;
       }
