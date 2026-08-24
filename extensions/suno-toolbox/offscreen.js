@@ -94,7 +94,7 @@ function waitForSlot(max) {
 function flushWaiters() { const ws = revokeWaiters; revokeWaiters = []; ws.forEach((w) => w()); }
 
 async function convertOne(track, tabId, index, total, folder) {
-  send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title });
+  send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "download", title: track.title, id: track.id });
   const ctrl = new AbortController();
   currentCtrl = ctrl;
   const timer = setTimeout(() => ctrl.abort(), 30000); // 30초 시간제한
@@ -108,7 +108,7 @@ async function convertOne(track, tabId, index, total, folder) {
     currentCtrl = null;
   }
 
-  send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "convert", title: track.title });
+  send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "convert", title: track.title, id: track.id });
   // 오디오 공간 하나를 계속 재사용한다 (크롬은 AudioContext 를 6개까지만 허용 → 곡마다 새로 만들면 막힘)
   let audioBuffer = await ctx().decodeAudioData(arr);
   const wav = encodeWAV(audioBuffer);
@@ -120,7 +120,7 @@ async function convertOne(track, tabId, index, total, folder) {
   pendingBlobs++;   // 저장(다운로드 완료)될 때까지 메모리에 남아있는 blob
   send({
     type: "TRACK_READY",
-    tabId, index, total,
+    tabId, index, total, id: track.id,
     blobUrl,
     filename: folder ? folder + "/" + name : name,
   });

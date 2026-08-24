@@ -344,8 +344,8 @@
   }
 
   function startDownload() {
-    const chosen = chosenTracks();
-    if (!chosen.length) return;
+    const chosen = chosenTracks().filter((t) => !downloadedIds.has(t.id)); // 이미 받은 곡 제외
+    if (!chosen.length) { setBusy(false); return; }
     doneCount = 0; errCount = 0; totalCount = chosen.length;
     lastChosen = chosen;
     stopping = false;
@@ -383,9 +383,10 @@
       const label = msg.phase === "download" ? "받는 중" : "변환 중";
       const frac = msg.phase === "download" ? msg.index : msg.index + 0.5;
       if (msg.total) setBar(frac / msg.total);
-      // 변환 단계까지 왔으면 그 곡은 저장되는 것 → ✓ 표시
-      if (msg.phase === "convert" && lastChosen && lastChosen[msg.index]) markDone(lastChosen[msg.index].id);
       statusEl.textContent = `${label}: ${msg.title || ""} (${msg.index + 1}/${msg.total})`;
+    } else if (msg.type === "TRACK_SAVED") {
+      kickWatchdog();
+      markDone(msg.id);          // 실제 저장 완료 → ✓ + 자동 체크 해제
     } else if (msg.type === "TRACK_ERROR") {
       kickWatchdog();
       errCount++;
@@ -393,38 +394,43 @@
       statusEl.textContent = `오류(건너뜀): ${msg.title || ""}`;
     } else if (msg.type === "BATCH_DONE") {
       clearTimeout(watchdog);
-      const remaining = chosenTracks();            // 자동 체크해제 덕분에 = 아직 안 받은 곡
-      const progressed = downloadedIds.size > roundStartCount;
-
       // 워치독 재시작(취소 후 이어받기)
       if (msg.cancelled && resumeAfterCancel && !stopping) {
         resumeAfterCancel = false;
-        if (remaining.length) { setTimeout(() => startDownload(), 1500); return; }
+        setTimeout(() => startDownload(), 1500);
+        return;
       }
       // 사용자가 직접 중단
       if (msg.cancelled) {
         statusEl.textContent = "중단됨 — 받던 곡까지 저장됐어요";
         panel.querySelector("#stb-stop").disabled = false; setBusy(false); return;
       }
-      // 한 묶음 끝 — 남은 곡이 있고 이번에 진전이 있었으면 자동으로 이어받기
-      if (remaining.length && progressed) {
-        watchdogStalls = 0;
-        statusEl.textContent = `남은 ${remaining.length}곡 자동으로 이어받는 중…`;
-        setTimeout(() => startDownload(), 1200);
-        return;
-      }
-      // 남았는데 진전이 없음 → 그 곡들은 못 받는 곡 (주소 문제 등)
-      if (remaining.length && !progressed) {
-        setBar(1);
-        statusEl.textContent = `${remaining.length}곡은 못 받았어요(주소 문제일 수 있음). 나머지는 저장 완료 ✓`;
-        panel.querySelector("#stb-stop").disabled = false; setBusy(false); return;
-      }
-      // 전부 완료!
-      setBar(1);
-      statusEl.textContent = "완료! 선택한 곡 전부 저장됐어요 🎉";
-      panel.querySelector("#stb-stop").disabled = false; setBusy(false);
+      // 변환은 끝났지만 마지막 다운로드/✓ 반영에 시간이 걸리므로 잠깐 뒤 판단
+      statusEl.textContent = "마무리 중…";
+      setTimeout(evaluateAfterBatch, 3500);
     }
   });
+
+  // 한 배치가 끝난 뒤: 남은 곡 자동 이어받기 / 완료 / 실패 판단
+  function evaluateAfterBatch() {
+    if (stopping) return;
+    const remaining = chosenTracks().filter((t) => !downloadedIds.has(t.id));
+    const progressed = downloadedIds.size > roundStartCount;
+    if (remaining.length && progressed) {
+      watchdogStalls = 0;
+      statusEl.textContent = `남은 ${remaining.length}곡 자동으로 이어받는 중…`;
+      startDownload();
+      return;
+    }
+    if (remaining.length && !progressed) {
+      setBar(1);
+      statusEl.textContent = `${remaining.length}곡은 못 받았어요(주소 문제일 수 있음). 나머지는 ✓ 저장됨`;
+      panel.querySelector("#stb-stop").disabled = false; setBusy(false); return;
+    }
+    setBar(1);
+    statusEl.textContent = "완료! 선택한 곡 전부 저장됐어요 🎉";
+    panel.querySelector("#stb-stop").disabled = false; setBusy(false);
+  }
 
   function finalizeTick() {
     doneCount++;

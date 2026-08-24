@@ -4,7 +4,8 @@
 
 const OFFSCREEN = "offscreen.html";
 let creating = null;               // 오프스크린 생성 중복 방지
-const downloadToBlob = new Map();  // downloadId -> blobUrl (완료 후 해제)
+const downloadToBlob = new Map();  // downloadId -> {blobUrl, songId, tabId}
+const savedSongIds = new Set();    // 이미 받은 곡 id (중복 다운로드 원천 차단)
 let activeJobs = 0;
 let pending = [];                  // 오프스크린이 준비되기 전 대기 중인 작업
 
@@ -120,7 +121,13 @@ async function startBatch(tracks, tabId) {
 }
 
 async function handleTrackReady(msg) {
-  // msg: { blobUrl, filename, tabId, index, total }
+  // msg: { blobUrl, filename, tabId, index, total, id }
+  // 이미 받은(또는 받는 중인) 곡이면 다시 저장하지 않는다 → 중복 파일 방지
+  if (msg.id && savedSongIds.has(msg.id)) {
+    chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: msg.blobUrl });
+    return;
+  }
+  if (msg.id) savedSongIds.add(msg.id);
   try {
     const id = await chrome.downloads.download({
       url: msg.blobUrl,
@@ -128,9 +135,9 @@ async function handleTrackReady(msg) {
       conflictAction: "uniquify",
       saveAs: false,
     });
-    downloadToBlob.set(id, msg.blobUrl);
+    downloadToBlob.set(id, { blobUrl: msg.blobUrl, songId: msg.id, tabId: msg.tabId });
   } catch (e) {
-    // 실패 시에도 blob 정리 요청
+    if (msg.id) savedSongIds.delete(msg.id); // 실패 → 나중에 다시 받을 수 있게
     chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: msg.blobUrl });
     if (msg.tabId != null) {
       chrome.tabs.sendMessage(msg.tabId, {
@@ -141,16 +148,19 @@ async function handleTrackReady(msg) {
   }
 }
 
-// 다운로드가 끝나면 해당 blob URL 해제 → 메모리 정리
+// 다운로드가 끝나면 blob 해제 + 저장 완료를 탭에 알림(✓ 표시)
 chrome.downloads.onChanged.addListener((delta) => {
   if (!delta.state) return;
   const s = delta.state.current;
-  if (s === "complete" || s === "interrupted") {
-    const blobUrl = downloadToBlob.get(delta.id);
-    if (blobUrl) {
-      chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl });
-      downloadToBlob.delete(delta.id);
-      // 여기서는 오프스크린을 닫지 않는다 (작업 중 오닫힘 방지). 닫기는 BATCH_DONE 이후에만.
-    }
+  if (s !== "complete" && s !== "interrupted") return;
+  const info = downloadToBlob.get(delta.id);
+  if (!info) return;
+  chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: info.blobUrl });
+  downloadToBlob.delete(delta.id);
+  if (s === "complete") {
+    if (info.tabId != null) chrome.tabs.sendMessage(info.tabId, { type: "TRACK_SAVED", id: info.songId }).catch(() => {});
+  } else {
+    if (info.songId) savedSongIds.delete(info.songId); // 중단/실패 → 다시 받을 수 있게
   }
+  // 오프스크린 닫기는 BATCH_DONE 이후에만 (작업 중 오닫힘 방지)
 });
