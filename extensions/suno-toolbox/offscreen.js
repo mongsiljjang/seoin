@@ -87,15 +87,10 @@ async function convertOne(track, tabId, index, total, folder) {
   }
 
   send({ type: "TRACK_PROGRESS", tabId, index, total, phase: "convert", title: track.title });
-  // 곡마다 새 AudioContext 를 쓰고 바로 닫아 메모리/리소스를 즉시 반납한다
-  const actx = new (self.AudioContext || self.webkitAudioContext)();
-  let audioBuffer;
-  try {
-    audioBuffer = await actx.decodeAudioData(arr);
-  } finally {
-    actx.close().catch(() => {});
-  }
+  // 오디오 공간 하나를 계속 재사용한다 (크롬은 AudioContext 를 6개까지만 허용 → 곡마다 새로 만들면 막힘)
+  let audioBuffer = await ctx().decodeAudioData(arr);
   const wav = encodeWAV(audioBuffer);
+  audioBuffer = null;          // 큰 디코드 결과는 바로 참조 해제 (메모리 반납)
   const blob = new Blob([wav], { type: "audio/wav" });
   const blobUrl = URL.createObjectURL(blob);
 
