@@ -141,6 +141,7 @@
         <div class="stb-selbtns">
           <button id="stb-all" type="button">전체 선택</button>
           <button id="stb-clear" type="button">전체 해제</button>
+          <button id="stb-suno" type="button" title="Suno에서 체크한 곡만 선택">수노 체크만</button>
         </div>
         <span id="stb-sel">0곡 선택</span>
       </div>
@@ -170,6 +171,50 @@
       selected.clear();                            // 전체 해제
       syncChecks();
     });
+    panel.querySelector("#stb-suno").addEventListener("click", () => {
+      mergeScan();
+      const sunoIds = detectSunoSelectedIds();
+      if (!sunoIds.size) {
+        statusEl.textContent = "Suno에서 체크한 곡이 없어요. 곡 옆 체크박스를 먼저 선택하세요.";
+        return;
+      }
+      selectAllMode = false;
+      selected.clear();
+      let n = 0;
+      sunoIds.forEach((id) => { if (allTracks.has(id)) { selected.add(id); n++; } });
+      renderRows();
+      statusEl.textContent = `Suno에서 체크한 ${n}곡 선택됨`;
+    });
+  }
+
+  // Suno 화면에서 체크(선택)된 곡의 id 수집 (best-effort)
+  function detectSunoSelectedIds() {
+    const ids = new Set();
+    document.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      if (!cb.checked) return;
+      if (cb.closest("#stb-panel")) return;   // 내 패널 체크박스는 제외
+      let el = cb;
+      for (let up = 0; up < 6 && el; up++) {
+        el = el.parentElement;
+        if (!el) break;
+        const img = el.querySelector('img[src*="suno.ai"]');
+        if (img) { const m = (img.getAttribute("src") || "").match(UUID); if (m) { ids.add(m[0].toLowerCase()); return; } }
+        const a = el.querySelector('a[href*="/song/"]');
+        if (a) { const m = (a.getAttribute("href") || "").match(/\/song\/([0-9a-f-]{16,})/i); if (m) { ids.add(m[1].toLowerCase()); return; } }
+      }
+    });
+    // 커스텀 체크박스(aria-checked) 대응
+    document.querySelectorAll('[role="checkbox"][aria-checked="true"], [aria-selected="true"]').forEach((node) => {
+      if (node.closest("#stb-panel")) return;
+      let el = node;
+      for (let up = 0; up < 6 && el; up++) {
+        const img = el.querySelector && el.querySelector('img[src*="suno.ai"]');
+        if (img) { const m = (img.getAttribute("src") || "").match(UUID); if (m) { ids.add(m[0].toLowerCase()); break; } }
+        el = el.parentElement;
+        if (!el) break;
+      }
+    });
+    return ids;
   }
 
   // 목록 갱신(누적 스캔 + 렌더)
