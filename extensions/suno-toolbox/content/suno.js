@@ -193,41 +193,40 @@
     });
   }
 
-  // 어떤 요소가 속한 "곡 한 개짜리 행"에서 곡 id 를 찾아 담는다.
-  // (이미지/링크가 여러 개면 목록 컨테이너로 보고 중단 → 엉뚱한 곡 선택 방지)
-  function addIdFromRow(startEl, ids) {
-    let el = startEl;
-    for (let up = 0; up < 8 && el; up++) {
-      if (el.querySelectorAll) {
-        const imgs = el.querySelectorAll('img[src*="suno.ai"]');
-        if (imgs.length === 1) {
-          const m = (imgs[0].getAttribute("src") || "").match(UUID);
-          if (m) { ids.add(m[0].toLowerCase()); return true; }
-        }
-        const links = el.querySelectorAll('a[href*="/song/"]');
-        if (links.length === 1) {
-          const m = (links[0].getAttribute("href") || "").match(/\/song\/([0-9a-f-]{16,})/i);
-          if (m) { ids.add(m[1].toLowerCase()); return true; }
-        }
-        if (imgs.length > 1 || links.length > 1) return false; // 목록 컨테이너
-      }
-      el = el.parentElement;
-    }
-    return false;
-  }
-
-  // Suno 화면에서 체크(선택)된 곡의 id 수집 (best-effort)
+  // Suno 화면에서 체크(선택)된 곡의 id 수집.
+  // DOM 구조 대신 "화면 세로 위치(같은 줄)"로 체크 요소와 곡을 매칭 → 구조 변화에 강함.
   function detectSunoSelectedIds() {
-    const ids = new Set();
-    // 1) 진짜 <input type=checkbox> 체크됨
-    document.querySelectorAll('input[type="checkbox"]:checked').forEach((cb) => {
-      if (!cb.closest("#stb-panel")) addIdFromRow(cb.parentElement, ids);
+    // 1) 현재 화면 곡들의 세로 중심 위치 (커버 이미지 / 곡 링크 기준)
+    const rows = [];
+    const pushRow = (id, r) => {
+      if (!r || (!r.height && !r.width)) return;
+      rows.push({ id: id.toLowerCase(), y: r.top + r.height / 2 });
+    };
+    document.querySelectorAll('img[src*="suno.ai"]').forEach((img) => {
+      const m = (img.getAttribute("src") || "").match(UUID);
+      if (m) pushRow(m[0], img.getBoundingClientRect());
     });
-    // 2) 커스텀 체크박스: aria-checked=true, data-state=checked, data-checked=true, aria-selected=true
-    const sel = '[aria-checked="true"], [data-state="checked"], [data-checked="true"], [aria-selected="true"]';
-    document.querySelectorAll(sel).forEach((node) => {
-      if (node.closest("#stb-panel")) return;
-      addIdFromRow(node, ids);
+    document.querySelectorAll('a[href*="/song/"]').forEach((a) => {
+      const m = (a.getAttribute("href") || "").match(/\/song\/([0-9a-f-]{16,})/i);
+      if (m) pushRow(m[1], a.getBoundingClientRect());
+    });
+
+    // 2) 체크된 요소들의 세로 중심 위치 (진짜 체크박스 우선, 없으면 커스텀)
+    const centers = [];
+    const collect = (sel) => document.querySelectorAll(sel).forEach((n) => {
+      if (n.closest("#stb-panel")) return;
+      const r = n.getBoundingClientRect();
+      if (r.height || r.width) centers.push(r.top + r.height / 2);
+    });
+    collect('input[type="checkbox"]:checked');
+    if (!centers.length) { collect('[aria-checked="true"]'); collect('[aria-selected="true"]'); collect('[data-state="checked"]'); }
+
+    // 3) 같은 줄(±40px)에서 가장 가까운 곡을 매칭
+    const ids = new Set();
+    centers.forEach((cy) => {
+      let best = null, bestD = 40;
+      for (const s of rows) { const d = Math.abs(s.y - cy); if (d < bestD) { bestD = d; best = s.id; } }
+      if (best) ids.add(best);
     });
     return ids;
   }
