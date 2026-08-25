@@ -115,10 +115,10 @@ console.log('\n── 카톡용 글 ──');
   ok('병원 이름이 들어간다',        메디칼.includes('서인치과'), true);
   ok('거래처가 들어간다',           메디칼.includes('A메디칼'), true);
   ok('품목이 들어간다',             메디칼.includes('알콜솜'), true);
-  ok('남은 것이 들어간다',          메디칼.includes('남은 것 8통'), true);
+  ok('남은 것이 들어간다',          메디칼.includes('8통 남음'), true);
   ok('다른 거래처 것은 안 섞인다',  메디칼.includes('4.0×12'), false);
   const 덴탈=kakaoText('A덴탈', openReqs().filter(r=>r.vendor==='A덴탈'));
-  ok('임플란트 쪽 글도 나온다',     덴탈.includes('오스템 TS III 4.0×12'), true);
+  ok('임플란트 쪽 글도 나온다',     덴탈.includes('오스템 TS III') && 덴탈.includes('- 4.0×12'), true);
 }
 
 console.log('\n── 앱이 골랐어요 — 열 때마다 고르고, 저장하지 않는다 ──');
@@ -173,7 +173,17 @@ console.log('\n── 앱이 고른 것도 같은 카톡 글로 나간다 ──
   const {appPicks, kakaoText} = 새판();
   const 글=kakaoText('A메디칼', appPicks().filter(p=>p.vendor==='A메디칼'));
   ok('품목이 들어간다',                 글.includes('알콜솜'), true);
-  ok('남은 것·평소 유지가 들어간다',    글.includes('남은 것 8통') && 글.includes('평소 15통 유지'), true);
+  ok('남은 것·평소 유지가 들어간다',    글.includes('8통 남음 · 평소 15통'), true);
+}
+
+console.log('\n── 카톡 글은 제품으로 묶는다 — 접두어를 줄마다 반복하지 않는다 ──');
+{
+  const {DB, appPicks, kakaoText} = 새판();
+  DB.implants[0].variants.push({id:'v2', label:'4.5×10', qty:0, minQty:3});
+  const 글=kakaoText('A덴탈', appPicks().filter(p=>p.vendor==='A덴탈'));
+  ok('제품 이름은 한 번만 나온다',      글.split('오스템 TS III').length-1, 1);
+  ok('규격이 그 아래 줄로 나온다',      글.includes('- 4.0×12') && 글.includes('- 4.5×10'), true);
+  ok('0개도 남은 것으로 적는다',        글.includes('- 4.5×10 (0개 남음 · 평소 3개)'), true);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
