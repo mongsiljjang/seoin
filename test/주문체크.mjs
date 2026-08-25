@@ -20,7 +20,8 @@ function grab(name){
   }
   throw new Error(name+' 의 끝을 못 찾았다');
 }
-const 떼올것=['reqKey','reqFor','addReq','dropReq','openReqs','markOrdered','clearOrdered','reqStock','kakaoText'];
+const 떼올것=['reqKey','reqFor','addReq','dropReq','openReqs','markOrdered','clearOrdered','reqStock','kakaoText',
+  'usageStats','forecast','needsOrder','appPicks','markPickOrdered'];
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want); y?pass++:fail++;
@@ -31,10 +32,11 @@ function 새판(){
     inventory:[{id:'g1', name:'알콜솜', qty:8, minQty:15, unit:'통', vendor:'A메디칼'}],
     implants:[{id:'p1', brand:'오스템', line:'TS III', part:'픽스처', vendor:'A덴탈', variants:[
       {id:'v1', label:'4.0×12', qty:2, minQty:5, inTot:10, uNor:8, uIns:0, uFail:0}]}],
-    orderReqs:[] };
+    orderReqs:[], invLogs:[] };
   const f=new Function('DB', `let _t=0; const now=()=>++_t, uid=()=>'id'+_t;
+const DAY_MS=86400000; const tms=v=>+new Date(v);
 ${떼올것.map(grab).join('\n')}
-return {reqFor,addReq,dropReq,openReqs,markOrdered,clearOrdered,reqStock,kakaoText};`)(DB);
+return {reqFor,addReq,dropReq,openReqs,markOrdered,clearOrdered,reqStock,kakaoText,appPicks,markPickOrdered};`)(DB);
   return { DB, it:DB.inventory[0], v:DB.implants[0].variants[0], ...f };
 }
 const 재고찍기 = DB => JSON.stringify([DB.inventory, DB.implants]);
@@ -117,6 +119,61 @@ console.log('\n── 카톡용 글 ──');
   ok('다른 거래처 것은 안 섞인다',  메디칼.includes('4.0×12'), false);
   const 덴탈=kakaoText('A덴탈', openReqs().filter(r=>r.vendor==='A덴탈'));
   ok('임플란트 쪽 글도 나온다',     덴탈.includes('오스템 TS III 4.0×12'), true);
+}
+
+console.log('\n── 앱이 골랐어요 — 열 때마다 고르고, 저장하지 않는다 ──');
+{
+  const {DB, appPicks} = 새판();
+  ok('최소에 닿은 일반재고를 고른다',   appPicks().some(p=>p.kind==='gen'&&p.refId==='g1'), true);
+  ok('최소에 닿은 임플란트도 고른다',   appPicks().some(p=>p.kind==='imp'&&p.refId==='p1|v1'), true);
+  ok('임플란트 이름이 온전하다',        appPicks().find(p=>p.kind==='imp').label, '오스템 TS III 4.0×12');
+  ok('거래처가 붙는다',                 appPicks().find(p=>p.refId==='g1').vendor, 'A메디칼');
+  DB.inventory[0].qty=100;                       // 물건이 와서 ＋입고했다
+  ok('입고되면 다음에 열 때 빠진다',    appPicks().some(p=>p.refId==='g1'), false);
+}
+{
+  const {appPicks, addReq} = 새판();
+  addReq('gen','g1','알콜솜','A메디칼','김간호','');
+  ok('사람이 체크한 품목은 안 고른다',  appPicks().some(p=>p.refId==='g1'), false);
+  ok('다른 품목은 그대로 고른다',       appPicks().some(p=>p.refId==='p1|v1'), true);
+}
+{
+  const {DB, appPicks} = 새판();
+  DB.implants[0].variants.push({id:'v2', label:'4.5×10', qty:0, minQty:0});
+  ok('최소가 없는 규격 칸은 안 고른다', appPicks().some(p=>p.refId==='p1|v2'), false);
+}
+
+console.log('\n── 소진 예측(주문임박)도 고른다 ──');
+{
+  const {DB, appPicks} = 새판();
+  const it=DB.inventory[0]; it.qty=10; it.minQty=2;              // 최소보다 넉넉하다
+  ok('넉넉하면 안 고른다',              appPicks().some(p=>p.refId==='g1'), false);
+  it.counts=[{at:0, qty:20},{at:8*86400000, qty:10, used:10}];   // 8일에 10통 → 곧 최소에 닿는다
+  const p=appPicks().find(x=>x.refId==='g1');
+  ok('써 온 속도로 곧 닿으면 고른다',   !!p, true);
+  ok('왜 골랐는지 말한다',              /써 온 속도면 \d+일 뒤 주문할 때예요/.test(p.why), true);
+}
+
+console.log('\n── 앱이 고른 것의 주문했어요 — 재고는 그대로다 ──');
+{
+  const {DB, appPicks, markPickOrdered, addReq} = 새판();
+  const 전 = 재고찍기(DB);
+  const r=markPickOrdered('gen','g1','알콜솜','A메디칼','실장');
+  ok('주문함에 들어간다',               DB.orderReqs.filter(x=>x.status==='ordered').length, 1);
+  ok('앱이 고른 표시가 남는다',         r.app, true);
+  ok('누가 주문했는지 남는다',          r.orderedBy, '실장');
+  ok('주문함에 있는 동안 다시 안 고른다', appPicks().some(p=>p.refId==='g1'), false);
+  ok('재고는 그대로다',                 재고찍기(DB), 전);
+  addReq('imp','p1|v1','오스템 TS III 4.0×12','A덴탈','김간호','');
+  ok('그새 사람이 체크했으면 그 줄이 우선', markPickOrdered('imp','p1|v1','오스템 TS III 4.0×12','A덴탈','실장'), null);
+}
+
+console.log('\n── 앱이 고른 것도 같은 카톡 글로 나간다 ──');
+{
+  const {appPicks, kakaoText} = 새판();
+  const 글=kakaoText('A메디칼', appPicks().filter(p=>p.vendor==='A메디칼'));
+  ok('품목이 들어간다',                 글.includes('알콜솜'), true);
+  ok('남은 것·평소 유지가 들어간다',    글.includes('남은 것 8통') && 글.includes('평소 15통 유지'), true);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);

@@ -1132,7 +1132,7 @@ function renderInv(){
     </div>`;
   }).join('');
   bindRowGestures();
-  const oc=$('#orderCnt'); if(oc){ const n=openReqs().length; oc.textContent=n?` ${n}`:''; }
+  const oc=$('#orderCnt'); if(oc){ const n=openReqs().length+appPicks().length; oc.textContent=n?` ${n}`:''; }
   refreshBell();
 }
 
@@ -1454,6 +1454,41 @@ function clearOrdered(id){
   DB.orderReqs=(DB.orderReqs||[]).filter(x=>x.id!==id);
   return DB.orderReqs.length<before;
 }
+
+/* ---- 자동발주 ① — 앱이 골랐어요 -----------------------------------------
+   재고가 최소에 닿았거나(≤최소) 써 온 속도로 곧 닿을(주문임박) 품목을,
+   주문 목록을 열 때마다 그 자리에서 다시 고른다. 저장하지 않는다 —
+   입고돼서 조건을 벗어나면 다음에 열 때 알아서 빠진다.
+   사람이 이미 체크했거나 주문함에 있는 품목은 안 고른다.
+   고르기만 한다 — 재고를 만지지 않고, 확인 없이 내보내지도 않는다.
+   나가는 순간은 실장이 카톡 글을 읽고 붙여넣을 때 하나다 (통화록 1-6장
+   8/20 정정 — 재고가 틀어져 있으면 자동 전송은 틀린 주문을 조용히 내보낸다). */
+function appPicks(){
+  const picks=[];
+  (DB.inventory||[]).forEach(it=>{
+    if(reqFor('gen', it.id) || !needsOrder(it)) return;
+    let why='';
+    if(it.qty>(+it.minQty||0)){ const f=forecast(it);
+      if(f) why = f.left<=0? '써 온 속도면 지금 주문할 때예요' : `써 온 속도면 ${f.left}일 뒤 주문할 때예요`; }
+    picks.push({kind:'gen', refId:it.id, label:it.name, vendor:it.vendor||'', app:true, why});
+  });
+  (DB.implants||[]).forEach(p=>(p.variants||[]).forEach(v=>{
+    if(!(+v.minQty>0) || (+v.qty||0)>+v.minQty) return;  // 최소가 없는 규격 칸은 안 고른다 — 안 쓰는 칸이 전부 걸린다
+    if(reqFor('imp', p.id+'|'+v.id)) return;
+    picks.push({kind:'imp', refId:p.id+'|'+v.id, app:true, why:'',
+      label:[p.brand,p.line,v.label].filter(Boolean).join(' '), vendor:p.vendor||''});
+  }));
+  return picks;
+}
+// 앱이 고른 품목의 "주문했어요" — 체크 단계 없이 바로 주문함에 넣는다.
+// 주문함에 있는 동안은 다시 안 골라진다. 재고는 그대로다.
+function markPickOrdered(kind, refId, label, vendor, who){
+  if(reqFor(kind, refId)) return null;                   // 그새 누가 체크했으면 그 줄이 우선이다
+  if(!Array.isArray(DB.orderReqs)) DB.orderReqs=[];
+  const r={id:uid(), kind, refId, label, vendor:vendor||'', status:'ordered', app:true,
+    reqs:[], orderedAt:now(), orderedBy:who||''};
+  DB.orderReqs.push(r); return r;
+}
 // 지금 재고·최소를 그 자리에서 읽는다 — 체크 시점 숫자를 저장하면 곧 낡는다
 function reqStock(r){
   if(r.kind==='gen'){ const it=(DB.inventory||[]).find(i=>i.id===r.refId);
@@ -1495,12 +1530,24 @@ function doDropReq(kind, refId){
 
 /* ---- 주문 목록 (실장용) ---- */
 function openOrderList(){
-  const open=openReqs(), ordered=(DB.orderReqs||[]).filter(r=>r.status==='ordered');
-  // 담당(거래처)별로 묶는다 — 카톡이 담당자에게 한 장씩 나가기 때문이다
+  const open=openReqs(), picks=appPicks(), ordered=(DB.orderReqs||[]).filter(r=>r.status==='ordered');
+  // 담당(거래처)별로 묶는다 — 카톡이 담당자에게 한 장씩 나가기 때문이다.
+  // 앱이 고른 것도 같은 묶음에 들어간다 — 사람 체크 옆에서, 같은 카톡 글로 나간다.
   const g=new Map();
-  open.forEach(r=>{ const k=r.vendor||'거래처 미지정'; if(!g.has(k)) g.set(k,[]); g.get(k).push(r); });
+  const 담기=r=>{ const k=r.vendor||'거래처 미지정'; if(!g.has(k)) g.set(k,[]); g.get(k).push(r); };
+  open.forEach(담기); picks.forEach(담기);
   const admin=isAdmin();
   const 줄 = r=>{ const st=reqStock(r);
+    if(r.app){
+      const 근거=[st?`남은 것 ${st.qty}${st.unit}${st.min?` · 평소 ${st.min}${st.unit} 유지`:''}`:'', r.why?esc(r.why):''].filter(Boolean).join(' · ');
+      return `<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
+        <div class="spread"><b class="tiny">${esc(r.label)}</b></div>
+        ${근거?`<div class="tiny muted" style="margin-top:3px">${근거}</div>`:''}
+        ${admin?`<div class="row" style="gap:5px;margin-top:8px">
+          <button class="btn sm grow" onclick="doMarkPickOrdered('${r.kind}',${jarg(r.refId)},${jarg(r.label)},${jarg(r.vendor)})">주문했어요</button>
+        </div>`:''}
+      </div>`;
+    }
     const who=r.reqs.map(x=>esc(x.by)).join(' · ');
     const memos=r.reqs.filter(x=>x.memo).map(x=>`"${esc(x.memo)}"`).join(' · ');
     return `<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
@@ -1512,13 +1559,16 @@ function openOrderList(){
         <button class="btn sm grow" onclick="doMarkOrdered('${r.id}')">주문했어요</button>
       </div>`:''}
     </div>`; };
-  const body = !open.length && !ordered.length
+  const body = !open.length && !picks.length && !ordered.length
     ? `<div class="card" style="box-shadow:none;background:var(--bg)">${emptyBox('🛒','체크된 품목이 없어요')}</div>`
-    : [...g.entries()].map(([vendor,rs])=>`<div style="margin-bottom:14px">
+    : [...g.entries()].map(([vendor,rs])=>{
+        const 사람=rs.filter(r=>!r.app), 앱=rs.filter(r=>r.app);
+        return `<div style="margin-bottom:14px">
         <div class="spread" style="margin:0 2px 6px"><b class="tiny">${esc(vendor)}</b>
           ${admin?`<button class="btn soft xs" onclick="copyKakao('${esc(vendor)}')">카톡용 글 복사</button>`:''}</div>
-        ${rs.map(줄).join('')}
-      </div>`).join('')
+        ${사람.map(줄).join('')}
+        ${앱.length?`<div class="tiny muted" style="margin:${사람.length?'8px':'0'} 2px 6px">앱이 골랐어요 — 재고가 최소에 닿았거나 곧 닿아요</div>${앱.map(줄).join('')}`:''}
+      </div>`; }).join('')
       + (ordered.length?`<div class="tiny muted" style="margin:12px 2px 6px">주문 넣은 것 — 물건이 오면 ＋입고로 받고 정리하세요</div>
         ${ordered.map(r=>`<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px;opacity:.75">
           <div class="spread"><span class="tiny">${esc(r.label)}</span>
@@ -1526,8 +1576,10 @@ function openOrderList(){
             ${admin?`<button class="btn soft xs" onclick="doClearOrdered('${r.id}')">정리</button>`:''}</span></div>
         </div>`).join('')}`:'');
   modal(`<h3>🛒 주문 목록</h3>
-    <div class="tiny muted" style="margin:-4px 2px 12px">직원들이 체크한 것이 실시간으로 모여요.
-      담당자별 <b>카톡용 글</b>을 복사해 붙여넣으면 주문 끝. <b>재고는 물건이 와서 ＋입고할 때만 움직여요.</b></div>
+    <div class="tiny muted" style="margin:-4px 2px 12px">직원들이 체크한 것이 실시간으로 모이고,
+      재고가 최소에 닿은 품목은 앱이 골라 올려요. 담당자별 <b>카톡용 글</b>을 복사해 붙여넣으면
+      주문 끝 — 보내기 전에 한 번 보세요, 저절로 나가는 건 없어요.
+      <b>재고는 물건이 와서 ＋입고할 때만 움직여요.</b></div>
     ${body}`);
 }
 function doMarkOrdered(id){
@@ -1535,10 +1587,15 @@ function doMarkOrdered(id){
   markOrdered(id, me?me.name:'');
   saveDB(); openOrderList(); toast('주문한 것으로 표시했어요 · 재고는 그대로예요');
 }
+function doMarkPickOrdered(kind, refId, label, vendor){
+  const me=currentUser();
+  if(markPickOrdered(kind, refId, label, vendor, me?me.name:'')) saveDB();
+  openOrderList(); toast('주문한 것으로 표시했어요 · 재고는 그대로예요');
+}
 function doClearOrdered(id){ clearOrdered(id); saveDB(); openOrderList(); toast('정리했어요'); }
 function copyKakao(vendor){
   const key = vendor==='거래처 미지정'? '' : vendor;
-  const entries=openReqs().filter(r=>(r.vendor||'')===key || (vendor==='거래처 미지정'&&!r.vendor));
+  const entries=[...openReqs(), ...appPicks()].filter(r=>(r.vendor||'')===key || (vendor==='거래처 미지정'&&!r.vendor));
   const txt=kakaoText(key, entries);
   const done=()=>toast('복사했어요 · 카톡에 붙여넣으세요');
   if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,()=>prompt('길게 눌러 복사하세요', txt));
