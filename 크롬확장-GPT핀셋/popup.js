@@ -33,6 +33,39 @@ const TONE_PROMPTS = {
 4. 형용사 대신 구체적인 수치와 통계를 넣을 것.`
 };
 
+// ─────────────────────────────────────────────
+// 3) 대표키워드 → 네이버 글 작성 명령서 조립
+//    (네이버 C-Rank·D.I.A.+·스마트블록 규칙을 프롬프트에 박아둔다)
+// ─────────────────────────────────────────────
+function buildNaverPrompt(keyword, experience) {
+    const expLine = experience
+        ? `- 글에 반영할 나의 실제 경험 메모: "${experience}". 이 메모를 첫 문단과 본문에 자연스럽게 녹일 것. 메모에 없는 경험이나 수치를 지어내지 말 것.`
+        : `- 나의 경험 메모는 없다. 경험이 들어가야 할 자리는 문장을 지어내지 말고 [여기에 본인 경험 한 줄] 표시로 비워둘 것.`;
+
+    return `너는 네이버 블로그 상위노출 글을 써 온 10년 차 실전 마케터다. 대표키워드 「${keyword}」로 네이버 블로그 글 한 편을 아래 규칙대로 작성해 줘.
+
+[제목]
+- 제목 후보 5개를 먼저 제시할 것. 대표키워드는 제목 앞쪽에 배치.
+- 5개 중 3개는 대상·상황을 좁힌 세부 키워드 조합(예: 50대, 초보, 무료)으로 만들 것.
+
+[본문 구조 — 순서대로]
+1. 첫 문단: 1인칭 경험 한 줄로 시작하고, 이어서 이 글에서 얻어갈 것을 2~3문장 두괄식으로 요약할 것. 인사말·날씨 얘기 금지.
+2. 질문형 소제목 3~4개. 각 소제목 바로 아래 첫 줄에 완결된 정답을 먼저 쓰고, 그다음 부연할 것.
+3. 본문 중간에 표(Table) 또는 3가지 불릿 정리를 1개 이상 넣을 것.
+4. 글의 하단부는 구체적인 이야기·관찰·시행착오 중심으로 쓸 것.
+5. 사진을 넣을 자리를 (사진: 어떤 장면을 찍을지 설명) 형식으로 3곳 이상 표시할 것.
+6. 글 끝에 독자가 물어볼 만한 질문과 답(FAQ) 2~3개, 해시태그 5개.
+
+[문체·키워드 규칙]
+- 대표키워드는 제목·첫 문단·소제목 중 1곳, 총 3번 안팎만 쓰고 반복하지 말 것. 대신 관련 유의어와 전문 용어를 골고루 쓸 것.
+- '혁신적인', '뛰어난', '요약하자면' 같은 AI식 표현 금지. 접속사(그리고·그래서·하지만)는 최소화.
+- 문장 길이를 비대칭으로 섞을 것(짧은 단문 2개 뒤에 긴 문장 1개).
+- 확실하지 않은 사실·수치는 쓰지 말고 [확인 필요]로 표시할 것.
+${expLine}
+
+전체 분량은 공백 포함 1,500자 이상.`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('pinContainer');
     const addForm = document.getElementById('addForm');
@@ -109,6 +142,20 @@ document.addEventListener('DOMContentLoaded', () => {
             urlInput.value = 'https://chatgpt.com/';
             addForm.classList.remove('open');
         });
+    };
+
+    // ── 네이버 글 생성기: 키워드로 작성 명령서를 조립해 클립보드로 ──
+    document.getElementById('naverBtn').onclick = () => {
+        const keyword = document.getElementById('kwInput').value.trim();
+        const experience = document.getElementById('expInput').value.trim();
+        if (!keyword) {
+            showToast('대표키워드를 먼저 입력하세요', true);
+            return;
+        }
+        navigator.clipboard.writeText(buildNaverPrompt(keyword, experience)).then(
+            () => showToast('명령서 복사 완료! 챗GPT 창에 붙여넣기(Ctrl+V) 후 엔터를 치세요'),
+            () => showToast('복사에 실패했습니다. 다시 눌러주세요', true)
+        );
     };
 
     // ── 변환 복사기: 원본 글 + 숨겨진 프롬프트를 묶어 클립보드로 ──
