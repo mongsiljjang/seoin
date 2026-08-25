@@ -95,11 +95,11 @@
 <body>
 <div class="wrap">
     <h1>🖊️ 네이버 글쓰기 도우미</h1>
-    <p class="subtitle">대표키워드 하나로, 네이버 규칙에 맞는 글 한 편을 챗GPT로 뽑아냅니다</p>
+    <p class="subtitle">대표키워드 하나로, 네이버 규칙에 맞는 글 한 편을 제미나이·챗GPT로 뽑아냅니다</p>
 
     <div class="card">
         <p class="step-title">1단계 · 글 명령서 만들기</p>
-        <p class="step-desc">주제와 키워드를 넣고 버튼을 누르면, 네이버 상위노출 규칙과 법적 금지 표현까지 담긴 글쓰기 명령서가 복사됩니다. 챗GPT에 붙여넣고 엔터만 치세요.</p>
+        <p class="step-desc">주제와 키워드를 넣고 버튼을 누르면, 네이버 상위노출 규칙과 법적 금지 표현까지 담긴 글쓰기 명령서가 복사됩니다. 쓰시는 AI(제미나이·챗GPT)에 붙여넣고 엔터만 치세요.</p>
 
         <label for="presetSelect">글의 주제</label>
         <div class="preset-row">
@@ -128,8 +128,8 @@
 
     <div class="card">
         <p class="step-title">2단계 · 사람의 언어로 다듬기</p>
-        <p class="step-desc">챗GPT가 써준 초안이 기계 냄새가 나면, 여기 붙여넣고 톤 버튼을 누르세요. 변환 명령이 글에 붙어 복사됩니다. 다시 챗GPT에 붙여넣고 엔터.</p>
-        <textarea id="srcText" placeholder="챗GPT가 써준 초안을 여기에 붙여넣으세요"></textarea>
+        <p class="step-desc">AI가 써준 초안이 기계 냄새가 나면, 여기 붙여넣고 톤 버튼을 누르세요. 변환 명령이 글에 붙어 복사됩니다. 다시 AI 창에 붙여넣고 엔터.</p>
+        <textarea id="srcText" placeholder="AI가 써준 초안을 여기에 붙여넣으세요"></textarea>
         <div class="tone-row">
             <button class="tone-btn btn-pink" data-tone="emotion">감성 블로그 톤</button>
             <button class="tone-btn btn-sky" data-tone="trust">전문가 칼럼 톤</button>
@@ -177,14 +177,15 @@ const PRESETS = {
 - 경험은 구체적인 장면으로 쓰되, 환자를 특정할 수 있는 정보는 절대 쓰지 말 것.`
     },
     insurance: {
-        name: '기업보험 (보험업법 지킴)',
-        note: '⚖️ 보험업법 광고 규제(보장 단정·타사 비방 금지, 약관 확인 안내)가 명령서에 자동 포함됩니다.',
-        persona: '이 글은 기업보험(단체보험·화재·배상책임 등)을 다루는 전문가의 정보성 글이다. 특정 상품 판매 권유가 아니라, 사업주가 몰라서 손해 보는 제도와 개념을 알기 쉽게 설명해 상담 문의로 이어지게 한다.',
-        guard: `- 보장을 단정하는 표현 금지: "무조건 보장", "전액 지급", "손해 볼 일 없는" 등.
+        name: '기업보험·경영 (보험업법 지킴)',
+        note: '⚖️ 주제는 자유롭게(위험관리·복지·정부지원 등), 글이 보험을 다룰 때만 보험업법 규칙이 적용되도록 명령서에 자동 포함됩니다.',
+        persona: '이 글은 기업보험 전문가가 쓰는 정보성 글이다. 보험 상품만이 아니라 사업주에게 도움이 되는 주제(위험관리, 직원 복지, 정부 지원 제도, 노무·세무 상식, 병원·사업장 운영 등)를 폭넓게 다룬다. 어떤 주제든 "사업주의 위험과 비용을 줄인다"는 관점으로 자연스럽게 연결해, 전문가에 대한 신뢰가 쌓이고 상담 문의로 이어지게 한다.',
+        guard: `- 아래 보험 관련 규칙은 글이 보험을 다루는 경우에 적용할 것. 보험을 다루지 않는 글에는 해당 규칙을 억지로 끼워 넣지 말 것.
+- 보장을 단정하는 표현 금지: "무조건 보장", "전액 지급", "손해 볼 일 없는" 등.
 - 타사 상품에 대한 비방이나 단순 비교 금지.
 - 확정되지 않은 보험금·환급률·수익률 수치를 제시하지 말 것.
 - 특정 상품 권유가 아니라 제도·개념 설명 중심으로 쓸 것.
-- 글 끝에 "보장 내용은 상품과 약관에 따라 다르므로, 가입 전 상품설명서와 약관을 반드시 확인하세요" 안내 문구를 넣을 것.`
+- 보험 상품을 다룬 글의 끝에는 "보장 내용은 상품과 약관에 따라 다르므로, 가입 전 상품설명서와 약관을 반드시 확인하세요" 안내 문구를 넣을 것.`
     },
     general: {
         name: '범용 (주제 무관)',
@@ -333,16 +334,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const keyword = kwInput.value.trim();
         if (!keyword) { showToast('대표키워드를 먼저 입력하세요', true); return; }
         copy(buildPrompt(allPresets()[presetSelect.value], keyword, expInput.value.trim()),
-            '명령서 복사 완료! 챗GPT 창에 붙여넣기(Ctrl+V) 후 엔터를 치세요');
+            '명령서 복사 완료! 제미나이·챗GPT 창에 붙여넣기(Ctrl+V) 후 엔터를 치세요');
     };
 
     // 2단계 — 톤 변환
     document.querySelectorAll('.tone-btn').forEach((btn) => {
         btn.onclick = () => {
             const src = srcText.value.trim();
-            if (!src) { showToast('먼저 챗GPT 초안을 2단계 칸에 붙여넣으세요', true); return; }
+            if (!src) { showToast('먼저 AI 초안을 2단계 칸에 붙여넣으세요', true); return; }
             copy(src + '\n\n---\n' + TONE_PROMPTS[btn.dataset.tone],
-                '복사 완료! 챗GPT 창에 붙여넣기(Ctrl+V) 후 엔터를 치세요');
+                '복사 완료! 제미나이·챗GPT 창에 붙여넣기(Ctrl+V) 후 엔터를 치세요');
         };
     });
 
