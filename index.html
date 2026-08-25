@@ -1537,9 +1537,10 @@ function openOrderList(){
   const 담기=r=>{ const k=r.vendor||'거래처 미지정'; if(!g.has(k)) g.set(k,[]); g.get(k).push(r); };
   open.forEach(담기); picks.forEach(담기);
   const admin=isAdmin();
-  const 줄 = r=>{ const st=reqStock(r);
+  const 줄 = r=>{ const st=reqStock(r), n=suggestQty(r.kind, r.refId);
+    const 제안 = (n&&st)? `이번 주문 ${n}${st.unit}` : '';
     if(r.app){
-      const 근거=[st?`남은 것 ${st.qty}${st.unit}${st.min?` · 평소 ${st.min}${st.unit} 유지`:''}`:'', r.why?esc(r.why):''].filter(Boolean).join(' · ');
+      const 근거=[st?`남은 것 ${st.qty}${st.unit}${st.min?` · 평소 ${st.min}${st.unit} 유지`:''}`:'', r.why?esc(r.why):'', 제안].filter(Boolean).join(' · ');
       return `<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
         <div class="spread"><b class="tiny">${esc(r.label)}</b></div>
         ${근거?`<div class="tiny muted" style="margin-top:3px">${근거}</div>`:''}
@@ -1553,7 +1554,7 @@ function openOrderList(){
     return `<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
       <div class="spread"><b class="tiny">${esc(r.label)}</b>
         ${r.reqs.length>1?`<span class="pill warn">${r.reqs.length}명 체크</span>`:''}</div>
-      <div class="tiny muted" style="margin-top:3px">${who} 체크${st?` · 남은 것 ${st.qty}${st.unit}`:''}</div>
+      <div class="tiny muted" style="margin-top:3px">${who} 체크${st?` · 남은 것 ${st.qty}${st.unit}`:''}${제안?` · ${제안}`:''}</div>
       ${memos?`<div class="tiny" style="margin-top:3px">${memos}</div>`:''}
       ${admin?`<div class="row" style="gap:5px;margin-top:8px">
         <button class="btn sm grow" onclick="doMarkOrdered('${r.id}')">주문했어요</button>
@@ -1577,9 +1578,9 @@ function openOrderList(){
         </div>`).join('')}`:'');
   modal(`<h3>🛒 주문 목록</h3>
     <div class="tiny muted" style="margin:-4px 2px 12px">직원들이 체크한 것이 실시간으로 모이고,
-      재고가 최소에 닿은 품목은 앱이 골라 올려요. 담당자별 <b>카톡용 글</b>을 복사해 붙여넣으면
-      주문 끝 — 보내기 전에 한 번 보세요, 저절로 나가는 건 없어요.
-      <b>재고는 물건이 와서 ＋입고할 때만 움직여요.</b></div>
+      재고가 최소에 닿은 품목은 앱이 골라 올려요. 수량은 지난 입고량을 보고 앱이 적어둔
+      초안이라 붙여넣은 뒤 고치면 돼요. 담당자별 <b>카톡용 글</b>을 복사해 붙여넣으면
+      주문 끝 — 저절로 나가는 건 없어요. <b>재고는 물건이 와서 ＋입고할 때만 움직여요.</b></div>
     ${body}`);
 }
 function doMarkOrdered(id){
@@ -1602,6 +1603,19 @@ function copyKakao(vendor){
   else prompt('길게 눌러 복사하세요', txt);
 }
 
+// 이번에 몇 개 시킬지 제안한다 — 지난 입고량 평균이 그 병원이 평소 시키는 양이다.
+// 입고 기록이 없으면 평소 유지량까지 채우는 개수로, 그것도 없으면 제안하지 않는다.
+// 어디까지나 초안이다 — 실장이 붙여넣기 전에 숫자만 고치면 되게 글에 그대로 둔다.
+function suggestQty(kind, refId){
+  let ins;
+  if(kind==='gen') ins=(DB.invLogs||[]).filter(l=>l.itemId===refId && l.type==='in');
+  else{ const [pid,vid]=String(refId).split('|');
+    ins=(DB.implantLogs||[]).filter(l=>l.pid===pid && l.vid===vid && l.type==='in'); }
+  const amts=ins.slice(0,6).map(l=>+l.amount||0).filter(n=>n>0);  // 기록은 앞이 최신이다
+  if(amts.length) return Math.round(amts.reduce((a,b)=>a+b,0)/amts.length);
+  const st=reqStock({kind, refId});
+  return (st && st.min>0 && st.min>st.qty)? st.min-st.qty : 0;
+}
 function kakaoText(vendor, entries){
   const 병원=DB.hospName||'우리병원';
   // 제품(브랜드·라인)으로 묶는다 — 규격마다 같은 접두어가 반복되면 폰에서 못 읽는다.
@@ -1614,10 +1628,12 @@ function kakaoText(vendor, entries){
       const v=p&&(p.variants||[]).find(x=>x.id===vid);
       if(p&&v){ head=[p.brand,p.line].filter(Boolean).join(' '); item=v.label; }
     }
-    const st=reqStock(r);
-    const 상황=st? `${st.qty}${st.unit} 남음${st.min?` · 평소 ${st.min}${st.unit}`:''}` : '';
+    const st=reqStock(r), n=suggestQty(r.kind, r.refId);
+    // 개수를 제안할 수 있으면 개수가 주문이고 남은 것은 참고, 없으면 남은 것·평소가 힌트다
+    const line = n&&st? `- ${item} ${n}${st.unit} (${st.qty}${st.unit} 남음)`
+      : `- ${item}${st?` (${st.qty}${st.unit} 남음${st.min?` · 평소 ${st.min}${st.unit}`:''})`:''}`;
     if(!g.has(head)) g.set(head,[]);
-    g.get(head).push(`- ${item}${상황?` (${상황})`:''}`);
+    g.get(head).push(line);
   });
   const 몸=[...g.entries()].map(([head,lines])=>(head?head+'\n':'')+lines.join('\n')).join('\n\n');
   return `[${병원} 주문]${vendor?` ${vendor}`:''}\n\n${몸}\n\n부탁드립니다!`;

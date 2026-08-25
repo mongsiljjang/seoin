@@ -21,7 +21,7 @@ function grab(name){
   throw new Error(name+' 의 끝을 못 찾았다');
 }
 const 떼올것=['reqKey','reqFor','addReq','dropReq','openReqs','markOrdered','clearOrdered','reqStock','kakaoText',
-  'usageStats','forecast','needsOrder','appPicks','markPickOrdered'];
+  'usageStats','forecast','needsOrder','appPicks','markPickOrdered','suggestQty'];
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want); y?pass++:fail++;
@@ -32,11 +32,11 @@ function 새판(){
     inventory:[{id:'g1', name:'알콜솜', qty:8, minQty:15, unit:'통', vendor:'A메디칼'}],
     implants:[{id:'p1', brand:'오스템', line:'TS III', part:'픽스처', vendor:'A덴탈', variants:[
       {id:'v1', label:'4.0×12', qty:2, minQty:5, inTot:10, uNor:8, uIns:0, uFail:0}]}],
-    orderReqs:[], invLogs:[] };
+    orderReqs:[], invLogs:[], implantLogs:[] };
   const f=new Function('DB', `let _t=0; const now=()=>++_t, uid=()=>'id'+_t;
 const DAY_MS=86400000; const tms=v=>+new Date(v);
 ${떼올것.map(grab).join('\n')}
-return {reqFor,addReq,dropReq,openReqs,markOrdered,clearOrdered,reqStock,kakaoText,appPicks,markPickOrdered};`)(DB);
+return {reqFor,addReq,dropReq,openReqs,markOrdered,clearOrdered,reqStock,kakaoText,appPicks,markPickOrdered,suggestQty};`)(DB);
   return { DB, it:DB.inventory[0], v:DB.implants[0].variants[0], ...f };
 }
 const 재고찍기 = DB => JSON.stringify([DB.inventory, DB.implants]);
@@ -173,7 +173,7 @@ console.log('\n── 앱이 고른 것도 같은 카톡 글로 나간다 ──
   const {appPicks, kakaoText} = 새판();
   const 글=kakaoText('A메디칼', appPicks().filter(p=>p.vendor==='A메디칼'));
   ok('품목이 들어간다',                 글.includes('알콜솜'), true);
-  ok('남은 것·평소 유지가 들어간다',    글.includes('8통 남음 · 평소 15통'), true);
+  ok('개수 제안과 남은 것이 들어간다',  글.includes('- 알콜솜 7통 (8통 남음)'), true);
 }
 
 console.log('\n── 카톡 글은 제품으로 묶는다 — 접두어를 줄마다 반복하지 않는다 ──');
@@ -183,7 +183,23 @@ console.log('\n── 카톡 글은 제품으로 묶는다 — 접두어를 줄�
   const 글=kakaoText('A덴탈', appPicks().filter(p=>p.vendor==='A덴탈'));
   ok('제품 이름은 한 번만 나온다',      글.split('오스템 TS III').length-1, 1);
   ok('규격이 그 아래 줄로 나온다',      글.includes('- 4.0×12') && 글.includes('- 4.5×10'), true);
-  ok('0개도 남은 것으로 적는다',        글.includes('- 4.5×10 (0개 남음 · 평소 3개)'), true);
+  ok('0개짜리도 개수를 제안한다',       글.includes('- 4.5×10 3개 (0개 남음)'), true);
+}
+
+console.log('\n── 주문 개수 제안 — 지난 입고량 평균, 없으면 평소까지 채움 ──');
+{
+  const {DB, suggestQty, kakaoText, appPicks} = 새판();
+  ok('기록이 없으면 평소까지 채운다',   suggestQty('gen','g1'), 7);           // 15 − 8
+  ok('임플란트도 같다',                 suggestQty('imp','p1|v1'), 3);        // 5 − 2
+  DB.invLogs=[{itemId:'g1',type:'in',amount:20},{itemId:'g1',type:'out',amount:999},{itemId:'g1',type:'in',amount:10}];
+  ok('입고량 평균으로 제안한다',        suggestQty('gen','g1'), 15);          // (20+10)/2
+  ok('출고 기록은 안 섞는다',           suggestQty('gen','g1'), 15);
+  DB.implantLogs=[{pid:'p1',vid:'v1',type:'in',amount:5},{pid:'p1',vid:'v1',type:'in',amount:3}];
+  ok('임플란트 입고 기록도 읽는다',     suggestQty('imp','p1|v1'), 4);
+  DB.inventory.push({id:'g2', name:'솜', qty:0, minQty:0, unit:'개'});
+  ok('평소 유지량이 없으면 제안 없음',  suggestQty('gen','g2'), 0);
+  const 글=kakaoText('A메디칼', appPicks().filter(p=>p.vendor==='A메디칼'));
+  ok('제안이 카톡 글에 실린다',         글.includes('- 알콜솜 15통 (8통 남음)'), true);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
