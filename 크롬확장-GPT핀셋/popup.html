@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            width: 340px; margin: 0; padding: 16px;
+            /* deslop-ko-ignore ko-font-order: 수강생 PC에 웹폰트 없이 떠야 하는 실습용 팝업이라 시스템 한글 폰트를 그대로 쓴다 (라틴 텍스트는 단축키 표기 정도) */
+            font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+            background-color: #f8f9fa; color: #333;
+            word-break: keep-all; line-height: 1.55;
+        }
+        h2 { font-size: 16px; margin: 0 0 12px; text-align: center; line-height: 1.4; }
+        h3 { font-size: 13px; margin: 18px 0 8px; color: #555; }
+
+        /* ── 고정핀 영역 ── */
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .pin-wrap { position: relative; }
+        .pin-btn {
+            width: 100%; border: none; padding: 12px 22px 12px 12px; border-radius: 8px;
+            font-weight: 700; font-size: 13px; font-family: inherit; color: #333;
+            cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            word-break: keep-all;
+        }
+        .pin-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.15); }
+        .btn-mint { background-color: #a0e8af; }
+        .btn-pink { background-color: #ffc4d9; }
+        .btn-lavender { background-color: #d1c4e9; }
+        .btn-lemon { background-color: #fff59d; }
+        .btn-sky { background-color: #b3e5fc; }
+        .btn-peach { background-color: #ffccbc; }
+        .del-btn {
+            position: absolute; top: 3px; right: 3px; width: 18px; height: 18px;
+            border: none; border-radius: 50%; background: rgba(255,255,255,0.7);
+            color: #666; font-size: 11px; line-height: 18px; padding: 0; cursor: pointer;
+        }
+        .del-btn.confirm { background: #d32f2f; color: #fff; width: auto; padding: 0 6px; border-radius: 9px; }
+        .add-btn {
+            width: 100%; margin-top: 12px; padding: 10px; border-radius: 8px;
+            background-color: #eee; border: 1px dashed #999; color: #555;
+            font-family: inherit; font-size: 13px; cursor: pointer;
+        }
+
+        /* ── 핀 추가 입력 폼 (팝업에서는 prompt()가 작동하지 않으므로 직접 만든다) ── */
+        #addForm { display: none; margin-top: 10px; padding: 10px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+        #addForm.open { display: block; }
+        #addForm input {
+            width: 100%; margin-bottom: 6px; padding: 8px; border: 1px solid #ccc;
+            border-radius: 6px; font-family: inherit; font-size: 13px;
+        }
+        #addForm .row { display: flex; gap: 6px; }
+        #addForm .row button {
+            flex: 1; padding: 8px; border: none; border-radius: 6px;
+            font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+        }
+        #saveBtn { background: #a0e8af; color: #1b4d2b; }
+        #cancelBtn { background: #eee; color: #555; }
+
+        /* ── 변환 복사기 영역 ── */
+        #srcText {
+            width: 100%; height: 90px; padding: 8px; border: 1px solid #ccc;
+            border-radius: 8px; font-family: inherit; font-size: 12px; resize: vertical;
+        }
+        .tone-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+        .tone-row .wide { grid-column: 1 / -1; }
+        .tone-btn {
+            border: none; padding: 10px 8px; border-radius: 8px; font-weight: 700;
+            font-size: 12px; font-family: inherit; color: #333; cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); word-break: keep-all;
+        }
+        .tone-btn:hover { transform: translateY(-1px); }
+        #toast {
+            display: none; margin-top: 10px; padding: 9px; border-radius: 8px;
+            background: #2e7d32; color: #fff; font-size: 12px; font-weight: 700;
+            text-align: center; word-break: keep-all;
+        }
+        #toast.err { background: #c62828; }
+        #toast.show { display: block; }
+        .hint { font-size: 11px; color: #888; margin: 6px 0 0; }
+    </style>
+</head>
+<body>
+    <h2>🎨 나만의 무한대 GPT 핀셋</h2>
+
+    <div class="btn-grid" id="pinContainer"></div>
+    <button class="add-btn" id="addBtn">＋ 새로운 프롬프트 핀 추가</button>
+
+    <div id="addForm">
+        <input id="titleInput" type="text" placeholder="핀 이름 (예: 유튜브 대본 요약기)">
+        <input id="urlInput" type="text" placeholder="연결할 링크 주소" value="https://chatgpt.com/">
+        <div class="row">
+            <button id="saveBtn">저장</button>
+            <button id="cancelBtn">취소</button>
+        </div>
+    </div>
+
+    <h3>✍️ 사람의 언어로 바꾸는 변환 복사기</h3>
+    <textarea id="srcText" placeholder="챗GPT가 써준 글을 여기에 붙여넣으세요"></textarea>
+    <div class="tone-row">
+        <button class="tone-btn btn-pink" data-tone="emotion">감성 블로그 톤</button>
+        <button class="tone-btn btn-sky" data-tone="trust">전문가 칼럼 톤</button>
+        <button class="tone-btn btn-lemon wide" data-tone="geo">GEO·AEO 구조화 (AI 검색 최적화)</button>
+    </div>
+    <div id="toast"></div>
+    <p class="hint">버튼을 누르면 글과 변환 명령이 함께 복사됩니다. 챗GPT 창에 붙여넣기(Ctrl+V) 후 엔터만 치세요.</p>
+
+    <script src="popup.js"></script>
+</body>
+</html>
