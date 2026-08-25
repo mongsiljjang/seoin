@@ -5,16 +5,14 @@
     <style>
         * { box-sizing: border-box; }
         body {
-            width: 340px; margin: 0; padding: 16px;
-            /* deslop-ko-ignore ko-font-order: 수강생 PC에 웹폰트 없이 떠야 하는 실습용 팝업이라 시스템 한글 폰트를 그대로 쓴다 (라틴 텍스트는 단축키 표기 정도) */
+            width: 320px; margin: 0; padding: 15px;
+            /* deslop-ko-ignore ko-font-order: 수강생 PC에 웹폰트 없이 떠야 하는 실습용 팝업이라 시스템 한글 폰트를 그대로 쓴다 */
             font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
             background-color: #f8f9fa; color: #333;
             word-break: keep-all; line-height: 1.55;
         }
         h2 { font-size: 16px; margin: 0 0 12px; text-align: center; line-height: 1.4; }
-        h3 { font-size: 13px; margin: 18px 0 8px; color: #555; }
 
-        /* ── 고정핀 영역 ── */
         .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .pin-wrap { position: relative; }
         .pin-btn {
@@ -42,7 +40,7 @@
             font-family: inherit; font-size: 13px; cursor: pointer;
         }
 
-        /* ── 핀 추가 입력 폼 (팝업에서는 prompt()가 작동하지 않으므로 직접 만든다) ── */
+        /* 핀 추가 입력 폼 (팝업에서는 prompt()가 작동하지 않으므로 직접 만든다) */
         #addForm { display: none; margin-top: 10px; padding: 10px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
         #addForm.open { display: block; }
         #addForm input {
@@ -57,36 +55,14 @@
         #saveBtn { background: #a0e8af; color: #1b4d2b; }
         #cancelBtn { background: #eee; color: #555; }
 
-        /* ── 네이버 글 생성기 영역 ── */
-        .gen-input {
-            width: 100%; margin-bottom: 6px; padding: 8px; border: 1px solid #ccc;
-            border-radius: 6px; font-family: inherit; font-size: 12px;
-        }
-        .gen-btn { width: 100%; padding: 10px; }
-
-        /* ── 변환 복사기 영역 ── */
-        #srcText {
-            width: 100%; height: 90px; padding: 8px; border: 1px solid #ccc;
-            border-radius: 8px; font-family: inherit; font-size: 12px; resize: vertical;
-        }
-        .tone-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
-        .tone-row .wide { grid-column: 1 / -1; }
-        .tone-btn {
-            border: none; padding: 10px 8px; border-radius: 8px; font-weight: 700;
-            font-size: 12px; font-family: inherit; color: #333; cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); word-break: keep-all;
-        }
-        .tone-btn:hover { transform: translateY(-1px); }
         #toast {
-            display: none; position: fixed; left: 16px; right: 16px; bottom: 12px;
+            display: none; position: fixed; left: 15px; right: 15px; bottom: 12px;
             padding: 9px; border-radius: 8px; z-index: 10;
-            background: #2e7d32; color: #fff; font-size: 12px; font-weight: 700;
+            background: #c62828; color: #fff; font-size: 12px; font-weight: 700;
             text-align: center; word-break: keep-all;
             box-shadow: 0 4px 10px rgba(0,0,0,0.2);
         }
-        #toast.err { background: #c62828; }
         #toast.show { display: block; }
-        .hint { font-size: 11px; color: #888; margin: 6px 0 0; }
     </style>
 </head>
 <body>
@@ -104,22 +80,7 @@
         </div>
     </div>
 
-    <h3>📝 ① 대표키워드로 네이버 글 초안 만들기</h3>
-    <input id="kwInput" class="gen-input" type="text" placeholder="대표키워드 (예: 챗GPT 활용법)">
-    <input id="expInput" class="gen-input" type="text" placeholder="내 경험 한 줄 (선택 — 예: 어제 수업에서 60대 12명 전원 성공)">
-    <button class="tone-btn btn-mint gen-btn" id="naverBtn">네이버 글 작성 명령서 복사</button>
-    <p class="hint">복사된 명령서를 챗GPT에 붙여넣으면 제목 후보와 본문 초안이 나옵니다. 경험 칸을 비우면 경험 문장 자리는 직접 채우도록 비워서 써 줍니다.</p>
-
-    <h3>✍️ ② 사람의 언어로 바꾸는 변환 복사기</h3>
-    <textarea id="srcText" placeholder="챗GPT가 써준 글을 여기에 붙여넣으세요"></textarea>
-    <div class="tone-row">
-        <button class="tone-btn btn-pink" data-tone="emotion">감성 블로그 톤</button>
-        <button class="tone-btn btn-sky" data-tone="trust">전문가 칼럼 톤</button>
-        <button class="tone-btn btn-lemon wide" data-tone="geo">GEO·AEO 구조화 (AI 검색 최적화)</button>
-    </div>
     <div id="toast"></div>
-    <p class="hint">버튼을 누르면 글과 변환 명령이 함께 복사됩니다. 챗GPT 창에 붙여넣기(Ctrl+V) 후 엔터만 치세요.</p>
-
     <script src="popup.js"></script>
 </body>
 </html>

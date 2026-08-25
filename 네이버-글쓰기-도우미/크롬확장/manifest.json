@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "네이버 글쓰기 도우미",
+  "version": "1.0",
+  "description": "대표키워드 하나로 네이버 규칙에 맞는 글 명령서를 만들고, AI 초안을 사람의 언어로 바꿔주는 원클릭 복사기",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "네이버 글쓰기 도우미 열기"
+  },
+  "permissions": ["storage", "clipboardWrite"]
+}
