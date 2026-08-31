@@ -122,12 +122,23 @@ async function startBatch(tracks, tabId) {
 
 async function handleTrackReady(msg) {
   // msg: { blobUrl, filename, tabId, index, total, id }
-  // 이미 받은(또는 받는 중인) 곡이면 다시 저장하지 않는다 → 중복 파일 방지
-  if (msg.id && savedSongIds.has(msg.id)) {
-    chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: msg.blobUrl });
-    return;
+  if (msg.id) {
+    // 같은 곡이 지금 저장되는 중이면 이번 것은 버린다 (동시 중복 방지)
+    for (const info of downloadToBlob.values()) {
+      if (info.songId === msg.id) {
+        chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: msg.blobUrl });
+        return;
+      }
+    }
+    // 이번 세션에 이미 저장한 곡이면 파일은 다시 만들지 않되, 화면에는 완료(✓)로 알린다
+    // (조용히 건너뛰면 UI 가 멈춘 것처럼 보인다)
+    if (savedSongIds.has(msg.id)) {
+      chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: msg.blobUrl });
+      if (msg.tabId != null) chrome.tabs.sendMessage(msg.tabId, { type: "TRACK_SAVED", id: msg.id }).catch(() => {});
+      return;
+    }
+    savedSongIds.add(msg.id);
   }
-  if (msg.id) savedSongIds.add(msg.id);
   try {
     const id = await chrome.downloads.download({
       url: msg.blobUrl,

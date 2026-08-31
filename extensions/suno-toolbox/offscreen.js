@@ -108,13 +108,17 @@ async function convertOne(track, tabId, index, total, folder) {
     let lastErr = null;
     for (const u of urls) {
       try {
-        const res = await fetch(u, { credentials: u === pipe ? "include" : "omit", signal: ctrl.signal });
+        // 로그인 쿠키를 항상 실어 보낸다 (*.suno.ai 권한은 manifest 에 이미 있음)
+        const res = await fetch(u, { credentials: "include", signal: ctrl.signal });
         if (!res.ok) throw new Error("HTTP " + res.status);
         arr = await res.arrayBuffer();
+        // audiopipe 는 곡을 못 줄 때도 200 + 빈 몸통을 돌려준다 → 실패로 판정해야 다음 주소를 시도한다
+        if (!arr || arr.byteLength < 256) throw new Error("빈 응답 — 비공개 곡이거나 로그인 필요");
         lastErr = null;
         break;
       } catch (e) {
         lastErr = e;
+        arr = undefined;
         if (ctrl.signal.aborted) break; // 시간초과/취소면 더 시도하지 않음
       }
     }

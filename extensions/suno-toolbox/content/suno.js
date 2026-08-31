@@ -60,6 +60,22 @@
       map.set(id, cur);
     }
 
+    // 3.5) 페이지가 실제 재생에 쓴 오디오 주소 (브라우저 네트워크 기록에서 수집)
+    //   서명/토큰이 붙은 주소가 잡히면 로그인 상태와 무관하게 받아지는 가장 확실한 주소다.
+    //   → 다운로드가 안 되는 곡은 한 번 재생해 주면 여기서 실제 주소가 잡힌다.
+    try {
+      performance.getEntriesByType("resource").forEach((r) => {
+        const u = r.name || "";
+        const m = u.match(/audiopipe\.suno\.ai\/\?item_id=([0-9a-f-]{16,})/i)
+               || u.match(/([0-9a-f-]{16,})\.(mp3|wav|m4a|ogg)/i);
+        if (!m) return;
+        const id = m[1].toLowerCase();
+        const cur = map.get(id) || { id, title: "", url: null };
+        if (!cur.url || (u.includes("?") && !cur.url.includes("?"))) cur.url = u; // 서명 붙은 주소 우선
+        map.set(id, cur);
+      });
+    } catch (_) {}
+
     // 마무리: URL 없으면 audiopipe 경로로 구성, 제목 없으면 id 앞부분
     // (cdn1 직링크는 2026-08 기준 차단됨 → audiopipe 가 공식 스트림 주소)
     const out = [];
@@ -95,7 +111,7 @@
         added++;
         if (selectAllMode) selected.add(t.id); // 전체선택 중이면 새 곡도 포함
       } else {
-        if (t.url && !cur.url) cur.url = t.url;
+        if (t.url && (!cur.url || (t.url.includes("?") && !cur.url.includes("?")))) cur.url = t.url; // 서명 붙은 주소 우선
         if (t.title && (!cur.title || t.title.length > cur.title.length)) cur.title = t.title;
       }
     }
@@ -394,7 +410,8 @@
       errCount++;
       finalizeTick();
       // 실제 오류 내용을 그대로 보여준다 (원인 파악용)
-      statusEl.textContent = `오류(건너뜀): ${msg.title || ""} — ${msg.error || "원인 미상"}`;
+      const hint = /빈 응답/.test(msg.error || "") ? " · 그 곡을 한 번 재생한 뒤 다시 시도해 보세요" : "";
+      statusEl.textContent = `오류(건너뜀): ${msg.title || ""} — ${msg.error || "원인 미상"}${hint}`;
       lastErrorText = msg.error || "";
     } else if (msg.type === "BATCH_DONE") {
       clearTimeout(watchdog);
