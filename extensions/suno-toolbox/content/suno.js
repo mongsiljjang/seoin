@@ -60,11 +60,12 @@
       map.set(id, cur);
     }
 
-    // 마무리: URL 없으면 표준 CDN 경로로 구성, 제목 없으면 id 앞부분
+    // 마무리: URL 없으면 audiopipe 경로로 구성, 제목 없으면 id 앞부분
+    // (cdn1 직링크는 2026-08 기준 차단됨 → audiopipe 가 공식 스트림 주소)
     const out = [];
     for (const e of map.values()) {
       if (!UUID.test(e.id) && e.id.length < 16) continue;
-      if (!e.url) e.url = `https://cdn1.suno.ai/${e.id}.mp3`;
+      if (!e.url) e.url = `https://audiopipe.suno.ai/?item_id=${e.id}`;
       if (!e.title) e.title = e.id.slice(0, 8);
       out.push(e);
     }
@@ -81,6 +82,7 @@
   let selectAllMode = false;    // 전체 선택 상태면 새로 뜬 곡도 자동 선택
   let opened = false;           // 패널을 한 번이라도 열었나
   let lastUrl = location.href;
+  let lastErrorText = "";       // 마지막 오류 내용 (원인 표시용)
 
   // 현재 화면에서 찾은 곡을 누적 목록에 병합. 새로 추가된 개수 반환.
   function mergeScan() {
@@ -131,7 +133,7 @@
     panel.id = "stb-panel";
     panel.innerHTML = `
       <div class="stb-head">
-        <b>Suno 곡 저장 (WAV)</b>
+        <b>Suno 곡 저장 (WAV) v${chrome.runtime.getManifest().version}</b>
         <div class="stb-head-btns">
           <button id="stb-rescan" title="다시 스캔">↻</button>
           <button id="stb-close" title="닫기">✕</button>
@@ -391,7 +393,9 @@
       kickWatchdog();
       errCount++;
       finalizeTick();
-      statusEl.textContent = `오류(건너뜀): ${msg.title || ""}`;
+      // 실제 오류 내용을 그대로 보여준다 (원인 파악용)
+      statusEl.textContent = `오류(건너뜀): ${msg.title || ""} — ${msg.error || "원인 미상"}`;
+      lastErrorText = msg.error || "";
     } else if (msg.type === "BATCH_DONE") {
       clearTimeout(watchdog);
       // 워치독 재시작(취소 후 이어받기)
@@ -424,7 +428,7 @@
     }
     if (remaining.length && !progressed) {
       setBar(1);
-      statusEl.textContent = `${remaining.length}곡은 못 받았어요(주소 문제일 수 있음). 나머지는 ✓ 저장됨`;
+      statusEl.textContent = `${remaining.length}곡은 못 받았어요` + (lastErrorText ? ` [원인: ${lastErrorText}]` : `(주소 문제일 수 있음)`) + `. 나머지는 ✓ 저장됨`;
       panel.querySelector("#stb-stop").disabled = false; setBusy(false); return;
     }
     setBar(1);

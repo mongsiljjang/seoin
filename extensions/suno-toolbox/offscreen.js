@@ -100,9 +100,25 @@ async function convertOne(track, tabId, index, total, folder) {
   const timer = setTimeout(() => ctrl.abort(), 30000); // 30초 시간제한
   let arr;
   try {
-    const res = await fetch(track.url, { credentials: "omit", signal: ctrl.signal });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    arr = await res.arrayBuffer();
+    // 1차: 수집된 주소 → 실패하면 2차: audiopipe 공식 스트림 주소로 재시도
+    // (cdn1/cdn2 직링크가 막히면서 옛 주소는 403/차단이 나올 수 있음)
+    const urls = [track.url];
+    const pipe = track.id ? "https://audiopipe.suno.ai/?item_id=" + track.id : null;
+    if (pipe && track.url !== pipe) urls.push(pipe);
+    let lastErr = null;
+    for (const u of urls) {
+      try {
+        const res = await fetch(u, { credentials: u === pipe ? "include" : "omit", signal: ctrl.signal });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        arr = await res.arrayBuffer();
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (ctrl.signal.aborted) break; // 시간초과/취소면 더 시도하지 않음
+      }
+    }
+    if (lastErr) throw lastErr;
   } finally {
     clearTimeout(timer);
     currentCtrl = null;
