@@ -335,6 +335,8 @@
   let resumeAfterCancel = false; // 워치독 재시작(취소 후 이어받기)
   let watchdog = null;         // 진행이 멈추면 자동 재시작하는 감시 타이머
   let watchdogStalls = 0;      // 연속 멈춤 횟수 (무한루프 방지)
+  let lastPhaseText = "준비 중"; // 멈췄을 때 어느 단계였는지 사용자에게 표시
+  let lastTrackTitle = "";
 
   function kickWatchdog() {
     clearTimeout(watchdog);
@@ -343,7 +345,8 @@
   function onStall() {
     if (!downloading || stopping) return;
     if (watchdogStalls >= 3) {  // 3번 연속 진전 없으면 포기
-      statusEl.textContent = "여러 번 멈춰서 중단했어요. 남은 곡은 '저장'을 다시 눌러주세요.";
+      const where = lastTrackTitle ? `${lastPhaseText}: ${lastTrackTitle}` : lastPhaseText;
+      statusEl.textContent = `여러 번 멈춰서 중단했어요. 마지막 단계 — ${where}`;
       setBusy(false); panel.querySelector("#stb-stop").disabled = false;
       return;
     }
@@ -398,7 +401,9 @@
     if (!msg || !statusEl) return;
     if (msg.type === "TRACK_PROGRESS") {
       kickWatchdog();
-      const label = msg.phase === "download" ? "받는 중" : "변환 중";
+      const label = msg.phase === "download" ? "받는 중" : msg.phase === "save" ? "저장 중" : "변환 중";
+      lastPhaseText = label;
+      lastTrackTitle = msg.title || "";
       const frac = msg.phase === "download" ? msg.index : msg.index + 0.5;
       if (msg.total) setBar(frac / msg.total);
       statusEl.textContent = `${label}: ${msg.title || ""} (${msg.index + 1}/${msg.total})`;
@@ -477,3 +482,4 @@
   new MutationObserver(() => { clearTimeout(t); t = setTimeout(onDomChange, 500); })
     .observe(document.body, { childList: true, subtree: true });
 })();
+
