@@ -146,7 +146,26 @@ async function handleTrackReady(msg) {
       conflictAction: "uniquify",
       saveAs: false,
     });
-    downloadToBlob.set(id, { blobUrl: msg.blobUrl, songId: msg.id, tabId: msg.tabId });
+    downloadToBlob.set(id, {
+      blobUrl: msg.blobUrl,
+      songId: msg.id,
+      tabId: msg.tabId,
+      title: msg.title,
+      index: msg.index,
+      total: msg.total,
+    });
+    if (msg.tabId != null) {
+      chrome.tabs.sendMessage(msg.tabId, {
+        type: "TRACK_PROGRESS",
+        phase: "save",
+        title: msg.title,
+        id: msg.id,
+        index: msg.index,
+        total: msg.total,
+      }).catch(() => {});
+    }
+    // blob 다운로드는 매우 빨리 끝날 수 있다. onChanged가 Map 등록보다 먼저 온 경우를 즉시 보정한다.
+    reconcileDownload(id);
   } catch (e) {
     if (msg.id) savedSongIds.delete(msg.id); // 실패 → 나중에 다시 받을 수 있게
     chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: msg.blobUrl });
@@ -159,19 +178,51 @@ async function handleTrackReady(msg) {
   }
 }
 
-// 다운로드가 끝나면 blob 해제 + 저장 완료를 탭에 알림(✓ 표시)
-chrome.downloads.onChanged.addListener((delta) => {
-  if (!delta.state) return;
-  const s = delta.state.current;
-  if (s !== "complete" && s !== "interrupted") return;
-  const info = downloadToBlob.get(delta.id);
+// 다운로드 완료 처리는 이벤트/상태조회 어느 쪽에서 와도 한 번만 실행한다.
+function finishTrackedDownload(downloadId, state) {
+  const info = downloadToBlob.get(downloadId);
   if (!info) return;
+  downloadToBlob.delete(downloadId); // 비동기 메시지보다 먼저 삭제해 중복 완료 방지
   chrome.runtime.sendMessage({ target: "offscreen", type: "REVOKE", blobUrl: info.blobUrl });
-  downloadToBlob.delete(delta.id);
-  if (s === "complete") {
+  if (state === "complete") {
     if (info.tabId != null) chrome.tabs.sendMessage(info.tabId, { type: "TRACK_SAVED", id: info.songId }).catch(() => {});
   } else {
     if (info.songId) savedSongIds.delete(info.songId); // 중단/실패 → 다시 받을 수 있게
+    if (info.tabId != null) {
+      chrome.tabs.sendMessage(info.tabId, {
+        type: "TRACK_ERROR",
+        tabId: info.tabId,
+        index: info.index,
+        total: info.total,
+        title: info.title,
+        error: "Chrome 다운로드가 중단됐어요",
+      }).catch(() => {});
+    }
   }
+}
+
+async function reconcileDownload(downloadId) {
+  if (!downloadToBlob.has(downloadId)) return;
+  try {
+    const items = await chrome.downloads.search({ id: downloadId });
+    const item = items && items[0];
+    if (item && (item.state === "complete" || item.state === "interrupted")) {
+      finishTrackedDownload(downloadId, item.state);
+    }
+  } catch (_) {}
+}
+
+// 다운로드가 끝나면 blob 해제 + 저장 완료를 탭에 알림(✓ 표시)
+chrome.downloads.onChanged.addListener((delta) => {
+  if (!delta.state) return;
+  const state = delta.state.current;
+  if (state !== "complete" && state !== "interrupted") return;
+  finishTrackedDownload(delta.id, state);
   // 오프스크린 닫기는 BATCH_DONE 이후에만 (작업 중 오닫힘 방지)
 });
+
+// 서비스워커가 이벤트를 놓친 경우에도 저장 완료를 복구한다.
+setInterval(() => {
+  for (const id of downloadToBlob.keys()) reconcileDownload(id);
+}, 2000);
+
