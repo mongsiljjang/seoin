@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 초기 파일럿은 인증·역할 모델을 붙이기 전까지 모든 DB 접근을 차단합니다.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
