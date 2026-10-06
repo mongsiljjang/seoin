@@ -177,7 +177,9 @@
   nav.tabs button.on{color:var(--brand)}
 
   /* Modal */
-  .modal-bg{position:fixed; inset:0; background:rgba(16,40,50,.45); z-index:50; display:none;
+  /* 로그인 화면(#gate 70)·출근 화면(#kiosk 75) 위에 떠야 한다. 아래에 깔리면
+     안내창이 열려도 사람 눈에는 '눌러도 아무 일이 없는' 것으로 보인다. */
+  .modal-bg{position:fixed; inset:0; background:rgba(16,40,50,.45); z-index:85; display:none;
     align-items:flex-end; justify-content:center}
   .modal-bg.open{display:flex; animation:fade .15s}
   .modal{background:#fff; width:100%; max-width:640px; border-radius:20px 20px 0 0; padding:18px 16px 22px;
@@ -218,7 +220,7 @@
 
   .toast{position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom)); transform:translateX(-50%);
     background:#12303a; color:#fff; font-size:13.5px; font-weight:700; padding:11px 18px; border-radius:999px;
-    z-index:80; opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; box-shadow:var(--shadow)}
+    z-index:95; opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; box-shadow:var(--shadow)}
   .toast.show{opacity:1; transform:translateX(-50%) translateY(-4px)}
 
   .divider{height:1px; background:var(--line); margin:12px 0}
@@ -6650,8 +6652,7 @@ function gateWayOut(){
     </div>
     <button class="btn block" style="margin-top:10px" onclick="cancelClaim();openOwnerGate()">👑 최고관리자로 바로 들어가기</button>
     <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>
-    <div class="tiny muted" style="margin-top:14px">
-      <a href="#" onclick="showLockoutHelp();return false" style="color:var(--sub);text-decoration:underline">아이디·비밀번호도 모를 때</a></div>`;
+    ${만들기링크()}`;
 
   if(m) return `
     <div class="gate-card" style="margin-top:10px;background:#fdeede">
@@ -6660,13 +6661,21 @@ function gateWayOut(){
         그 기기가 하나도 없으면 아래를 눌러주세요.</div>
     </div>
     <button class="btn block" style="margin-top:10px" onclick="showLockoutHelp()">아무도 못 들어갈 때</button>
-    <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>`;
+    <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>
+    ${만들기링크()}`;
 
   return `
     <button class="btn soft block" style="margin-top:10px" onclick="cancelClaim();openOwnerGate()">👑 최고관리자 로그인으로 들어가기</button>
     <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>
-    <div class="tiny muted" style="margin-top:14px">
-      <a href="#" onclick="showLockoutHelp();return false" style="color:var(--sub);text-decoration:underline">아무도 못 들어갈 때</a></div>`;
+    ${만들기링크()}`;
+}
+/* 표지판(meta)은 앱이 저장할 때만 갱신된다. 콘솔에서 명단을 지워도 표지판은
+   '사람이 있다' 로 남아 있어서, 정작 열린 문을 화면이 가린다.
+   그래서 이 두 길은 어느 경우에도 지우지 않는다. */
+function 만들기링크(){
+  return `<div class="tiny muted" style="margin-top:14px">
+    빈 병원이라면 <a href="#" onclick="cancelClaim();openSetupGate();return false" style="color:var(--brand);font-weight:700">관리자 만들기</a><br>
+    <a href="#" onclick="showLockoutHelp();return false" style="color:var(--sub);text-decoration:underline">아무도 못 들어갈 때</a></div>`;
 }
 function gateSetupHtml(){
   return `<div class="gate-ic">👑</div>
