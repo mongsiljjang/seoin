@@ -1116,7 +1116,7 @@ function setInvFilter(f){ invFilter=f; $$('#invFilter button').forEach(b=>b.clas
 function renderInv(){
   const q = ($('#invSearch').value||'').trim().toLowerCase();
   let list = DB.inventory.slice().sort((a,b)=>(a.qty<=a.minQty?0:1)-(b.qty<=b.minQty?0:1) || a.name.localeCompare(b.name,'ko'));
-  if(q) list = list.filter(i=>(i.name+' '+(i.category||'')).toLowerCase().includes(q));
+  if(q) list = list.filter(i=>(i.name+' '+(i.category||'')+' '+(i.place||'')).toLowerCase().includes(q));
   if(invFilter==='low') list=list.filter(i=>i.qty<=i.minQty);
   if(invFilter==='ok') list=list.filter(i=>i.qty>i.minQty);
   if(invFilter==='order') list=list.filter(needsOrder);
@@ -1145,7 +1145,7 @@ function renderInv(){
       : i.qty<=i.minQty? `부족 · 최소 ${i.minQty}${esc(i.unit)}`
       : (f&&f.left<=7)? (f.left<=0?'지금 주문':`${f.left}일 뒤 주문`)
       : (dd!==null&&dd<0)? '유통기한 만료' : (dd!==null&&dd<=30)? `유통기한 D-${dd}`
-      : [esc(i.category||''), f?`하루 ${num1(f.daily)}${esc(i.unit)}`:''].filter(Boolean).join(' · ');
+      : [esc(i.category||''), esc(i.place||''), f?`하루 ${num1(f.daily)}${esc(i.unit)}`:''].filter(Boolean).join(' · ');
     return `<div class="irow" data-id="${i.id}">
       <span class="dot" style="background:${st}"></span>
       <div class="grow" style="min-width:0">
@@ -1211,7 +1211,9 @@ function openInvForm(edit){
       <label class="field"><span>단가 (원, 선택)</span><input id="fPrice" type="number" inputmode="numeric" value="${it&&it.price?it.price:''}" placeholder="0"></label>
     </div>
     <label class="field"><span>유통기한 (선택)</span><input id="fExpiry" type="date" value="${it?esc(it.expiry||''):''}"></label>
-    <label class="field"><span>메모 (선택)</span><input id="fNote" value="${it?esc(it.note||''):''}" placeholder="보관 위치 등"></label>
+    <label class="field"><span>보관 위치 (선택)</span><input id="fPlace" list="placeList" value="${it?esc(it.place||''):''}" placeholder="예: 소독실">
+      <datalist id="placeList">${[...new Set(['소독실','진료실',...DB.inventory.map(x=>x.place).filter(Boolean)])].map(v=>`<option value="${esc(v)}">`).join('')}</datalist></label>
+    <label class="field"><span>메모 (선택)</span><input id="fNote" value="${it?esc(it.note||''):''}" placeholder="예: 두 번째 서랍"></label>
     <div class="row">
       <button class="btn block" onclick="saveItem('${it?it.id:''}')">${it?'저장':'추가'}</button>
       ${it?`<button class="btn danger" onclick="delItem('${it.id}')">삭제</button>`:''}
@@ -1222,7 +1224,7 @@ function saveItem(id){
   const data={ name, category:$('#fCat').value.trim(), unit:$('#fUnit').value.trim()||'개',
     qty:Math.max(0,parseInt($('#fQty').value,10)||0), minQty:Math.max(0,parseInt($('#fMin').value,10)||0),
     vendor:$('#fVendor').value.trim(), price:Math.max(0,parseInt($('#fPrice').value,10)||0),
-    expiry:$('#fExpiry').value||'', note:$('#fNote').value.trim(), updatedAt:now() };
+    expiry:$('#fExpiry').value||'', place:$('#fPlace').value.trim(), note:$('#fNote').value.trim(), updatedAt:now() };
   if(id){ Object.assign(itemById(id), data); }
   else { DB.inventory.push({id:uid(), ...data}); }
   saveDB(); closeModal(); renderInv(); toast('저장되었습니다');
@@ -1248,7 +1250,7 @@ function openItemDetail(id){
     <h3>${esc(it.name)}</h3>
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0">
       <div class="spread"><div><div class="big" style="color:var(--brand)">${it.qty}${esc(it.unit)}</div>
-        <div class="tiny muted">${esc(it.category||'분류없음')} · 최소 ${it.minQty}${esc(it.unit)}</div>
+        <div class="tiny muted">${esc(it.category||'분류없음')}${it.place?' · '+esc(it.place):''} · 최소 ${it.minQty}${esc(it.unit)}</div>
         ${(it.vendor||it.price||it.expiry)?`<div class="tiny muted" style="margin-top:3px">${[it.vendor?'거래처 '+esc(it.vendor):'', it.price?'단가 '+won(it.price):'', it.expiry?'유통기한 '+it.expiry+(dDays(it.expiry)!==null?` (${dDays(it.expiry)<0?'만료':'D-'+dDays(it.expiry)})`:''):''].filter(Boolean).join(' · ')}</div>`:''}</div>
         <div class="row" style="gap:6px">
           <button class="btn soft sm" onclick="togglePin('${it.id}');openItemDetail('${it.id}')"
