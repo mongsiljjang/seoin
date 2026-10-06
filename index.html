@@ -252,6 +252,10 @@
   #iabBar{background:#fff4e5; color:#8a5200; border-bottom:1px solid #f0d9b5;
     padding:11px 14px; font-size:13px; line-height:1.65; display:none}
   #iabBar.show{display:block}
+  #demoBar{background:#2f3a46; color:#fff; font-size:12.5px; font-weight:700;
+    padding:9px 14px; text-align:center; display:none; line-height:1.6}
+  #demoBar.show{display:block}
+  #demoBar a{color:#ffd98a; font-weight:800}
   #iabBar b{color:#7a4600}
   #iabBar .row{display:flex; gap:7px; margin-top:8px; flex-wrap:wrap}
   #iabBar button{border:1px solid #e0c493; background:#fff; color:#7a4600;
@@ -339,6 +343,7 @@
 </header>
 <div id="adminBanner" onclick="openMenu()"></div>
 <div id="iabBar"></div>
+<div id="demoBar"></div>
 
 <main class="wrap">
 
@@ -498,6 +503,10 @@ const WS_ID = (function(){
   return ws || (window.WORKSPACE_ID || 'clinic');
 })();
 const WS = ()=>WS_ID;
+/* 데모 — 주소에 ?demo=1 을 붙이면 로그인 없이 가짜 자료로 둘러본다.
+   남에게 보여줄 때 진짜 직원 이름과 급여를 꺼낼 수는 없다. 서버에도 안 붙고
+   이 기기에도 안 남긴다. 창을 닫으면 전부 사라진다. */
+const DEMO = /(^|[?&])demo=1(&|$)/.test(location.search);
 // 기기에 남기는 자리도 병원마다 갈라야 한다. 안 그러면 옆 병원 자료가 화면에 뜬다.
 // 처음 병원은 예전 이름을 그대로 쓴다 — 이름을 바꾸면 쓰던 자료가 사라진다.
 const STORE_KEY = 'hospital_mgr_v1' + (WS_ID==='clinic' ? '' : ':'+WS_ID);
@@ -508,6 +517,11 @@ const uid = ()=> Date.now().toString(36) + Math.floor(Math.random()*1e6).toStrin
 /* ---------- 저장소 ---------- */
 let DB;
 function loadDB(){
+  if(DEMO){
+    DB = { version:1, hospName:'보기용 치과',
+      staff:[], inventory:[], invLogs:[], attendance:[], leaves:[] };
+    seedDemo(); ensureSchema(); return;
+  }
   try{ DB = JSON.parse(localStorage.getItem(STORE_KEY)); }catch(e){ DB=null; }
   if(!DB || !DB.version){
     DB = { version:1, hospName:'우리병원 관리',
@@ -541,7 +555,7 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(DB.payLock && typeof DB.payLock!=='object') DB.payLock=null;
   if(!DB.geo || typeof DB.geo!=='object') DB.geo={on:false,lat:null,lng:null,radiusM:200};
   if(typeof DB.geo.radiusM!=='number') DB.geo.radiusM=200; }
-function saveDB(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPush(); }
+function saveDB(){ if(DEMO) return; localStorage.setItem(STORE_KEY, JSON.stringify(DB)); cloudPush(); }
 
 function seedDemo(){
   const s1=uid(), s2=uid(), s3=uid();
@@ -6103,6 +6117,7 @@ function mergeStaff(){              // 명단 + (관리자면) PIN
 
 /* ---------- 시작 ---------- */
 function cloudInit(){
+  if(DEMO){ updateSyncBadge('local'); return; }
   if(!cloudConfigured()){ updateSyncBadge('local'); return; }
   try{
     if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
@@ -6443,8 +6458,12 @@ function cloudPush(force){
    - (참고) 화면 단에서 숨기는 방식 — 신뢰하는 병원 직원 사이용.
    ======================================================================== */
 function normPhone(s){ return String(s||'').replace(/\D/g,''); }
-function sessionId(){ return localStorage.getItem('hosp_uid')||''; }
-function setSession(id){ id? localStorage.setItem('hosp_uid',id) : localStorage.removeItem('hosp_uid'); }
+let demoSession='';
+function sessionId(){ return DEMO? demoSession : (localStorage.getItem('hosp_uid')||''); }
+function setSession(id){
+  if(DEMO){ demoSession = id||''; return; }
+  id? localStorage.setItem('hosp_uid',id) : localStorage.removeItem('hosp_uid');
+}
 function currentUser(){ const id=sessionId(); return id? DB.staff.find(s=>s.id===id && s.active!==false) : null; }
 // 권한 3단계 — 오너(최고관리자) · 인사담당자 · 직원
 // 예전 데이터의 '관리자'가 곧 오너다. 값을 그대로 둬서 로그인이 끊기지 않는다.
@@ -6987,11 +7006,25 @@ function copyAppLink(){
     .then(()=>toast('주소를 복사했어요'), ()=>prompt('이 주소를 복사해 주세요', url));
 }
 
+/* 데모는 로그인을 건너뛰고 바로 안을 보여준다. 보여주기가 목적이라
+   문 앞에서 막히면 아무 소용이 없다. 대신 저장은 한 글자도 하지 않는다. */
+function startDemo(){
+  const bar=$('#demoBar');
+  if(bar){
+    bar.innerHTML = `보기용 화면이에요 — <b>저장되지 않습니다.</b> 창을 닫으면 사라져요.
+      &nbsp;<a href="./${WS_ID==='clinic'?'':'?h='+encodeURIComponent(WS_ID)}">진짜 앱으로</a>`;
+    bar.classList.add('show');
+  }
+  const admin = (DB.staff||[]).find(s=>s.role===ROLE_OWNER) || (DB.staff||[])[0];
+  if(admin) setSession(admin.id);
+}
+
 function boot(){
   loadDB();
   $('#hospName').textContent = DB.hospName || '우리병원 관리';
   $('#todayStr').textContent = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
   $('#attDate').value = todayKey();
+  if(DEMO) startDemo();
   renderHome();
   applyRole();
   showInAppBrowserBar();
