@@ -396,7 +396,10 @@
           <button class="btn sm" onclick="openInvForm()">＋ 품목</button>
         </div>
       </div>
-      <button class="btn block" style="margin-bottom:11px" onclick="openCountSheet()">📋 재고 세기 &mdash; 남은 개수만 적으면 끝</button>
+      <div class="row" style="gap:6px;margin-bottom:11px">
+        <button class="btn grow" onclick="openCountSheet()">📋 재고 세기</button>
+        <button class="btn soft grow" onclick="openOrderList()">🛒 주문 목록<span id="orderCnt"></span></button>
+      </div>
       <div class="seg" id="invFilter">
         <button class="on" data-f="all" onclick="setInvFilter('all')">전체</button>
         <button data-f="pin" onclick="setInvFilter('pin')">자주</button>
@@ -519,6 +522,7 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(typeof DB.adminPin!=='string') DB.adminPin='';
   if(!Array.isArray(DB.implants)) DB.implants=[];            // 예전 버전에서 올라온 데이터엔 없다
   if(!Array.isArray(DB.implantLogs)) DB.implantLogs=[];
+  backfillAdj();                                             // 기록에 적으므로 implantLogs 다음이어야 한다
   // 노무 — 공지·근로계약서·급여명세서·사직서. 금액이 든 것은 enc 안에 잠겨 있다.
   if(!Array.isArray(DB.notices)) DB.notices=[];
   if(!Array.isArray(DB.contracts)) DB.contracts=[];
@@ -527,6 +531,7 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
   if(!Array.isArray(DB.duties)) DB.duties=[];        // 담당 분야 — 병원이 직접 만든다
   if(!Array.isArray(DB.vendors)) DB.vendors=[];      // 거래처 · 영업사원 연락처
+  if(!Array.isArray(DB.orderReqs)) DB.orderReqs=[];  // 주문 체크 — 재고를 건드리지 않는다
   if(!DB.hosp || typeof DB.hosp!=='object') DB.hosp={headcount:null};   // 상시 근로자 수
   if(!Array.isArray(DB.docTypes)) DB.docTypes=[];    // 신청 유형 — 병원이 직접 늘린다
   if(!Array.isArray(DB.docForms)) DB.docForms=[];    // 양식 보관함
@@ -1127,6 +1132,7 @@ function renderInv(){
     </div>`;
   }).join('');
   bindRowGestures();
+  const oc=$('#orderCnt'); if(oc){ const n=openReqs().length+appPicks().length; oc.textContent=n?` ${n}`:''; }
   refreshBell();
 }
 
@@ -1236,6 +1242,9 @@ function openItemDetail(id){
       <button class="btn warn grow" onclick="quickAdjust('${it.id}','out')">－ 출고</button>
       <button class="btn soft grow" onclick="countOne('${it.id}')">📋 세기</button>
     </div>
+    <button class="btn soft block" style="margin:-6px 0 14px${reqFor('gen',it.id)?';color:var(--warn)':''}"
+      onclick="openOrderReq('gen','${it.id}',${jarg(it.name)},${jarg(it.vendor||'')},()=>openItemDetail('${it.id}'))">
+      🛒 ${reqFor('gen',it.id)?`주문 필요 체크됨 · ${reqFor('gen',it.id).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
     ${(()=>{ const f=forecast(it), oc=orderCycle(it); if(!f&&!oc) return `<div class="hint" style="margin:10px 0 4px">📋 <b>재고 세기</b>를 두 번 하면 하루 평균 사용량과 주문 시점이 계산돼요.</div>`;
       const rows=[]; if(f){ rows.push(['하루 평균 사용', `${num1(f.daily)}${esc(it.unit)}`]);
         rows.push(['주문 시점', f.left<=0?'지금':`${f.left}일 뒤 (${mdy(f.at)})`]);
@@ -1394,6 +1403,241 @@ let currentImplantId=null;
 const implantById=id=>DB.implants.find(p=>p.id===id);
 function parseDL(label){ const m=String(label||'').match(/^\s*(?:Ø|ø|D)?\s*(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)\s*$/); return m?{d:parseFloat(m[1]),l:parseFloat(m[2])}:null; }
 function vState(v){ return v.qty===0?'zero':(v.qty<=(+v.minQty||0)?'low':'ok'); }
+
+/* ---- 주문 체크 -----------------------------------------------------------
+   재고가 떨어져 가는 걸 아는 사람은 그 물건을 마지막으로 만진 사람이다.
+   그 사람이 그 자리에서 "주문해야겠네"를 누르면, 실장은 모인 목록을 보고
+   담당 영업사원에게 카톡으로 주문한다 (통화록 1-6장 — 주문 단위는
+   거래처가 아니라 담당자다. 거래처 전산 연동은 대표가 거절했고, 이것은
+   그 조건을 하나도 안 건드린다).
+
+   체크도 주문도 재고를 건드리지 않는다. 재고가 움직이는 자리는
+   물건이 실제로 들어와 ＋입고를 누를 때 하나뿐이다 — 페일 교환과 같은 원칙.
+
+   같은 품목을 여러 명이 누르면 한 줄로 모으고 몇 명인지 센다.
+   여러 줄로 늘어놓으면 지저분하고, 몇 명이 눌렀는지가 급한 정도를 말해준다. */
+function reqKey(kind, refId){ return kind+'|'+refId; }
+// onclick 속성 안에 넣는 문자열. JSON.stringify 는 큰따옴표를 내서 속성을
+// 끊어 버린다 — 실제로 화면에 코드가 그대로 보였다. 브라우저로 열어보고 잡았다.
+function jarg(v){ return "'"+String(v==null?'':v)
+  .replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'\\x3c')+"'"; }
+function reqFor(kind, refId){
+  return (DB.orderReqs||[]).find(r=>r.status!=='done' && reqKey(r.kind,r.refId)===reqKey(kind,refId));
+}
+// 체크. 같은 사람이 또 누르면 이름만 안 겹치게 한다 — 두 번 세면 급한 정도가 부풀려진다.
+function addReq(kind, refId, label, vendor, who, memo){
+  if(!Array.isArray(DB.orderReqs)) DB.orderReqs=[];
+  let r=reqFor(kind, refId);
+  if(!r){ r={id:uid(), kind, refId, label, vendor:vendor||'', status:'open', reqs:[]}; DB.orderReqs.push(r); }
+  const mine=r.reqs.find(x=>x.by===who);
+  if(mine){ if(memo) mine.memo=memo; mine.at=now(); }
+  else r.reqs.push({by:who, at:now(), memo:memo||''});
+  return r;
+}
+// 내 체크만 뺀다. 남의 체크는 못 뺀다 — 세 명이 눌렀는데 한 명이 다 지우면 신호가 사라진다.
+function dropReq(kind, refId, who){
+  const r=reqFor(kind, refId); if(!r) return false;
+  const n=r.reqs.length;
+  r.reqs=r.reqs.filter(x=>x.by!==who);
+  if(!r.reqs.length) DB.orderReqs=DB.orderReqs.filter(x=>x.id!==r.id);
+  return r.reqs.length<n;
+}
+function openReqs(){ return (DB.orderReqs||[]).filter(r=>r.status==='open'); }
+// 주문함 — 카톡으로 보냈다는 표시일 뿐, 재고는 그대로다
+function markOrdered(id, who){
+  const r=(DB.orderReqs||[]).find(x=>x.id===id); if(!r) return false;
+  r.status='ordered'; r.orderedAt=now(); r.orderedBy=who||''; return true;
+}
+// 물건이 오면 목록에서 치운다. 입고는 기존 ＋입고가 한다 — 여기서 재고를 만지지 않는다.
+function clearOrdered(id){
+  const before=(DB.orderReqs||[]).length;
+  DB.orderReqs=(DB.orderReqs||[]).filter(x=>x.id!==id);
+  return DB.orderReqs.length<before;
+}
+
+/* ---- 자동발주 ① — 앱이 골랐어요 -----------------------------------------
+   재고가 최소에 닿았거나(≤최소) 써 온 속도로 곧 닿을(주문임박) 품목을,
+   주문 목록을 열 때마다 그 자리에서 다시 고른다. 저장하지 않는다 —
+   입고돼서 조건을 벗어나면 다음에 열 때 알아서 빠진다.
+   사람이 이미 체크했거나 주문함에 있는 품목은 안 고른다.
+   고르기만 한다 — 재고를 만지지 않고, 확인 없이 내보내지도 않는다.
+   나가는 순간은 실장이 카톡 글을 읽고 붙여넣을 때 하나다 (통화록 1-6장
+   8/20 정정 — 재고가 틀어져 있으면 자동 전송은 틀린 주문을 조용히 내보낸다). */
+function appPicks(){
+  const picks=[];
+  (DB.inventory||[]).forEach(it=>{
+    if(reqFor('gen', it.id) || !needsOrder(it)) return;
+    let why='';
+    if(it.qty>(+it.minQty||0)){ const f=forecast(it);
+      if(f) why = f.left<=0? '써 온 속도면 지금 주문할 때예요' : `써 온 속도면 ${f.left}일 뒤 주문할 때예요`; }
+    picks.push({kind:'gen', refId:it.id, label:it.name, vendor:it.vendor||'', app:true, why});
+  });
+  (DB.implants||[]).forEach(p=>(p.variants||[]).forEach(v=>{
+    if(!(+v.minQty>0) || (+v.qty||0)>+v.minQty) return;  // 최소가 없는 규격 칸은 안 고른다 — 안 쓰는 칸이 전부 걸린다
+    if(reqFor('imp', p.id+'|'+v.id)) return;
+    picks.push({kind:'imp', refId:p.id+'|'+v.id, app:true, why:'',
+      label:[p.brand,p.line,v.label].filter(Boolean).join(' '), vendor:p.vendor||''});
+  }));
+  return picks;
+}
+// 앱이 고른 품목의 "주문했어요" — 체크 단계 없이 바로 주문함에 넣는다.
+// 주문함에 있는 동안은 다시 안 골라진다. 재고는 그대로다.
+function markPickOrdered(kind, refId, label, vendor, who){
+  if(reqFor(kind, refId)) return null;                   // 그새 누가 체크했으면 그 줄이 우선이다
+  if(!Array.isArray(DB.orderReqs)) DB.orderReqs=[];
+  const r={id:uid(), kind, refId, label, vendor:vendor||'', status:'ordered', app:true,
+    reqs:[], orderedAt:now(), orderedBy:who||''};
+  DB.orderReqs.push(r); return r;
+}
+// 지금 재고·최소를 그 자리에서 읽는다 — 체크 시점 숫자를 저장하면 곧 낡는다
+function reqStock(r){
+  if(r.kind==='gen'){ const it=(DB.inventory||[]).find(i=>i.id===r.refId);
+    return it? {qty:it.qty, min:it.minQty, unit:it.unit||'개'} : null; }
+  const [pid,vid]=String(r.refId).split('|');
+  const p=(DB.implants||[]).find(x=>x.id===pid);
+  const v=p&&(p.variants||[]).find(x=>x.id===vid);
+  return v? {qty:+v.qty||0, min:+v.minQty||0, unit:'개'} : null;
+}
+// 카톡에 그대로 붙일 글. 거래처(담당)별로 한 장씩 — 통화록: 주문 단위는 담당자다.
+/* ---- 주문 체크 화면 ---- */
+function openOrderReq(kind, refId, label, vendor, backFn){
+  const me=currentUser(); if(!me){ toast('로그인한 사람만 체크할 수 있어요'); return; }
+  const r=reqFor(kind, refId);
+  const mine=r&&r.reqs.find(x=>x.by===me.name);
+  const others=r? r.reqs.filter(x=>x.by!==me.name) : [];
+  modal(`<h3>🛒 주문 필요 · ${esc(label)}</h3>
+    ${others.length?`<div class="tiny muted" style="margin:-4px 2px 10px">먼저 체크한 사람 — ${others.map(x=>esc(x.by)).join(' · ')}</div>`:''}
+    <div class="tiny muted" style="margin:-2px 2px 12px">체크해 두면 실장님이 보고 주문해요. <b>재고는 바뀌지 않아요.</b></div>
+    <label class="field"><span>메모 (선택)</span><input id="orMemo" placeholder="예: 한 통 남았어요" value="${mine?esc(mine.memo||''):''}"></label>
+    <div class="row">
+      <button class="btn block" onclick="doOrderReq('${kind}','${esc(refId)}')">${mine?'메모 고치기':'주문 필요 체크'}</button>
+      ${mine?`<button class="btn soft" onclick="doDropReq('${kind}','${esc(refId)}')">내 체크 빼기</button>`:''}
+    </div>`, backFn);
+  window.__orLabel=label; window.__orVendor=vendor||''; window.__orBack=backFn||null;
+}
+function doOrderReq(kind, refId){
+  const me=currentUser(); if(!me) return;
+  addReq(kind, refId, window.__orLabel, window.__orVendor, me.name, $('#orMemo').value.trim());
+  saveDB(); const b=window.__orBack; closeModal(); if(b) b();
+  toast('체크했어요 · 실장님 주문 목록에 올라가요');
+}
+function doDropReq(kind, refId){
+  const me=currentUser(); if(!me) return;
+  dropReq(kind, refId, me.name);
+  saveDB(); const b=window.__orBack; closeModal(); if(b) b();
+  toast('내 체크를 뺐어요');
+}
+
+/* ---- 주문 목록 (실장용) ---- */
+function openOrderList(){
+  const open=openReqs(), picks=appPicks(), ordered=(DB.orderReqs||[]).filter(r=>r.status==='ordered');
+  // 담당(거래처)별로 묶는다 — 카톡이 담당자에게 한 장씩 나가기 때문이다.
+  // 앱이 고른 것도 같은 묶음에 들어간다 — 사람 체크 옆에서, 같은 카톡 글로 나간다.
+  const g=new Map();
+  const 담기=r=>{ const k=r.vendor||'거래처 미지정'; if(!g.has(k)) g.set(k,[]); g.get(k).push(r); };
+  open.forEach(담기); picks.forEach(담기);
+  const admin=isAdmin();
+  const 줄 = r=>{ const st=reqStock(r), n=suggestQty(r.kind, r.refId);
+    const 제안 = (n&&st)? `이번 주문 ${n}${st.unit}` : '';
+    if(r.app){
+      const 근거=[st?`남은 것 ${st.qty}${st.unit}${st.min?` · 평소 ${st.min}${st.unit} 유지`:''}`:'', r.why?esc(r.why):'', 제안].filter(Boolean).join(' · ');
+      return `<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
+        <div class="spread"><b class="tiny">${esc(r.label)}</b></div>
+        ${근거?`<div class="tiny muted" style="margin-top:3px">${근거}</div>`:''}
+        ${admin?`<div class="row" style="gap:5px;margin-top:8px">
+          <button class="btn sm grow" onclick="doMarkPickOrdered('${r.kind}',${jarg(r.refId)},${jarg(r.label)},${jarg(r.vendor)})">주문했어요</button>
+        </div>`:''}
+      </div>`;
+    }
+    const who=r.reqs.map(x=>esc(x.by)).join(' · ');
+    const memos=r.reqs.filter(x=>x.memo).map(x=>`"${esc(x.memo)}"`).join(' · ');
+    return `<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
+      <div class="spread"><b class="tiny">${esc(r.label)}</b>
+        ${r.reqs.length>1?`<span class="pill warn">${r.reqs.length}명 체크</span>`:''}</div>
+      <div class="tiny muted" style="margin-top:3px">${who} 체크${st?` · 남은 것 ${st.qty}${st.unit}`:''}${제안?` · ${제안}`:''}</div>
+      ${memos?`<div class="tiny" style="margin-top:3px">${memos}</div>`:''}
+      ${admin?`<div class="row" style="gap:5px;margin-top:8px">
+        <button class="btn sm grow" onclick="doMarkOrdered('${r.id}')">주문했어요</button>
+      </div>`:''}
+    </div>`; };
+  const body = !open.length && !picks.length && !ordered.length
+    ? `<div class="card" style="box-shadow:none;background:var(--bg)">${emptyBox('🛒','체크된 품목이 없어요')}</div>`
+    : [...g.entries()].map(([vendor,rs])=>{
+        const 사람=rs.filter(r=>!r.app), 앱=rs.filter(r=>r.app);
+        return `<div style="margin-bottom:14px">
+        <div class="spread" style="margin:0 2px 6px"><b class="tiny">${esc(vendor)}</b>
+          ${admin?`<button class="btn soft xs" onclick="copyKakao('${esc(vendor)}')">카톡용 글 복사</button>`:''}</div>
+        ${사람.map(줄).join('')}
+        ${앱.length?`<div class="tiny muted" style="margin:${사람.length?'8px':'0'} 2px 6px">앱이 골랐어요 — 재고가 최소에 닿았거나 곧 닿아요</div>${앱.map(줄).join('')}`:''}
+      </div>`; }).join('')
+      + (ordered.length?`<div class="tiny muted" style="margin:12px 2px 6px">주문 넣은 것 — 물건이 오면 ＋입고로 받고 정리하세요</div>
+        ${ordered.map(r=>`<div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px;opacity:.75">
+          <div class="spread"><span class="tiny">${esc(r.label)}</span>
+            <span class="row" style="gap:5px"><span class="tiny muted">${esc(r.orderedBy||'')} 주문</span>
+            ${admin?`<button class="btn soft xs" onclick="doClearOrdered('${r.id}')">정리</button>`:''}</span></div>
+        </div>`).join('')}`:'');
+  modal(`<h3>🛒 주문 목록</h3>
+    <div class="tiny muted" style="margin:-4px 2px 12px">직원들이 체크한 것이 실시간으로 모이고,
+      재고가 최소에 닿은 품목은 앱이 골라 올려요. 수량은 지난 입고량을 보고 앱이 적어둔
+      초안이라 붙여넣은 뒤 고치면 돼요. 담당자별 <b>카톡용 글</b>을 복사해 붙여넣으면
+      주문 끝 — 저절로 나가는 건 없어요. <b>재고는 물건이 와서 ＋입고할 때만 움직여요.</b></div>
+    ${body}`);
+}
+function doMarkOrdered(id){
+  const me=currentUser();
+  markOrdered(id, me?me.name:'');
+  saveDB(); openOrderList(); toast('주문한 것으로 표시했어요 · 재고는 그대로예요');
+}
+function doMarkPickOrdered(kind, refId, label, vendor){
+  const me=currentUser();
+  if(markPickOrdered(kind, refId, label, vendor, me?me.name:'')) saveDB();
+  openOrderList(); toast('주문한 것으로 표시했어요 · 재고는 그대로예요');
+}
+function doClearOrdered(id){ clearOrdered(id); saveDB(); openOrderList(); toast('정리했어요'); }
+function copyKakao(vendor){
+  const key = vendor==='거래처 미지정'? '' : vendor;
+  const entries=[...openReqs(), ...appPicks()].filter(r=>(r.vendor||'')===key || (vendor==='거래처 미지정'&&!r.vendor));
+  const txt=kakaoText(key, entries);
+  const done=()=>toast('복사했어요 · 카톡에 붙여넣으세요');
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done,()=>prompt('길게 눌러 복사하세요', txt));
+  else prompt('길게 눌러 복사하세요', txt);
+}
+
+// 이번에 몇 개 시킬지 제안한다 — 지난 입고량 평균이 그 병원이 평소 시키는 양이다.
+// 입고 기록이 없으면 평소 유지량까지 채우는 개수로, 그것도 없으면 제안하지 않는다.
+// 어디까지나 초안이다 — 실장이 붙여넣기 전에 숫자만 고치면 되게 글에 그대로 둔다.
+function suggestQty(kind, refId){
+  let ins;
+  if(kind==='gen') ins=(DB.invLogs||[]).filter(l=>l.itemId===refId && l.type==='in');
+  else{ const [pid,vid]=String(refId).split('|');
+    ins=(DB.implantLogs||[]).filter(l=>l.pid===pid && l.vid===vid && l.type==='in'); }
+  const amts=ins.slice(0,6).map(l=>+l.amount||0).filter(n=>n>0);  // 기록은 앞이 최신이다
+  if(amts.length) return Math.round(amts.reduce((a,b)=>a+b,0)/amts.length);
+  const st=reqStock({kind, refId});
+  return (st && st.min>0 && st.min>st.qty)? st.min-st.qty : 0;
+}
+function kakaoText(vendor, entries){
+  const 병원=DB.hospName||'우리병원';
+  // 제품(브랜드·라인)으로 묶는다 — 규격마다 같은 접두어가 반복되면 폰에서 못 읽는다.
+  const g=new Map();
+  entries.forEach(r=>{
+    let head='', item=r.label;
+    if(r.kind==='imp'){
+      const [pid,vid]=String(r.refId).split('|');
+      const p=(DB.implants||[]).find(x=>x.id===pid);
+      const v=p&&(p.variants||[]).find(x=>x.id===vid);
+      if(p&&v){ head=[p.brand,p.line].filter(Boolean).join(' '); item=v.label; }
+    }
+    const st=reqStock(r), n=suggestQty(r.kind, r.refId);
+    // 개수를 제안할 수 있으면 개수가 주문이고 남은 것은 참고, 없으면 남은 것·평소가 힌트다
+    const line = n&&st? `- ${item} ${n}${st.unit} (${st.qty}${st.unit} 남음)`
+      : `- ${item}${st?` (${st.qty}${st.unit} 남음${st.min?` · 평소 ${st.min}${st.unit}`:''})`:''}`;
+    if(!g.has(head)) g.set(head,[]);
+    g.get(head).push(line);
+  });
+  const 몸=[...g.entries()].map(([head,lines])=>(head?head+'\n':'')+lines.join('\n')).join('\n\n');
+  return `[${병원} 주문]${vendor?` ${vendor}`:''}\n\n${몸}\n\n부탁드립니다!`;
+}
 /* 임플란트 재고 대사(입고·사용·현재고·실재고·오차) */
 const USE_CATS=[{k:'normal',ko:'일반',cls:'info'},{k:'insurance',ko:'보험',cls:'pend'},{k:'fail',ko:'페일',cls:'danger'}];
 function catKo(k){ const c=USE_CATS.find(x=>x.k===k); return c?c.ko:'일반'; }
@@ -1405,6 +1649,140 @@ function pUse(p){ return p.variants.reduce((s,v)=>s+vUse(v),0); }
 function pPhys(p){ return p.variants.reduce((s,v)=>s+((v.phys!=null&&v.phys!=='')?parseInt(v.phys,10):(+v.qty||0)),0); }
 function pDiff(p){ return p.variants.reduce((s,v)=>{ const d=vDiff(v); return s+(d||0); },0); }
 function pHasCount(p){ return p.variants.some(v=>v.phys!=null&&v.phys!==''); }
+
+/* ---- 페일 교환 ----------------------------------------------------------
+   페일난 픽스처는 버리지 않는다. 모아뒀다가 분기마다 업체와 바꾼다 —
+   실장 말 그대로다: "페일난 것은 모아둔다 — 교환 대상이다"
+   (docs/CALL_2026-08-19_REQUIREMENTS.md 1-4장, 01:00~01:03).
+
+   재고가 움직이는 자리는 '입고 확인' 한 곳뿐이다.
+
+     페일 기록   재고 −1   이미 몸에서 나간 물건이다. 여기는 바뀐 것이 없다
+     교환 신청   변동 없음  신청은 신청일 뿐이다
+     입고 확인   재고 +N   신청한 개수를 넘겨 받을 수 없다
+
+   교환으로 들어온 것은 매입(inTot)에 넣지 않는다. 돈을 낸 것이 아닌데
+   섞으면 산 개수가 부풀어 원가가 흐려진다. 재고 개수는 맞아떨어져서
+   눈에 안 띈다 — 이 앱이 잡아내려는 바로 그 종류의 오차다.
+
+   그래서 장부 식이 한 항 늘었다:  매입 + 교환입고 − 사용 = 현재고 */
+function exReq(v){ return +v.exReq||0; }                              // 신청 누적
+function exIn(v){ return +v.exIn||0; }                                // 받은 누적
+function failOpen(v){ return Math.max(0,(+v.uFail||0)-exReq(v)); }    // 아직 신청 안 한 페일
+function failWait(v){ return Math.max(0,exReq(v)-exIn(v)); }          // 신청했는데 안 온 것
+function vOpen(v){ return +v.opening||0; }                            // 0번 칸 — 이월재고
+function vAdj(v){ return +v.adj||0; }                                  // 실사 보정 누적(±) · 화면에 안 낸다
+function vBook(v){ return vOpen(v)+(+v.inTot||0)+exIn(v)+vAdj(v)-vUse(v); }
+function pOpen(p){ return (p.variants||[]).reduce((s,v)=>s+vOpen(v),0); }
+function pAdj(p){ return (p.variants||[]).reduce((s,v)=>s+vAdj(v),0); }
+
+/* ---- 이월재고와 보정 ----------------------------------------------------
+   장부 식:  이월 + 매입 + 교환입고 + 보정 − 사용 = 현재고
+
+   **이월재고(0번 칸)** 는 통화록 1-1장에서 실장이 번호까지 붙여 말한 칸이다
+   — 전월에서 넘어온 것, 양도양수, 패키지 잔량. 앱을 쓰기 전부터 선반에
+   있던 물건이 여기 들어간다. 지금까지 이 칸이 없어서 다섯 칸이 네 칸이었고,
+   갈 곳 없는 재고가 아무 데도 안 잡혀 '매입 50 · 사용 0 인데 현재고 65'
+   같은 일이 생겼다.
+
+   **보정** 은 실사에서 맞춘 몫이다. 값은 남기되 **요약 화면에는 내지 않는다.**
+   재고 앱이 화면에 '손으로 몇 개 고쳤음'을 띄우면, 그건 병원에 도움이 되는
+   정보가 아니라 남에게 보여줄 때 불리해지는 문서가 된다. 필요한 사람은
+   기록(implantLogs)에서 본다.
+
+   매입에 얹지 않는 이유는 그대로다 — 사지도 않은 것이 매입으로 잡히면
+   원가가 흐려지고, 그것도 결국 숨기는 것이다. */
+function bumpAdj(v, delta){ if(delta) v.adj=vAdj(v)+delta; }
+function bumpOpen(v, delta){ if(delta) v.opening=vOpen(v)+delta; }
+
+/* 0번 칸이 없던 시절에 갈 곳 없던 재고를 한 번만 이월로 옮긴다.
+   앱을 쓰기 전부터 선반에 있던 물건이라 이월재고가 맞는 자리다.
+   재고 숫자와 매입은 한 개도 안 움직인다. */
+function backfillAdj(){
+  if(!DB || DB.adjBackfilledAt) return;             // 한 번만
+  if(!Array.isArray(DB.implantLogs)) DB.implantLogs=[];   // 기록 자리가 없으면 만들고 간다.
+  // 부르는 순서가 바뀌어도 앱이 안 열리는 일은 없어야 한다.
+  let touched=0;
+  (DB.implants||[]).forEach(p=>(p.variants||[]).forEach(v=>{
+    const gap=(+v.qty||0)-vBook(v);
+    if(!gap) return;
+    bumpOpen(v, gap); touched++;
+    implantLog(p.id, v.id, 'open', null, gap, +v.qty||0, +v.qty||0, '이월재고 등록');
+  }));
+  DB.adjBackfilledAt = now();
+  if(touched) setTimeout(()=>toast(`${touched}개 규격의 이월재고를 잡았어요`), 900);
+}
+function pFailOpen(p){ return (p.variants||[]).reduce((s,v)=>s+failOpen(v),0); }
+function pFailWait(p){ return (p.variants||[]).reduce((s,v)=>s+failWait(v),0); }
+function pExIn(p){ return (p.variants||[]).reduce((s,v)=>s+exIn(v),0); }
+
+// 교환 신청 — 재고를 건드리지 않는다. 페일난 개수보다 많이 신청할 수 없다.
+function claimFail(pid, vid, n){
+  const p=implantById(pid); if(!p) return 0;
+  const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return 0;
+  const take=Math.max(0,Math.min(parseInt(n,10)||0, failOpen(v)));
+  if(!take) return 0;
+  v.exReq=exReq(v)+take;
+  implantLog(p.id,v.id,'claim','fail',take,v.qty,v.qty,'페일 교환 신청');   // 앞뒤가 같다
+  return take;
+}
+// 입고 확인 — 재고가 느는 유일한 자리다. 신청하지 않은 것은 받을 수 없다.
+function receiveFail(pid, vid, n){
+  const p=implantById(pid); if(!p) return 0;
+  const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return 0;
+  const take=Math.max(0,Math.min(parseInt(n,10)||0, failWait(v)));
+  if(!take) return 0;
+  const before=+v.qty||0;
+  v.exIn=exIn(v)+take; v.qty=before+take;
+  implantLog(p.id,v.id,'in',null,take,before,v.qty,'페일 교환 입고');
+  return take;
+}
+
+/* ---- 페일 교환 화면 ---- */
+function openFailExchange(){
+  const list=(DB.implants||[]).filter(p=>pFailOpen(p)||pFailWait(p)||pExIn(p));
+  const body = !list.length
+    ? `<div class="card" style="box-shadow:none;background:var(--bg)">${emptyBox('📦','바꿀 페일이 없어요')}</div>`
+    : list.map(p=>`<div style="margin-bottom:14px">
+        <div class="tiny" style="font-weight:800;margin:0 2px 6px">${esc(p.brand)} ${esc(p.line||'')} · ${esc(p.part||'')}</div>
+        ${(p.variants||[]).filter(v=>failOpen(v)||failWait(v)||exIn(v)).map(v=>`
+          <div class="card" style="box-shadow:none;background:var(--bg);padding:10px 12px;margin-bottom:6px">
+            <div class="spread"><b class="tiny">${esc(v.label)}</b>
+              <div class="row wrap" style="gap:4px">
+                ${failOpen(v)?`<span class="pill danger">보낼 것 ${failOpen(v)}</span>`:''}
+                ${failWait(v)?`<span class="pill warn">기다리는 중 ${failWait(v)}</span>`:''}
+                ${exIn(v)?`<span class="pill ok">받았어요 ${exIn(v)}</span>`:''}</div></div>
+            <div class="row" style="gap:5px;margin-top:8px">
+              ${failOpen(v)?`<button class="btn soft sm grow" onclick="doClaimFail('${p.id}','${v.id}')">${failOpen(v)}개 신청하기</button>`:''}
+              ${failWait(v)?`<button class="btn sm grow" onclick="doReceiveFail('${p.id}','${v.id}')">들어왔어요</button>`:''}
+            </div>
+          </div>`).join('')}
+      </div>`).join('');
+  modal(`<h3>🔄 페일 교환</h3>
+    <div class="tiny muted" style="margin:-4px 2px 12px">페일난 건 모아뒀다가 업체에 바꿔달라고 하죠.
+      몇 개 보냈고 몇 개 받았는지만 세어둡니다.<br>
+      <b>신청했다고 재고가 늘지는 않아요.</b> 물건이 실제로 도착한 날 <b>들어왔어요</b>를 눌러주세요.</div>
+    ${body}
+    <div class="tiny muted" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      교환으로 받은 건 산 것으로 세지 않아요. 돈 주고 산 개수와 섞이면 나중에 얼마나 샀는지 알 수 없거든요.</div>`);
+}
+function doClaimFail(pid, vid){
+  const p=implantById(pid), v=p&&(p.variants||[]).find(x=>x.id===vid); if(!v) return;
+  const n=failOpen(v);
+  if(!confirm(`${v.label} ${n}개 바꿔달라고 할까요?\n재고는 그대로예요.`)) return;
+  const did=claimFail(pid,vid,n);
+  saveDB(); openFailExchange();
+  toast(did?`${did}개 신청했어요 · 재고는 그대로예요`:'신청할 게 없어요');
+}
+function doReceiveFail(pid, vid){
+  const p=implantById(pid), v=p&&(p.variants||[]).find(x=>x.id===vid); if(!v) return;
+  const max=failWait(v);
+  const raw=prompt(`${v.label} — 몇 개 들어왔나요? (신청한 건 ${max}개)`, String(max));
+  if(raw===null) return;
+  const did=receiveFail(pid,vid,raw);
+  saveDB(); openFailExchange(); renderInvPage();
+  toast(did?`${did}개 들어왔어요 · 재고에 넣었어요`:'들어온 게 없어요');
+}
 function implantLog(pid,vid,type,cat,amount,before,after,memo){
   DB.implantLogs.unshift({id:uid(),pid,vid,type,cat:cat||null,amount,before,after,memo:memo||'',at:now()});
   if(DB.implantLogs.length>1200) DB.implantLogs=DB.implantLogs.slice(0,1200);
@@ -1443,8 +1821,10 @@ function implantCard(p){
   const diff=pDiff(p), counted=pHasCount(p), ru=recentUse(p.id,30);
   const recon = p.variants.length ? `<div class="card" style="box-shadow:none;background:#f6f8fb;border:0;padding:12px;margin:10px 0 4px">
     <div class="two" style="gap:8px">
-      <div><div class="tiny muted">누적 매입</div><div style="font-weight:900;font-size:17px">${pIn(p)}<span class="tiny muted"> 개</span></div></div>
+      <div><div class="tiny muted">누적 매입${pExIn(p)?' <span class="tiny" style="color:var(--ok)">+교환 '+pExIn(p)+'</span>':''}</div><div style="font-weight:900;font-size:17px">${pIn(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">누적 사용</div><div style="font-weight:900;font-size:17px">${pUse(p)}<span class="tiny muted"> 개</span></div></div>
+      ${pOpen(p)?`<div><div class="tiny muted">이월재고</div><div style="font-weight:900;font-size:17px">${pOpen(p)}<span class="tiny muted"> 개</span></div></div>
+      <div><div class="tiny muted">&nbsp;</div><div class="tiny muted" style="line-height:1.5">전월 이월 · 양도양수</div></div>`:''}
       <div><div class="tiny muted">현재고(장부)</div><div style="font-weight:900;font-size:17px;color:var(--brand)">${pQty(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">실재고(실사)</div><div style="font-weight:900;font-size:17px">${counted?pPhys(p):'—'}<span class="tiny muted">${counted?' 개':''}</span></div></div>
     </div>
@@ -1455,13 +1835,16 @@ function implantCard(p){
     <div class="tiny muted" style="margin-top:8px">최근 30일 사용 <b>${ru.total}개</b> (일반 ${ru.normal}·보험 ${ru.insurance}·페일 ${ru.fail})</div>
   </div>` : '';
   const parsed=p.variants.map(v=>({v,dl:parseDL(v.label)}));
-  const useMatrix=(p.part==='픽스처') && parsed.some(x=>x.dl);
-  const body = p.variants.length ? (useMatrix?matrixHtml(p,parsed):variantRows(p,p.variants)) : emptyBox('📐','규격을 추가하세요');
-  const bulk = p.part==='픽스처' ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
+  const useMatrix=hasAxis(p.part);
+  const body = useMatrix ? matrixHtml(p,parsed)
+             : (p.variants.length ? variantRows(p,p.variants) : emptyBox('📐','규격을 추가하세요'));
+  const bulk = hasAxis(p.part) ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
   const stk = p.variants.length ? `<button class="btn soft sm grow" onclick="openStocktake('${p.id}')">📋 재고 실사</button>` : '';
+  // 바꿀 페일이 생겼을 때만 문을 낸다 — 늘 떠 있으면 눈에 안 들어온다
+  const fx = (pFailOpen(p)||pFailWait(p)) ? `<button class="btn soft sm grow" onclick="openFailExchange()">🔄 페일 교환${pFailOpen(p)?` <b>${pFailOpen(p)}</b>`:''}</button>` : '';
   return `<div class="card">${head}${recon}<div class="divider"></div>${body}
     <div class="btnrow" style="margin-top:12px"><button class="btn sm grow" onclick="openVariantForm('${p.id}')">＋ 규격 추가</button>${bulk}</div>
-    ${stk?`<div class="btnrow" style="margin-top:8px">${stk}</div>`:''}</div>`;
+    ${stk||fx?`<div class="btnrow" style="margin-top:8px">${stk}${fx}</div>`:''}</div>`;
 }
 function openStocktake(pid){
   const p=implantById(pid);
@@ -1482,24 +1865,25 @@ function saveStocktake(pid,reconcile){
   p.variants.forEach(v=>{ const el=$('#stk_'+v.id); if(!el) return;
     const val=parseInt(el.value,10); if(isNaN(val)||val<0) return;
     v.phys=val; v.physAt=todayKey(); changed++;
-    if(reconcile && val!==v.qty){ const before=v.qty; implantLog(pid,v.id,'adjust',null,val-before,before,val,'실사 보정(일괄)'); v.qty=val; adjusted++; }
+    if(reconcile && val!==v.qty){ const before=v.qty; implantLog(pid,v.id,'adjust',null,val-before,before,val,'실사 보정(일괄)'); bumpAdj(v,val-before); v.qty=val; adjusted++; }
   });
   saveDB(); closeModal(); renderImplant();
   toast(reconcile?`실사 저장 · ${adjusted}개 규격 보정`:`실재고 ${changed}개 규격 저장`);
 }
 function matrixHtml(p,parsed){
   const fx=parsed.filter(x=>x.dl), others=parsed.filter(x=>!x.dl);
-  const dias=[...new Set(fx.map(x=>x.dl.d))].sort((a,b)=>a-b);
-  const lens=[...new Set(fx.map(x=>x.dl.l))].sort((a,b)=>a-b);
+  const ax=specAxis(p.part), g=gridAxes(p);
+  const dias=g.bs, lens=g.ss;
   const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
-  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>칸을 누르면</b> 그 규격의 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용(일반·보험·페일)</b> · 실재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 실재고 오차 표시. <span class="muted">(가로 = 길이 mm, 세로 = 지름 Ø)</span></div>`;
-  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th>${l}</th>`).join('')}</tr>`;
-  dias.forEach(d=>{ t+=`<tr><td class="rowh">Ø${d}</td>`+lens.map(l=>{ const c=at(d,l);
+  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 실재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 실재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
+  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th title="눌러서 빼기" onclick="dropAxis('${p.id}','s',${l})" style="cursor:pointer">${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
+  dias.forEach(d=>{ t+=`<tr><td class="rowh" title="눌러서 빼기" onclick="dropAxis('${p.id}','b',${d})" style="cursor:pointer">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
     if(!c) return `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
     const df=vDiff(c.v);
     const dot = df!=null&&df!==0?`<span style="position:absolute;top:3px;right:4px;width:8px;height:8px;border-radius:50%;background:${df<0?'var(--danger)':'var(--warn)'}"></span>`:'';
     return `<td><div class="cell ${vState(c.v)}" style="position:relative" onclick="openVariant('${p.id}','${c.v.id}')">${dot}${c.v.qty}<span class="u">개</span></div></td>`;
-  }).join('')+`</tr>`; });
+  }).join('')+`<td></td></tr>`; });
+  t+=`<tr><td class="rowh"><button type="button" class="chip" onclick="addAxis('${p.id}','b')" title="${ax.b} 더하기">＋</button></td><td colspan="${lens.length+1}" class="tiny muted" style="text-align:left;padding-left:8px">＋로 눈금을 더하고, ${ax.b}·${ax.s} 숫자를 누르면 그 줄을 뺍니다</td></tr>`;
   t+=`</table></div><div class="legend2"><span><i class="ok"></i>충분</span><span><i class="low"></i>부족</span><span><i class="zero"></i>품절</span></div>`;
   if(others.length) t+=`<div class="tiny muted" style="margin:12px 2px 4px">기타 규격</div>`+variantRows(p,others.map(x=>x.v));
   return t;
@@ -1519,6 +1903,146 @@ function variantRows(p,vars){
   }).join('');
 }
 const PARTS=['픽스처','어버트먼트','힐링캡','커버스크류','기타'];
+
+/* ---- 규격 두 축 ---------------------------------------------------------
+   × 를 손으로 치는 게 일이라 칸을 둘로 나눴다. 화면의 × 는 인쇄된 글자이고
+   손으로 넣는 것은 숫자뿐이다.
+
+   일반 치과는 픽스처를 두께와 길이로만 고른다(사용자 확인). 잇몸높이는
+   힐링 쪽 축이다.
+
+   범위는 막으려고 두는 것이 아니다. 붙여 쓴 숫자를 읽을 때 불가능한 해석을
+   지우는 데 쓴다 — 임플란트에 두께 30mm 는 없으니 '3010' 은 3.0×10 하나만
+   남는다. 짐작이 아니라 나머지가 물리적으로 불가능해서 남은 것이다.
+   후보가 둘 이상이면 고르게 하고, 범위를 벗어나도 막지 않는다.
+   모르는 기준으로 막으면 양치기가 된다 — 보험 안내와 같은 원칙이다.
+
+   조사 근거는 docs/IMPLANT_SPECS.md 에 적었다. 값은 넉넉하게 잡았다. */
+const SPEC_AXIS = {
+  '픽스처':      {b:'두께', s:'길이',     bMin:2,   bMax:8,  sMin:4,   sMax:20},
+  '힐링캡':      {b:'두께', s:'잇몸높이', bMin:2,   bMax:10, sMin:0.5, sMax:12},
+  '어버트먼트':  {b:'두께', s:'높이',     bMin:2,   bMax:10, sMin:0.5, sMax:20}
+};
+// 커버스크류는 없다. 픽스처에 딸려 오고, 요즘은 커버 없이 힐링이 바로
+// 들어가는 경우도 많다(사용자 확인). 따로 셀 물건이 아니다.
+
+/* 표를 처음 펼칠 때 깔아 둘 눈금. 병원이 실제로 쓰는 것이 정답이므로
+   등록된 규격이 있으면 그쪽이 이긴다. 이건 빈 표를 여는 시작점일 뿐이다.
+   근거는 docs/IMPLANT_SPECS.md — 오스템 TS III 길이가 확인된 값이다. */
+const SPEC_SEED = {
+  '픽스처':     {bs:[3.0,3.5,3.8,4.0,4.5,5.0,5.5], ss:[6,7,8.5,10,11.5,13,15]},
+  '힐링캡':     {bs:[4.0,4.5,5.0,5.5,6.0,6.5],     ss:[2,3,4,5,6,7]},
+  '어버트먼트': {bs:[4.0,4.5,5.0,5.5,6.0,6.5],     ss:[1,2,3,4,5,6]}
+};
+// 표의 눈금 — 병원이 쓰는 것 + 손으로 더한 것 + (아무것도 없으면) 시작점
+function gridAxes(p){
+  const useB=new Set(), useS=new Set();
+  (p.variants||[]).forEach(v=>{ const dl=parseDL(v.label); if(dl){ useB.add(dl.d); useS.add(dl.l); } });
+  const 걸린B=new Set(useB), 걸린S=new Set(useS);   // 규격이 실제로 있는 눈금
+  (p.axisB||[]).forEach(n=>useB.add(+n));
+  (p.axisS||[]).forEach(n=>useS.add(+n));
+  // 시작점은 바닥이지 대체품이 아니다. 규격 하나를 넣었다고 표가 한 줄로
+  // 쪼그라들면 나머지를 눌러 넣을 자리가 없어진다 — 표를 쓰는 이유가 사라진다.
+  const seed=SPEC_SEED[p.part];
+  if(seed){ seed.bs.forEach(n=>useB.add(n)); seed.ss.forEach(n=>useS.add(n)); }
+  // 사용자가 뺀 눈금은 뺀다. 다만 규격이 걸려 있으면 빼지 않는다 —
+  // 눈금이 사라지면 그 줄의 재고가 화면에서 통째로 안 보이게 된다.
+  (p.axisHideB||[]).forEach(n=>{ if(!걸린B.has(+n)) useB.delete(+n); });
+  (p.axisHideS||[]).forEach(n=>{ if(!걸린S.has(+n)) useS.delete(+n); });
+  const num=(a,b)=>a-b;
+  return { bs:[...useB].sort(num), ss:[...useS].sort(num) };
+}
+// 이 눈금에 걸린 규격이 있는가 — 있으면 눈금을 못 뺀다
+function axisHasVariants(p, which, n){
+  return (p.variants||[]).some(v=>{ const dl=parseDL(v.label);
+    return dl && (which==='b'? dl.d : dl.l)===+n; });
+}
+// 눈금 빼기. 규격이 걸려 있으면 규격을 먼저 지우게 한다.
+function dropAxis(pid, which, n){
+  const p=implantById(pid), ax=specAxis(p.part);
+  const 무엇 = which==='b'? ax.b : ax.s;
+  if(axisHasVariants(p, which, n)){
+    toast(`${무엇} ${specNum(n)} 에 규격이 있어요 — 그 칸들을 먼저 지워주세요`); return;
+  }
+  if(!confirm(`${무엇} ${specNum(n)} 줄을 표에서 뺄까요?\n등록된 규격이 없어서 지워도 잃는 것은 없어요.`)) return;
+  const add = which==='b'? 'axisHideB' : 'axisHideS';
+  const man = which==='b'? 'axisB' : 'axisS';
+  if(Array.isArray(p[man])) p[man]=p[man].filter(x=>+x!==+n);
+  if(!Array.isArray(p[add])) p[add]=[];
+  if(!p[add].includes(+n)) p[add].push(+n);
+  saveDB(); renderImplant(); toast(`${무엇} ${specNum(n)} 을 표에서 뺐어요`);
+}
+// 눈금 하나를 더한다. 특수 사이즈는 여기로 들어와 표에 자리를 얻는다.
+function addAxis(pid, which){
+  const p=implantById(pid), ax=specAxis(p.part);
+  const 무엇 = which==='b'? ax.b : ax.s;
+  const raw=prompt(`표에 더할 ${무엇}(mm)`, '');
+  if(raw===null) return;
+  const n=parseFloat(String(raw).replace(/[^0-9.]/g,''));
+  if(!isFinite(n)||n<=0){ toast('숫자로 적어주세요'); return; }
+  const key = which==='b'? 'axisB' : 'axisS';
+  if(!Array.isArray(p[key])) p[key]=[];
+  if(!p[key].includes(n)) p[key].push(n);
+  const hide = which==='b'? 'axisHideB' : 'axisHideS';   // 뺐던 것을 다시 넣는 길
+  if(Array.isArray(p[hide])) p[hide]=p[hide].filter(x=>+x!==n);
+  saveDB(); renderImplant(); toast(`${무엇} ${specNum(n)} 을 표에 더했어요`);
+}
+function specAxis(part){ return SPEC_AXIS[part] || {b:'두께', s:'길이', bMin:0.5, bMax:30, sMin:0.5, sMax:30}; }
+
+// 붙여 친 숫자가 한 가지로만 읽히면 그 자리에서 두 칸으로 갈라 놓는다.
+// 확인 창을 띄우지 않는 이유 — × 치는 마찰을 없애려고 만든 기능에 마찰을
+// 새로 붙일 수 없다. 대신 갈라진 결과가 칸에 그대로 보이므로 조용하지 않다.
+function specSplit(part){
+  const B=$('#vB'), S=$('#vS'); if(!B||!S) return;
+  const raw=B.value.trim(); if(!raw) return;
+  const ax=specAxis(part), n=parseFloat(raw);
+  // 첫 칸에 적힌 것이 두께로 말이 되면 손대지 않는다. 3.5 를 치는 중일 뿐이다.
+  if(isFinite(n) && String(n)===raw && n>=ax.bMin && n<=ax.bMax) return;
+  const g=specGuess(raw, part);
+  if(g.length!==1) return;                        // 여럿이거나 못 읽으면 손대지 않는다
+  // 둘째 칸에 값이 남아 있어도 덮는다. '3010' 은 두께가 될 수 없으므로
+  // 그대로 두면 3010×12 같은 이름이 조용히 만들어진다 — 실제로 그랬다.
+  B.value=specNum(g[0].b); S.value=specNum(g[0].s);
+}
+function hasAxis(part){ return !!SPEC_AXIS[part]; }
+
+// 숫자를 사람이 적던 대로 되돌린다. 4 → '4', 4.50 → '4.5'
+function specNum(n){ return String(parseFloat(n)); }
+// 규격 이름은 언제나 같은 모양으로 만든다 — 모양이 갈리면 재고가 갈린다
+function dlLabel(b, s){
+  const B=specNum(b); if(!isFinite(parseFloat(B))) return '';
+  if(s===''||s==null) return B;
+  const S=specNum(s); return isFinite(parseFloat(S)) ? `${B}×${S}` : B;
+}
+// 두 규격이 같은 것인가 — '4×12' 와 '4.0×12' 는 같다. 글자로 비교하면 갈린다.
+function sameSpec(a, b){
+  const x=parseDL(a), y=parseDL(b);
+  if(x&&y) return x.d===y.d && x.l===y.l;
+  return String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+}
+// 붙여 쓴 숫자에서 가능한 읽기를 모두 낸다. 고르는 것은 사람이 한다.
+function specGuess(text, part){
+  const t=String(text||'').trim(); if(!t) return [];
+  const ax=specAxis(part);
+  const 맞나=(b,s)=> b>=ax.bMin&&b<=ax.bMax && s>=ax.sMin&&s<=ax.sMax;
+  // 구분자가 있으면 읽을 것도 없다
+  const m=t.match(/^\s*(?:Ø|ø|D)?\s*(\d+(?:\.\d+)?)\s*(?:[x×X*,\-\s/]+)\s*(\d+(?:\.\d+)?)\s*(?:mm)?\s*$/);
+  if(m) return [{b:+m[1], s:+m[2], sure:true}];
+  const d=t.replace(/[^0-9]/g,''); if(d.length<2) return [];
+  const out=[], seen=new Set();
+  for(let i=1;i<d.length;i++){
+    const L=d.slice(0,i), R=d.slice(i);
+    // 앞은 두께다. 2자리면 소수점을 넣어 본다(30 → 3.0), 그대로도 본다.
+    const bs = L.length===2 ? [+L, +(L[0]+'.'+L[1])] : [+L];
+    const ss = R.length===2 ? [+R, +(R[0]+'.'+R[1])] : [+R];
+    bs.forEach(b=>ss.forEach(s=>{
+      if(!맞나(b,s)) return;
+      const k=specNum(b)+'|'+specNum(s); if(seen.has(k)) return;
+      seen.add(k); out.push({b,s,sure:false});
+    }));
+  }
+  return out;
+}
 function openImplantForm(edit){
   const p=edit?implantById(edit):null;
   modal(`<h3>${p?'임플란트 제품 수정':'임플란트 제품 추가'}</h3>
@@ -1553,29 +2077,93 @@ function delImplant(id){
 }
 function openVariantForm(pid, editVid, preset){
   const p=implantById(pid); const v=editVid?p.variants.find(x=>x.id===editVid):null;
+  const ax=specAxis(p.part), two=hasAxis(p.part);
+  const cur = v? parseDL(v.label) : (preset? parseDL(preset) : null);
+  // 칩은 표와 같은 눈금을 쓴다. 등록된 것만 뽑으면 처음엔 두세 개밖에 안 뜬다.
+  const dias = two ? gridAxes(p).bs : [];
+  const lens = two ? gridAxes(p).ss : [];
+  // × 는 화면에 인쇄된 글자다. 손으로 넣는 것은 숫자뿐이다.
+  const specField = two
+    ? `<div class="field"><span>규격 * <span class="tiny muted">숫자만 넣으면 돼요</span></span>
+        <div class="row" style="gap:6px;align-items:center">
+          <input id="vB" inputmode="decimal" placeholder="${ax.b}" value="${cur?specNum(cur.d):''}"
+            oninput="specSplit('${p.part}')" style="flex:1;text-align:center;font-size:18px;font-weight:800">
+          <b class="muted" style="font-size:18px">×</b>
+          <input id="vS" inputmode="decimal" placeholder="${ax.s}" value="${cur?specNum(cur.l):''}" style="flex:1;text-align:center;font-size:18px;font-weight:800">
+        </div>
+        <div class="tiny muted" style="margin-top:5px">왼쪽이 ${ax.b}, 오른쪽이 ${ax.s} 예요. <b>3010</b> 처럼 붙여 쳐도 알아서 갈라집니다.</div>
+        ${dias.length?`<div class="tiny muted" style="margin-top:8px">${ax.b}</div>
+          <div class="chips" style="margin-top:3px">${dias.map(d=>`<button type="button" class="chip" onclick="$('#vB').value='${specNum(d)}'">${specNum(d)}</button>`).join('')}</div>`:''}
+        ${lens.length?`<div class="tiny muted" style="margin-top:7px">${ax.s}</div>
+          <div class="chips" style="margin-top:3px">${lens.map(l=>`<button type="button" class="chip" onclick="$('#vS').value='${specNum(l)}'">${specNum(l)}</button>`).join('')}</div>`:''}
+       </div>
+       <input id="vLabel" type="hidden" value="${v?esc(v.label):(preset||'')}">`
+    : `<label class="field"><span>규격 *</span><input id="vLabel" value="${v?esc(v.label):(preset||'')}" placeholder="예: Ø4.5 GH3"></label>`;
   modal(`<h3>${v?'규격 수정':'규격 추가'} · ${esc(p.brand)} ${esc(p.line||'')}</h3>
-    <label class="field"><span>규격 *</span><input id="vLabel" value="${v?esc(v.label):(preset||'')}" placeholder="${p.part==='픽스처'?'예: 4.0×10':'예: Ø4.5 GH3'}"></label>
+    ${specField}
     <div class="two">
       <label class="field"><span>현재 수량</span><input id="vQty" type="number" inputmode="numeric" value="${v?v.qty:0}"></label>
       <label class="field"><span>최소 수량</span><input id="vMin" type="number" inputmode="numeric" value="${v?(v.minQty||0):2}"></label>
     </div>
+    ${v?'':`<label class="field"><span>이 수량은 어디서 왔나요?</span>
+      <select id="vOrigin"><option value="in">이번에 산 것 (매입)</option><option value="open">전부터 있던 것 (이월재고)</option></select></label>
+    <div class="tiny muted" style="margin:-6px 2px 12px">앱을 쓰기 전부터 선반에 있던 물건이면 <b>이월재고</b>예요. 매입에 섞이면 산 개수가 부풀어요.</div>`}
     <label class="field"><span>LOT / 제조번호 (선택)</span><input id="vLot" value="${v?esc(v.lot||''):''}"></label>
     <div class="row"><button class="btn block" onclick="saveVariant('${pid}','${v?v.id:''}')">${v?'저장':'추가'}</button>
       ${v?`<button class="btn danger" onclick="delVariant('${pid}','${v.id}')">삭제</button>`:''}</div>`);
 }
 function saveVariant(pid,vid){
-  const p=implantById(pid); const label=$('#vLabel').value.trim(); if(!label){ toast('규격을 입력하세요'); return; }
+  const p=implantById(pid);
+  let label;
+  if(hasAxis(p.part) && $('#vB')){
+    const b=$('#vB').value.trim(), sv=$('#vS').value.trim();
+    // 한 칸에 붙여 썼으면 읽어 본다. 물리적으로 가능한 읽기가 하나뿐일 때만 넣는다.
+    if(b && !sv){
+      const g=specGuess(b, p.part);
+      if(g.length===1){ label=dlLabel(g[0].b,g[0].s); }
+      else if(g.length>1){ toast(`${g.map(x=>dlLabel(x.b,x.s)).join(' 인가요, ')} 인가요? 두 칸에 나눠 적어주세요`); return; }
+      else { toast(`${specAxis(p.part).s}도 적어주세요`); return; }
+    } else label=dlLabel(b, sv);
+    if(!label){ toast('규격을 숫자로 적어주세요'); return; }
+  } else {
+    label=$('#vLabel').value.trim();
+  }
+  if(!label){ toast('규격을 입력하세요'); return; }
   const qty=Math.max(0,parseInt($('#vQty').value,10)||0);
   const data={ label, qty, minQty:Math.max(0,parseInt($('#vMin').value,10)||0), lot:$('#vLot').value.trim() };
   if(vid){ const v=p.variants.find(x=>x.id===vid);
-    if(qty!==v.qty) implantLog(pid,vid,'adjust',null,qty-v.qty,v.qty,qty,'규격 수정');
+    // 여기가 재고가 새던 자리다. 개수만 바뀌고 매입도 사용도 안 따라가서
+    // 매입 50 · 사용 0 인데 현재고가 65 가 됐다.
+    if(qty!==v.qty){ implantLog(pid,vid,'adjust',null,qty-v.qty,v.qty,qty,'규격 수정'); bumpAdj(v,qty-v.qty); }
     Object.assign(v, data); }
-  else { if(p.variants.find(x=>x.label===label)){ toast('이미 있는 규격이에요'); return; }
-    const nv={id:uid(), ...data, inTot:qty, uNor:0, uIns:0, uFail:0, phys:null, physAt:null};
-    p.variants.push(nv); if(qty>0) implantLog(pid,nv.id,'in',null,qty,0,qty,'초기 등록'); }
+  else { const dup=p.variants.find(x=>sameSpec(x.label,label));
+    if(dup){ toast(`이미 ${dup.label} 로 있어요`); return; }
+    // 첫 수량이 매입인지 이월인지는 사람이 안다 — 통화록 1-1장의 0번 칸.
+    const asOpen = $('#vOrigin') && $('#vOrigin').value==='open';
+    const nv={id:uid(), ...data, inTot:asOpen?0:qty, opening:asOpen?qty:0, uNor:0, uIns:0, uFail:0, phys:null, physAt:null};
+    p.variants.push(nv);
+    if(qty>0) implantLog(pid,nv.id, asOpen?'open':'in', null, qty, 0, qty, asOpen?'이월재고 등록':'초기 등록'); }
   saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
 }
-function delVariant(pid,vid){ const p=implantById(pid); p.variants=p.variants.filter(x=>x.id!==vid); saveDB(); closeModal(); renderImplant(); toast('삭제되었습니다'); }
+// 기록이 남은 규격이 조용히 사라지면 대사가 통째로 어긋난다.
+// 잘못 만든 빈 칸은 그냥 지우고, 움직인 적 있는 칸은 무엇을 잃는지 보여준다.
+function variantTouched(v){
+  return (+v.qty||0)!==0 || (+v.inTot||0)!==0 || vUse(v)!==0 || vOpen(v)!==0 || vAdj(v)!==0 || exIn(v)!==0;
+}
+function delVariant(pid,vid){
+  const p=implantById(pid); const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return;
+  if(variantTouched(v)){
+    const 잃는것=[
+      (+v.qty||0)? `현재고 ${v.qty}개` : '',
+      (+v.inTot||0)? `매입 ${v.inTot}개` : '',
+      vUse(v)? `사용 ${vUse(v)}개` : '',
+      vOpen(v)? `이월 ${vOpen(v)}개` : ''
+    ].filter(Boolean).join(' · ');
+    if(!confirm(`${v.label} 에는 ${잃는것} 기록이 있어요.\n지우면 이 숫자들이 대사에서 빠집니다. 그래도 지울까요?`)) return;
+  }
+  p.variants=p.variants.filter(x=>x.id!==vid);
+  saveDB(); closeModal(); renderImplant(); toast(`${v.label} 을 지웠어요`);
+}
 function openVariant(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid); if(!v) return;
   const diff=vDiff(v);
@@ -1587,7 +2175,7 @@ function openVariant(pid,vid){
         <div class="tiny muted">현재고(장부) · ${esc(p.part||'')} · 최소 ${v.minQty||0}${v.lot?' · LOT '+esc(v.lot):''}</div></div></div>
       <div class="divider" style="margin:10px 0"></div>
       <div class="two" style="gap:8px">
-        <div><div class="tiny muted">누적 매입(입고)</div><div style="font-weight:800">${+v.inTot||0}개</div></div>
+        <div><div class="tiny muted">누적 매입(입고)</div><div style="font-weight:800">${+v.inTot||0}개${exIn(v)?` <span class="tiny" style="color:var(--ok)">+교환 ${exIn(v)}</span>`:''}${vOpen(v)?` <span class="tiny muted">· 이월 ${vOpen(v)}</span>`:''}</div></div>
         <div><div class="tiny muted">누적 사용</div><div style="font-weight:800">${vUse(v)}개</div></div>
       </div>
       <div class="row wrap" style="gap:6px;margin-top:8px">
@@ -1598,6 +2186,9 @@ function openVariant(pid,vid){
       <button class="btn warn grow" onclick="adjustVariant('${pid}','${vid}','out')">－ 사용</button></div>
     <div class="row" style="margin-bottom:8px"><button class="btn soft grow" onclick="setPhysical('${pid}','${vid}')">📋 실재고 입력</button>
       ${diff!=null&&diff!==0?`<button class="btn warn grow" onclick="reconcileVariant('${pid}','${vid}')">현재고를 실재고로 맞추기</button>`:''}</div>
+    <button class="btn soft block" style="margin-bottom:8px${reqFor('imp',pid+'|'+vid)?';color:var(--warn)':''}"
+      onclick="openOrderReq('imp','${pid}|${vid}',${jarg(p.brand+' '+(p.line||'')+' '+v.label)},${jarg(p.vendor||'')},()=>openVariant('${pid}','${vid}'))">
+      🛒 ${reqFor('imp',pid+'|'+vid)?`주문 필요 체크됨 · ${reqFor('imp',pid+'|'+vid).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
     <button class="btn soft block" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>`);
 }
 function setPhysical(pid,vid){
@@ -1620,7 +2211,7 @@ function reconcileVariant(pid,vid){
   const target=parseInt(v.phys,10); if(isNaN(target)){ toast('먼저 실재고를 입력하세요'); return; }
   const before=v.qty; const d=target-before;
   if(!confirm(`장부 현재고 ${before}개 → 실재고 ${target}개로 맞출까요?\n(오차 ${d>0?'+':''}${d}개는 보정 기록으로 남아요)`)) return;
-  v.qty=target; implantLog(pid,vid,'adjust',null,d,before,target,'실사 보정');
+  v.qty=target; bumpAdj(v,d); implantLog(pid,vid,'adjust',null,d,before,target,'실사 보정');
   saveDB(); closeModal(); renderImplant(); toast(`보정 완료 · 현재고 ${target}개`);
 }
 let ivCat='normal';
@@ -1653,10 +2244,11 @@ function doVariantAdjust(pid,vid,type){
   if(type==='out' && v.qty<=(+v.minQty||0)) setTimeout(()=>toast(`⚠️ ${v.label} ${v.qty===0?'품절':'재고 부족'} (${v.qty}개)`),1300);
 }
 function openBulkVariants(pid){
+  const ax=specAxis(implantById(pid).part);
   modal(`<h3>규격 일괄 추가</h3>
-    <div class="tiny muted" style="margin-bottom:12px">지름과 길이를 쉼표로 나눠 입력하면 조합이 한 번에 만들어져요. (이미 있는 규격은 건너뜀)</div>
-    <label class="field"><span>지름(mm)</span><input id="blD" placeholder="3.5, 4.0, 4.5, 5.0"></label>
-    <label class="field"><span>길이(mm)</span><input id="blL" placeholder="7, 8.5, 10, 11.5, 13"></label>
+    <div class="tiny muted" style="margin-bottom:12px">${ax.b}와 ${ax.s}를 쉼표로 나눠 적으면 조합이 한 번에 만들어져요. ×는 안 쳐도 돼요. (이미 있는 규격은 건너뜀)</div>
+    <label class="field"><span>${ax.b}(mm)</span><input id="blD" inputmode="decimal" placeholder="3.5, 4.0, 4.5, 5.0"></label>
+    <label class="field"><span>${ax.s}(mm)</span><input id="blL" inputmode="decimal" placeholder="7, 8.5, 10, 11.5, 13"></label>
     <label class="field"><span>규격별 최소수량</span><input id="blMin" type="number" inputmode="numeric" value="2"></label>
     <button class="btn block" onclick="doBulkVariants('${pid}')">추가</button>`);
 }
@@ -1667,7 +2259,9 @@ function doBulkVariants(pid){
   const min=Math.max(0,parseInt($('#blMin').value,10)||0);
   if(!ds.length||!ls.length){ toast('지름과 길이를 입력하세요'); return; }
   let added=0;
-  ds.forEach(d=>ls.forEach(l=>{ const label=`${d}×${l}`; if(!p.variants.find(v=>v.label===label)){ p.variants.push({id:uid(),label,qty:0,minQty:min,lot:''}); added++; } }));
+  ds.forEach(d=>ls.forEach(l=>{ const label=dlLabel(d,l);
+    if(label && !p.variants.find(v=>sameSpec(v.label,label))){
+      p.variants.push({id:uid(),label,qty:0,minQty:min,lot:'',inTot:0,uNor:0,uIns:0,uFail:0,phys:null,physAt:null}); added++; } }));
   saveDB(); closeModal(); renderImplant(); toast(`${added}개 규격을 추가했어요`);
 }
 
@@ -1752,8 +2346,9 @@ function mSetQty(k,r,n,memo){
   const f=mStock(k,r,true); if(!f) return false;
   const before=+f.v.qty||0; if(before===want) return true;
   f.v.qty=want;
-  if(want>before) f.v.inTot=(+f.v.inTot||0)+(want-before);
-  implantLog(f.p.id, f.v.id, want>before?'in':'out', null, Math.abs(want-before), before, want, memo||'재료 목록에서 수량 조정');
+  // 산 것이 아니라 손으로 맞춘 것이다. 매입에 얹으면 원가가 흐려진다.
+  bumpAdj(f.v, want-before);
+  implantLog(f.p.id, f.v.id, 'adjust', null, Math.abs(want-before), before, want, memo||'재료 목록에서 수량 조정');
   return true;
 }
 
@@ -2105,6 +2700,52 @@ function applyCaseStock(oldT, oldIns, newT, newIns, memo){
   return {out,back,miss,missing:[...missing]};
 }
 
+/* ---- 보험 페일 → 시술중지 안내 -----------------------------------------
+   보험 케이스에 페일이 새로 적히면 공단 시술중지 등록을 물어본다.
+   근거는 docs/INSURANCE_RULES.md 3장. 재시술 급여가 인정되는 길은
+   시술중지 등록 → 재등록 뿐이고, 3단계(보철) 비용을 청구한 뒤에는
+   중지 등록 자체가 막힌다. 되돌릴 수 없는 시점이 있고, 앱은 페일을 아는
+   유일한 곳이라 그 앞에 설 수 있다.
+
+   앱은 판정하지 않는다. 수가도 개수도 연령도 보지 않고 순서가 있다는
+   사실만 알린다. 그래야 규정이 해마다 바뀌어도 이 안내가 틀리지 않는다.
+   기한 조건도 걸지 않는다 — 모르는 기준으로 띄우면 양치기가 된다.
+
+   이미 알린 페일에는 다시 뜨지 않는다. 케이스를 고칠 때마다 뜨면
+   그것도 양치기다. 그래서 '새로 생긴' 페일만 센다. */
+function newFails(oldT, oldIns, newT, newIns){
+  if(newIns!=='보험') return [];              // 일반은 공단 등록이라는 것이 없다
+  // 일반이던 케이스를 보험으로 바꾸면 옛 페일도 처음 알리는 것이 된다
+  const seen = oldIns==='보험'
+    ? new Set((oldT||[]).filter(t=>t.fail).map(t=>String(t.fdi)))
+    : new Set();
+  return (newT||[]).filter(t=>t.fail && !seen.has(String(t.fdi)))
+                   .map(t=>String(t.fdi));
+}
+
+// 문구는 판정이 아니라 물음이다. 대신 결정해 주지 않는다.
+//
+// 저장 요약(토스트)을 안내 안으로 들여온 이유 — 토스트는 화면 아래 84px 에
+// 고정인데 이 안내도 아래에서 올라오는 창이라, 둘이 겹쳐 정작 중요한
+// '3단계 뒤에는 안 된다' 를 덮었다. 브라우저로 열어보고서야 보였다.
+function failNotice(fdis, chart, summary){
+  if(!fdis || !fdis.length) return;
+  const t=$('#toast'); if(t) t.classList.remove('show');
+  const teeth = fdis.map(n=>'#'+esc(n)).join(' ');
+  modal(`<h3>보험 임플란트 페일</h3>
+    <div class="tiny muted" style="margin:-6px 2px 12px">${esc(chart||'')} · 치아 ${teeth}</div>
+    <div class="card" style="box-shadow:none;background:var(--bg);border-left:3px solid var(--danger);margin-bottom:12px;padding:12px 14px">
+      <div style="font-weight:800;margin-bottom:6px">공단에 시술중지 등록하셨나요?</div>
+      <div class="tiny">3단계(보철) 비용을 청구한 뒤에는 <b>중지 등록이 안 됩니다.</b></div>
+    </div>
+    <div class="tiny muted" style="margin:0 2px 14px">
+      재시술 급여는 시술중지 등록 → 재등록을 거쳐야 인정됩니다.
+      앱은 청구를 대신 판단하지 않습니다 — 순서가 있다는 것만 알립니다.
+    </div>
+    ${summary? `<div class="tiny muted" style="margin:-6px 2px 14px;padding-top:10px;border-top:1px solid var(--line)">${esc(summary)}</div>`:''}
+    <button class="btn block" onclick="closeModal()">확인했습니다</button>`);
+}
+
 /* ---- 힐링 회수 ----------------------------------------------------------
    힐링은 2차 수술 때 나가서 2주 뒤 인상채득 때 돌아온다. 돌아오지 않은
    개수가 곧 분실이다 — 직원이 따로 반납을 적을 필요가 없다. */
@@ -2131,23 +2772,35 @@ function openRecall(id){
     <label class="field"><span>회수일</span><input id="rcDate" type="date" value="${todayKey()}"></label>
     <button class="btn block" onclick="saveRecall('${id}')">회수 처리</button>`);
 }
+// 돌아온 힐링을 재고로 되돌린다. 화면과 떼어 둔 이유는 시험을 붙이기 위해서다.
+//
+// 되돌릴 때는 나갈 때 센 칸으로 되돌려야 한다 — caseTally 와 같은 규칙을 쓴다.
+// 전에는 무조건 일반에서 뺐다. 그래서 보험 케이스의 힐링을 회수하면 보험
+// 사용수가 그대로 남고 애먼 일반 사용수가 깎여, 대사가 조용히 틀어졌다.
+function recallStock(c, back){
+  const sizes=new Map();
+  (c.teeth||[]).forEach(t=>{ const k=String(t.heal||'').trim(); if(!k) return;
+    const cat = t.fail? 'uFail' : (c.insur==='보험'?'uIns':'uNor');
+    const key=k+'|'+cat; sizes.set(key,(sizes.get(key)||0)+1); });
+  let left=Math.max(0,+back||0), done=0;
+  sizes.forEach((n,key)=>{
+    if(left<=0) return;
+    const i=key.lastIndexOf('|'), label=key.slice(0,i), cat=key.slice(i+1);
+    const take=Math.min(n,left);
+    const f=findVar(label); if(!f) return;          // 재료 목록에 없으면 건드리지 않는다
+    left-=take; done+=take;
+    const {p,v}=f, before=v.qty; v.qty=before+take;
+    v[cat]=Math.max(0,(+v[cat]||0)-take);
+    implantLog(p.id,v.id,'in',null,take,before,v.qty,`힐링 회수 · ${c.chart}`);
+  });
+  return done;
+}
 function saveRecall(id){
   const c=caseById(id); if(!c) return;
   const out=healOut(c);
   const back=Math.max(0,Math.min(out,parseInt($('#rcBack').value,10)||0));
   c.recallAt=$('#rcDate').value||todayKey(); c.recallBack=back; c.recallLost=out-back;
-  // 재활용이니 돌아온 것만 재고로 되돌린다
-  const sizes=new Map();
-  (c.teeth||[]).forEach(t=>{ const k=String(t.heal||'').trim(); if(k) sizes.set(k,(sizes.get(k)||0)+1); });
-  let left=back;
-  sizes.forEach((n,label)=>{
-    if(left<=0) return;
-    const take=Math.min(n,left); left-=take;
-    const f=findVar(label); if(!f) return;
-    const {p,v}=f, before=v.qty; v.qty=before+take;
-    v.uNor=Math.max(0,(+v.uNor||0)-take);
-    implantLog(p.id,v.id,'in',null,take,before,v.qty,`힐링 회수 · ${c.chart}`);
-  });
+  recallStock(c, back);
   saveDB(); closeModal(); renderLedger();
   toast(c.recallLost? `${back}개 회수 · ${c.recallLost}개 분실` : `${back}개 모두 회수했어요`);
 }
@@ -2178,6 +2831,7 @@ function renderLedger(){
       <div class="row" style="gap:6px">
         <button class="btn sm soft" onclick="openVendors()">🏢 거래처</button>
         <button class="btn sm soft" onclick="openMasters('fixtures')">⚙️ 재료 목록</button>
+        <button class="btn sm soft" onclick="openNotePaste()">📝 수첩</button>
         <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
       </div>
     </div>
@@ -2296,6 +2950,257 @@ function lcApplyAll(){
     lcTeeth[n]={...d, fx:fx||d.fx||'', heal:heal||d.heal||'', abT:abT, ab:ab||d.ab||'', graft:gf||d.graft||''}; });
   lcRenderTeeth(); toast(`${lcSel.length}개 치아에 넣었어요 · LOT만 하나씩 적으면 돼요`);
 }
+/* ---- 수첩 줄 읽기 -------------------------------------------------------
+   실장이 수첩에 적는 그대로 받는다. 형식을 새로 강요하면 안 쓰게 된다.
+
+     박소영    보험 #46 오스템 4.0*12
+               일반 #21덴티움 2.8*20      ← 이름이 비면 위 줄과 같은 환자
+
+   순서에 기대지 않고 토큰 생김새로 가른다. 그래야 순서를 바꿔 적어도 읽힌다. */
+let noteRows=[];
+
+// 수첩은 4.0*12, 앱은 4.0×12 로 적는다. 가운데 글자만 바꾸고 숫자는 적은
+// 그대로 둔다 — 숫자로 바꿨다 되돌리면 4.0 이 4 가 되어 규격이 안 맞는다.
+function noteSpec(s){
+  const m=String(s||'').match(/^(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)$/);
+  return m? `${m[1]}×${m[2]}` : '';
+}
+
+// 8/21 · 8-21 · 2026-08-21 만 날짜로 본다. 마침표는 안 받는다 — 4.0 과 헷갈린다.
+function noteDate(tok){
+  let m=tok.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return `${m[1]}-${pad(+m[2])}-${pad(+m[3])}`;
+  m=tok.match(/^(\d{1,2})[\/-](\d{1,2})$/);
+  if(m) return `${new Date().getFullYear()}-${pad(+m[1])}-${pad(+m[2])}`;
+  return '';
+}
+
+// 재료 목록에서 찾는다. 글자가 다르면 숫자로 견준다 — 4.0×12 와 4×12 는
+// 사람 눈에 같은 규격인데 글자로는 다르다.
+function noteVar(brand, spec){
+  const hit=findVar((brand? brand+' ':'')+spec); if(hit) return hit;
+  const want=parseDL(spec); if(!want) return null;
+  const b=String(brand||'').trim();
+  for(const p of (DB.implants||[])) for(const v of (p.variants||[])){
+    const got=parseDL(v.label);
+    if(got && got.d===want.d && got.l===want.l && (!b || String(p.brand||'').includes(b) || b.includes(String(p.brand||''))))
+      return {p,v};
+  }
+  return null;
+}
+
+function noteParse(text){
+  const rows=[]; let lastName='';
+  String(text||'').split(/\r?\n/).forEach(raw=>{
+    const line=raw.trim(); if(!line) return;
+    // 치식과 규격을 먼저 떼어 놓는다 — '#21덴티움' 처럼 붙여 쓰기 때문에
+    // 공백만으로는 자를 수 없다.
+    //
+    // 치식은 반드시 두 자리로 본다(FDI). 전에는 공백도 이어지는 것으로 봐서
+    // '#46 2차수술' 의 2 까지 치아로 먹었다 — 없는 치아가 하나 생겼다.
+    // 여러 개는 쉼표나 # 로 나눠 적는다: #46,47 · #46#47 · #46 #47
+    const toks=line
+      .replace(/#\s*(\d{2}(?:\s*[,#]\s*\d{2})*)/g, ' #$1 ')
+      .replace(/(\d+(?:\.\d+)?\s*[x×X*]\s*\d+(?:\.\d+)?)/g, ' $1 ')
+      .split(/\s+/).filter(Boolean);
+
+    const r={date:'', name:'', chart:'', insur:'일반', fail:false, teeth:[],
+             brand:'', spec:'', heal:'', stage:0, raw:line};
+    const rest=[]; let specAt=-1;
+    toks.forEach((t,i)=>{
+      if(t[0]==='#'){ t.slice(1).split(/[,#]+/).filter(Boolean).forEach(n=>r.teeth.push(n)); return; }
+      const sp=noteSpec(t); if(sp){ r.spec=sp; specAt=i; return; }
+      const dt=noteDate(t); if(dt){ r.date=dt; return; }
+      if(t==='보험'){ r.insur='보험'; return; }
+      if(t==='일반'||t==='비급여'){ r.insur='일반'; return; }
+      if(t==='페일'||t==='실패'){ r.fail=true; return; }
+      if(/^[12]차(수술)?$/.test(t)){ r.stage=+t[0]; return; }
+      rest.push({t, i});
+    });
+
+    // 남은 낱말 가운데 무엇이 브랜드인가. 짐작보다 대조가 낫다 —
+    // 재료 목록에서 규격과 함께 찾아지는 쪽이 브랜드다.
+    let k=-1;
+    if(r.spec) for(let j=rest.length-1;j>=0;j--) if(noteVar(rest[j].t, r.spec)){ k=j; break; }
+    // 못 찾으면 자리로 본다. 브랜드는 규격 바로 앞에 오고 이름은 줄 앞에 온다.
+    if(k<0 && specAt>=0) rest.forEach((x,j)=>{ if(x.i<specAt && (k<0 || x.i>rest[k].i)) k=j; });
+    if(k>=0){ r.brand=rest[k].t; rest.splice(k,1); }
+
+    // 2차수술 줄에는 픽스처 규격 대신 힐링이 온다. 'Ø4.5 GH3' 처럼 낱말이
+    // 갈라져 있어서, 이어진 낱말을 붙여 보며 재료 목록에 있는 것을 찾는다.
+    if(!r.spec && rest.length) outer:
+      for(let len=Math.min(4,rest.length); len>=1; len--)
+        for(let a=rest.length-len; a>=0; a--){
+          const run=rest.slice(a,a+len);
+          if(run.some((x,j)=>j && x.i!==run[j-1].i+1)) continue;   // 이어진 것만
+          const label=run.map(x=>x.t).join(' ');
+          if(findVar(label)){ r.heal=label; rest.splice(a,len); break outer; }
+        }
+    // 단계를 안 적었으면 무엇이 나갔는지로 본다. 픽스처면 1차, 힐링이면 2차다.
+    if(!r.stage) r.stage = (!r.spec && r.heal) ? 2 : 1;
+
+    r.name = rest.map(x=>x.t).join(' ') || lastName;   // 이름이 비면 위 줄과 같은 환자
+    if(r.name) lastName=r.name;
+    rows.push(r);
+  });
+  return rows;
+}
+
+// 2차수술 줄은 새 케이스가 아니라 이미 있는 케이스에 붙인다.
+// 새로 만들면 픽스처가 두 번 빠진다 — 단계별 수술에서 제일 조심할 자리다.
+// 여러 건이 걸리면 고르지 않는다. 조용히 갖다 붙이면 틀렸을 때 못 찾는다.
+function noteLink(r){
+  if(r.stage!==2 || !r.name || !r.teeth.length) return null;
+  const nm=maskName(r.name);
+  const hit=(DB.implantCases||[]).filter(c=>
+    (c.pname||'')===nm && !c.d2 &&
+    r.teeth.every(f=>(c.teeth||[]).some(t=>String(t.fdi)===String(f))));
+  return hit.length===1 ? hit[0] : (hit.length ? 'many' : null);
+}
+
+// 저장하기 전에 무엇이 안 맞는지 알아야 고칠 수 있다.
+function noteFx(r){ const v=noteVar(r.brand, r.spec); return v? `${v.p.brand} ${v.v.label}` : (r.brand? r.brand+' ' : '')+r.spec; }
+function noteBad(r){
+  if(!r.teeth.length) return '치아번호가 없어요';
+  if(r.stage===2){
+    const link=noteLink(r);
+    if(link==='many') return '붙일 케이스가 여러 건이에요 — 대장에서 직접 고르세요';
+    if(!link) return '1차수술 기록을 못 찾았어요';
+    if(r.heal && !findVar(r.heal)) return '재료 목록에 없는 힐링이에요';
+    return '';                       // 힐링을 안 적었어도 2차 날짜는 남길 수 있다
+  }
+  if(!r.spec) return '규격을 못 읽었어요';
+  if(!noteVar(r.brand, r.spec)) return '재료 목록에 없는 규격이에요';
+  return '';
+}
+
+/* ---- 수첩 옮겨 적기 화면 -------------------------------------------------
+   폼 여섯 칸을 채우는 것보다 한 줄 치는 것이 빠르다. 사진 판독이 붙으면
+   판독 결과가 이 표로 들어오게 되어 있어서, 여기 만든 것은 그대로 쓴다. */
+let noteText='';
+function openNotePaste(){
+  modal(`<h3>📝 수첩 옮겨 적기</h3>
+    <div class="tiny muted" style="margin:-4px 2px 10px">수첩에 적은 대로 한 줄에 하나씩 넣으세요.
+      순서는 바뀌어도 되고, <b>이름을 비우면 윗줄과 같은 환자</b>로 봅니다.</div>
+    <textarea id="noteText" rows="7" spellcheck="false"
+      style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:15px;line-height:1.7;resize:vertical"
+      placeholder="박소영  보험 #46 오스템 4.0*12&#10;        일반 #21덴티움 2.8*20">${esc(noteText)}</textarea>
+    <div class="tiny muted" style="margin:8px 2px 12px">날짜를 안 적으면 오늘로 잡고, 표에서 고칠 수 있어요.</div>
+    <button class="btn block" onclick="noteRead()">읽기</button>`);
+}
+function noteRead(){
+  noteText=$('#noteText').value;
+  noteRows=noteParse(noteText);
+  if(!noteRows.length){ toast('읽을 줄이 없어요'); return; }
+  noteReview();
+}
+function noteSet(i,k,v){
+  if(k==='teeth') noteRows[i].teeth=String(v).split(/[,#\s]+/).filter(Boolean);
+  else noteRows[i][k]=v;
+  noteReview();
+}
+// 2차수술 줄이 어느 케이스에 붙는지 눈으로 보여준다. 조용히 갖다 붙이면
+// 틀렸을 때 찾을 방법이 없다.
+function noteLinkText(r){
+  const c=noteLink(r);
+  if(!c || c==='many') return '';
+  const who=[c.chart, c.pname].filter(Boolean).join(' ');
+  return `${esc(who)} · 1차 ${esc(c.d1||'—')} 케이스에 붙임`
+       + (r.heal? ` · 힐링 ${esc(r.heal)}` : ' · 힐링은 비움');
+}
+
+// 읽은 것을 그대로 저장하지 않는다. 사람이 한 번 보고 넘겨야 잘못 읽은 줄이
+// 재고를 조용히 틀어놓지 않는다.
+function noteReview(){
+  const badN=noteRows.filter(r=>noteBad(r)).length;
+  const rows=noteRows.map((r,i)=>{ const bad=noteBad(r); return `
+    <div class="card" style="box-shadow:none;background:var(--bg);padding:10px 11px;margin-bottom:7px">
+      <div class="row wrap" style="gap:5px;margin-bottom:5px">
+        <input type="date" value="${esc(r.date||todayKey())}" onchange="noteSet(${i},'date',this.value)" style="flex:0 0 142px">
+        <input value="${esc(r.name)}" placeholder="환자" onchange="noteSet(${i},'name',this.value)" style="flex:1;min-width:90px">
+        <select onchange="noteSet(${i},'insur',this.value)" style="flex:0 0 78px">
+          <option ${r.insur==='보험'?'selected':''}>보험</option>
+          <option ${r.insur!=='보험'?'selected':''}>일반</option></select>
+        <select onchange="noteSet(${i},'stage',+this.value)" style="flex:0 0 86px">
+          <option value="1" ${r.stage!==2?'selected':''}>1차수술</option>
+          <option value="2" ${r.stage===2?'selected':''}>2차수술</option></select>
+      </div>
+      <div class="row wrap" style="gap:5px">
+        <input value="${esc(r.chart)}" placeholder="차트번호 (없어도 됨)" onchange="noteSet(${i},'chart',this.value)" style="flex:1;min-width:110px">
+        <input value="${esc(r.teeth.join(','))}" placeholder="치식" onchange="noteSet(${i},'teeth',this.value)" style="flex:0 0 88px">
+        ${r.stage===2
+          ? `<input value="${esc(r.heal)}" list="hlList" placeholder="힐링 (나중에 골라도 됨)" onchange="noteSet(${i},'heal',this.value)" style="flex:0 0 196px">`
+          : `<input value="${esc(r.brand)}" placeholder="브랜드" onchange="noteSet(${i},'brand',this.value)" style="flex:0 0 96px">
+             <input value="${esc(r.spec)}" placeholder="규격" onchange="noteSet(${i},'spec',this.value)" style="flex:0 0 92px">`}
+      </div>
+      <div class="tiny" style="margin-top:6px;color:${bad?'var(--danger)':'var(--muted)'}">
+        ${bad? '⚠ '+bad : (r.stage===2? '✓ '+noteLinkText(r) : '✓ '+esc(noteFx(r)))}${r.fail?' · 페일':''}
+        <span class="muted" style="margin-left:6px">${esc(r.raw)}</span></div>
+    </div>`; }).join('');
+  modal(`<h3>읽은 결과 ${noteRows.length}줄</h3>
+    <datalist id="hlList">${lcOpts('힐링').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
+    <div class="tiny muted" style="margin:-4px 2px 10px">${badN
+      ? `<b style="color:var(--danger)">${badN}줄은 재고에서 못 찾았어요.</b> 고치거나, 그대로 두면 대장에만 남고 재고는 안 깎입니다.`
+      : '모두 재고에서 찾았어요. 저장하면 그만큼 빠집니다.'}</div>
+    ${rows}
+    <div class="row" style="margin-top:10px">
+      <button class="btn block" onclick="noteSaveAll()">대장에 적고 재고 반영</button>
+    </div>`, openNotePaste);
+}
+// 보험과 일반은 케이스를 나눈다. 심평원 실사에서 섞여 있으면 소명이 안 된다.
+function noteSaveAll(){
+  if(!Array.isArray(DB.implantCases)) DB.implantCases=[];
+  let made=0, upd=0, out=0, miss=0;
+  const nf=[];                     // 보험 페일 — 여러 건이어도 안내는 한 번만 띄운다
+
+  // 1차부터 적는다. 같은 붙여넣기 안에 1차와 2차가 함께 있으면
+  // 2차가 붙을 케이스가 먼저 있어야 한다.
+  const g=new Map();
+  noteRows.filter(r=>r.stage!==2).forEach(r=>{
+    if(!r.teeth.length || !r.spec) return;
+    const date=r.date||todayKey();
+    const key=[r.name, r.insur, date, r.chart].join('|');
+    if(!g.has(key)) g.set(key, {name:r.name, insur:r.insur, date, chart:r.chart, teeth:[]});
+    const fx=noteFx(r);
+    r.teeth.forEach(fdi=>g.get(key).teeth.push({fdi, fx, fail:!!r.fail}));
+  });
+  g.forEach(v=>{
+    const data={ chart:v.chart, pname:maskName(v.name), birth:'', insur:v.insur,
+      d1:v.date, d2:'', memo:'수첩', teeth:v.teeth, updatedAt:now() };
+    newFails([], '', data.teeth, data.insur).forEach(n=>nf.push(n));
+    const rr=applyCaseStock([], '', data.teeth, data.insur, `수첩 ${v.chart||v.name||''}`.trim());
+    DB.implantCases.push(Object.assign({id:uid(), createdAt:now()}, data));
+    out+=rr.out; miss+=rr.miss; made++;
+  });
+
+  // 2차수술 줄은 이미 있는 케이스에 얹는다. 새 케이스를 만들면 픽스처가
+  // 또 빠진다. applyCaseStock 이 차이만 보므로 힐링만 빠져나간다.
+  noteRows.filter(r=>r.stage===2).forEach(r=>{
+    const c=noteLink(r);
+    if(!c || c==='many') return;
+    const before=(c.teeth||[]).map(t=>Object.assign({}, t));
+    const hit=t=>r.teeth.some(f=>String(f)===String(t.fdi));
+    if(r.heal) (c.teeth||[]).forEach(t=>{ if(hit(t)) t.heal=r.heal; });
+    // 페일은 2차 수술 때 잇몸을 열고서야 드러난다 — 골유착 실패가 그렇다.
+    // 전에는 줄에서 읽어 놓고 케이스에 적지 않아, 그 페일이 어디에도 안 남았다.
+    if(r.fail) (c.teeth||[]).forEach(t=>{ if(hit(t)) t.fail=true; });
+    c.d2 = r.date||todayKey(); c.updatedAt=now();
+    newFails(before, c.insur, c.teeth, c.insur).forEach(n=>nf.push(n));
+    const rr=applyCaseStock(before, c.insur, c.teeth, c.insur, `수첩 2차 ${c.chart||''}`.trim());
+    out+=rr.out; miss+=rr.miss; upd++;
+  });
+
+  if(!made && !upd){ toast('적을 줄이 없어요 — 치아번호와 규격을 확인해 주세요'); return; }
+  noteText=''; saveDB(); closeModal(); renderLedger();
+  const bits=[];
+  if(made) bits.push(`${made}건 새로 적음`);
+  if(upd)  bits.push(`${upd}건 2차수술 반영`);
+  bits.push(`재고 ${out}개 차감`);
+  if(miss) bits.push(`못 뺀 규격 ${miss}개`);
+  toast(bits.join(' · '));
+  failNotice(nf, '수첩', bits.join(' · '));
+}
+
 function openCaseForm(id){
   const c=id?caseById(id):null;
   lcEditId=id||''; lcSel=[]; lcTeeth={};
@@ -2362,6 +3267,8 @@ function saveCase(id){
     memo:$('#lcMemo').value.trim(),
     teeth:lcSel.map(n=>({fdi:n, ...(lcTeeth[n]||{})})), updatedAt:now() };
   const old=id?caseById(id):null;
+  // old 는 살아 있는 참조라 Object.assign 뒤에는 옛 값이 아니다. 먼저 본다.
+  const nf=newFails(old?old.teeth:[], old?old.insur:'', data.teeth, data.insur);
   const r=applyCaseStock(old?old.teeth:[], old?old.insur:'', data.teeth, data.insur, `대장 ${chart}`);
   if(id){ Object.assign(caseById(id), data); }
   else { DB.implantCases.push({id:uid(), createdAt:now(), ...data}); }
@@ -2370,7 +3277,8 @@ function saveCase(id){
   if(r.out) bits.push(`재고 ${r.out}개 차감`);
   if(r.back) bits.push(`${r.back}개 되돌림`);
   toast(bits.join(' · '));
-  if(r.miss) setTimeout(()=>toast(`⚠️ 재고에 없는 규격 ${r.miss}개는 못 뺐어요 — 재료 목록에서 '재고에 등록'을 눌러주세요`),1600);
+  if(r.miss && !nf.length) setTimeout(()=>toast(`⚠️ 재고에 없는 규격 ${r.miss}개는 못 뺐어요 — 재료 목록에서 '재고에 등록'을 눌러주세요`),1600);
+  failNotice(nf, chart, bits.join(' · ') + (r.miss?` · 재고에 없는 규격 ${r.miss}개는 못 뺐어요`:''));
 }
 function delCase(id){
   if(!isOwner()){ toast('삭제는 최고관리자만 할 수 있어요'); return; }
@@ -5051,7 +5959,7 @@ let booting=false;             // 최초 이전 중에만 전부 쓸 수 있다
 let legacyDoc=null;            // 옛 단일 문서 — 옮기고 나면 읽기만 한다
 
 const B_SHARED = ['version','hospName','inventory','invLogs','purchases','attendance','leaves',
-  'implants','implantLogs','implantCases','masters','notices','duties','vendors','hosp',
+  'implants','implantLogs','implantCases','masters','notices','duties','vendors','orderReqs','hosp',
   'docTypes','docForms','geo','members','prefs','payLock','lastBackupAt'];
 const B_PERSON = ['contracts','payslips','resignations','docReqs'];
 
@@ -5065,6 +5973,8 @@ function refRoster(){ return wsRef().collection('roster').doc('main'); }
 function refSecrets(){ return wsRef().collection('secrets').doc('main'); }
 function refPeople(sid){ return wsRef().collection('people').doc(sid); }
 function refMeta(){ return wsRef().collection('meta').doc('main'); }
+// 계량기 — 개수만 적는다. 요금 구간을 실측으로 정하려고 둔 자리다.
+function refUsage(){ return wsRef().collection('usage').doc('main'); }
 function refOwnerKey(){ return wsRef().collection('ownerkey').doc('main'); }
 function refUnlock(){ return wsRef().collection('unlock').doc(myUid); }
 
@@ -5493,7 +6403,10 @@ function writeAll(){
   if(booting || got.shared){ mine.shared=t; job('shared', refShared().set(Object.assign(pickShared(), stamp))); }
   if(booting || (admin && got.roster)){  mine.roster=t;  job('roster',  refRoster().set(Object.assign(pickRoster(), stamp)));
     // 문 앞 표지판 — 사람이 있는지만 적는다. 이름도 번호도 담지 않는다.
-    jobOptional('meta', refMeta().set({ hasClinic: (DB.staff||[]).length>0, updatedAt:t })); }
+    jobOptional('meta', refMeta().set({ hasClinic: (DB.staff||[]).length>0, updatedAt:t }));
+    // 계량기 — 몇 명인지만. merge 로 적어야 나중에 붙을 칸을 지우지 않는다.
+    jobOptional('usage', refUsage().set({
+      staffCount: (DB.staff||[]).filter(s=>s.active!==false).length, updatedAt:t }, {merge:true})); }
   if(booting || (admin && got.secrets)){ mine.secrets=t; job('secrets', refSecrets().set(Object.assign(pickSecrets(), stamp))); }
 
   if(admin){
