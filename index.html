@@ -5582,6 +5582,16 @@ function setGate(state){
               : state==='waiting'? gateWaitHtml()
               : state==='owner'? gateOwnerHtml() : gateLoginHtml();
   g.classList.add('show'); document.body.style.overflow='hidden';
+  if(state==='waiting') loadGateMeta();
+}
+/* 승인 대기 화면은 막다른 길이 되기 쉽다. 승인해 줄 기기가 하나도 없으면
+   기다려도 아무 일이 안 일어나는데, 화면은 계속 기다리라고만 한다.
+   문 앞 표지판(meta)을 읽어 '지금 어느 문이 열려 있는지' 를 말해준다. */
+let gateMeta=null;
+async function loadGateMeta(){
+  if(gateMeta || !fdb) return;
+  try{ gateMeta = (await refMeta().get()).data() || {}; }catch(e){ return; }
+  if(gateState==='waiting') $('#gateBody').innerHTML = gateWaitHtml();
 }
 function gateLoginHtml(){
   return `<div class="gate-ic">🏥</div>
@@ -5704,14 +5714,45 @@ function gateWaitHtml(){
     <div class="gate-p">이 기기를 쓰려면 관리자 승인이 필요해요. 관리자가 승인하면 자동으로 열립니다.</div>
     <div class="gate-card">
       <div class="tiny muted" style="text-align:left;line-height:1.7">
-        신청한 번호 <b>${esc(c.phone||'')}</b><br>
-        관리자에게 <b>승인해 달라</b>고 말씀해 주세요. 관리자는 <b>설정 → 기기 승인</b>에서 처리합니다.
+        ${c.phone? `신청한 번호 <b>${esc(c.phone)}</b><br>` : ''}관리자에게 <b>승인해 달라</b>고 말씀해 주세요. 관리자는 <b>설정 → 기기 승인</b>에서 처리합니다.
       </div>
     </div>
+    ${gateWayOut()}`;
+}
+/* 세 가지 경우뿐이다 — 아직 빈 병원인가, 최고관리자 열쇠가 있는가, 둘 다 아닌가. */
+function gateWayOut(){
+  const m = gateMeta;
+  if(m && m.hasClinic===false) return `
+    <div class="gate-card" style="margin-top:10px;background:var(--brand-soft)">
+      <div class="tiny" style="text-align:left;line-height:1.8">아직 <b>아무도 없는 병원</b>이에요.
+        승인해 줄 사람이 없으니 <b>직접 관리자를 만드시면</b> 바로 들어갑니다.</div>
+    </div>
+    <button class="btn block" style="margin-top:10px" onclick="cancelClaim();openSetupGate()">관리자 만들기</button>
+    <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>`;
+
+  if(m && m.ownerSalt) return `
+    <div class="gate-card" style="margin-top:10px;background:var(--brand-soft)">
+      <div class="tiny" style="text-align:left;line-height:1.8">승인해 줄 기기가 없으세요?
+        <b>최고관리자 아이디·비밀번호</b>가 있으면 <b>승인 없이 바로</b> 들어옵니다.</div>
+    </div>
+    <button class="btn block" style="margin-top:10px" onclick="cancelClaim();openOwnerGate()">👑 최고관리자로 바로 들어가기</button>
+    <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>
+    <div class="tiny muted" style="margin-top:14px">
+      <a href="#" onclick="showLockoutHelp();return false" style="color:var(--sub);text-decoration:underline">아이디·비밀번호도 모를 때</a></div>`;
+
+  if(m) return `
+    <div class="gate-card" style="margin-top:10px;background:#fdeede">
+      <div class="tiny" style="text-align:left;line-height:1.8;color:#7a2e0c">이 병원은 <b>최고관리자 아이디·비밀번호를 아직 안 정했어요.</b>
+        그래서 지금은 <b>승인된 관리자 기기에서 승인받는 길</b>뿐입니다.
+        그 기기가 하나도 없으면 아래를 눌러주세요.</div>
+    </div>
+    <button class="btn block" style="margin-top:10px" onclick="showLockoutHelp()">아무도 못 들어갈 때</button>
+    <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>`;
+
+  return `
     <button class="btn soft block" style="margin-top:10px" onclick="cancelClaim();openOwnerGate()">👑 최고관리자 로그인으로 들어가기</button>
     <button class="btn soft block" style="margin-top:8px" onclick="cancelClaim()">다른 번호로 다시 하기</button>
-    <div class="tiny muted" style="margin-top:14px">승인해 줄 관리자가 아직 없나요?
-      <a href="#" onclick="cancelClaim();openSetupGate();return false" style="color:var(--brand);font-weight:700">관리자 만들기</a><br>
+    <div class="tiny muted" style="margin-top:14px">
       <a href="#" onclick="showLockoutHelp();return false" style="color:var(--sub);text-decoration:underline">아무도 못 들어갈 때</a></div>`;
 }
 function gateSetupHtml(){
