@@ -49,6 +49,15 @@
     font-size:12px; font-weight:700; padding:8px 12px; border-radius:999px; cursor:pointer}
 
   main{padding-top:14px}
+  /* PC — 폰 기준 설계라 1000px 이상에서만 넓힌다. 재고·출퇴근·직원 명단은 2단,
+     나머지 화면은 640px 그대로 가운데에 둔다. */
+  @media (min-width:1000px){
+    .wrap{max-width:1040px}
+    #page-home, #page-leave{max-width:640px; margin:0 auto}
+    #invList, #attList, .twocol{display:grid; grid-template-columns:1fr 1fr; gap:0 12px; align-items:start}
+    #invList > :only-child, #attList > :only-child, .twocol > :only-child{grid-column:1/-1}
+    nav.tabs{max-width:1040px; margin:0 auto}
+  }
   .page{display:none; animation:fade .18s ease}
   .page.active{display:block}
   @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -5589,7 +5598,7 @@ function hrListHtml(){
       <button class="btn soft sm" onclick="openDuties()">🧰 담당</button>
       <button class="btn soft sm" onclick="openVendors()">🏢 거래처</button>
     </div>
-    <div>`
+    <div class="twocol">`
     + (list.length? list.map(s=>{
     const r=annualRemain(s), c=contractOf(s.id), ps=payslipsOf(s.id)[0], rg=resignOf(s.id);
     const flags=[];
