@@ -36,3 +36,14 @@ Firestore 는 한 번 판단할 때 **문서 10개까지만** 조회할 수 있�
 복구 문 + 열쇠까지 전부 있는 상태)에서 개설과 읽기가 되는지 본다.
 
 조건을 하나 더 얹을 때마다 이 파일을 먼저 늘리고 돌려본다.
+
+## 브라우저 시험 (`browser.*.mjs`)
+
+화면을 실제 브라우저로 띄워 본다. 앱을 정적 서버로 띄우고 주소를 `BASE` 로 준다.
+playwright 는 `_playwright.mjs` 가 찾는다 — 환경변수 `PLAYWRIGHT_PATH` → `test/node_modules` → 서버 기본 경로 순서.
+
+```bash
+npm i -D playwright && npx playwright install chromium   # 처음 한 번
+python -m http.server 8765 --directory ..                # 터미널 1
+BASE=http://127.0.0.1:8765 node browser.데모.mjs          # 터미널 2
+```

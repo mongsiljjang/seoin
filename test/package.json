@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "emu": "firebase emulators:start --only firestore --project demo-mediops",
-    "test": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node rules.권한.mjs && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node rules.로그인.mjs && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node rules.한계.mjs"
+    "test": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node rules.권한.mjs && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node rules.로그인.mjs && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node rules.한계.mjs && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node rules.첫개설.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",

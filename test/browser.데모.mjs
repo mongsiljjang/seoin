@@ -1,4 +1,4 @@
-import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { chromium } from './_playwright.mjs';
 const base = process.env.BASE;
 let pass=0, fail=0;
 const ok=(n,c)=>{ c?(pass++,console.log('✅ '+n)) : (fail++,console.log('❌ '+n)); };
