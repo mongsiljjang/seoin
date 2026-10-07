@@ -5571,14 +5571,15 @@ function printEduLog(rid){
   const it=eduCatalog().find(x=>x.id===r.itemId); if(!it) return;
   const names=(r.staffIds||[]).map(staffLabel).filter(Boolean);
   const rows=names.map((n,i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td></td></tr>`).join('');
-  const w=window.open('','_blank');
-  if(!w){ toast('팝업이 막혀 있어요. 브라우저에서 팝업을 허용해 주세요'); return; }
-  w.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>교육 일지</title>
+  // 새 창은 폰에서 막히는 일이 많다. 숨은 틀(iframe) 안에 일지를 그리고 그 틀을 인쇄한다.
+  // 인쇄 화면에서 PDF 로 저장하거나, 와이파이 복합기를 골라 바로 출력하거나, 복합기 팩스로 보낸다.
+  if(IN_APP_BROWSER && !confirm('지금 다른 앱(카톡 등) 안의 창이라 인쇄가 안 될 수 있어요. 크롬이나 사파리에서 이 앱을 연 뒤 다시 눌러 주세요. 그래도 시도할까요?')) return;
+  const html=`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>교육 일지</title>
     <style>body{margin:28px;color:#111;word-break:keep-all}
     h1{font-size:20px;margin:0 0 14px}table{border-collapse:collapse;width:100%;margin:10px 0}
     td,th{border:1px solid #444;padding:8px 10px;font-size:14px;text-align:left}th{background:#eee;width:110px}
     .sign td:last-child{width:40%;height:34px}.small{font-size:12px;color:#444;margin-top:10px}</style></head><body>
-    <h1>${esc(it.name)} 교육 일지</h1>
+    <h1>${esc(it.name)} 일지</h1>
     <table><tr><th>병원</th><td>${esc(DB.hospName||'')}</td></tr>
       <tr><th>교육 일시</th><td>${esc(r.date)}</td></tr>
       <tr><th>교육 방법</th><td>${esc(r.method||'')}</td></tr>
@@ -5587,9 +5588,16 @@ function printEduLog(rid){
       <tr><th>교육 내용</th><td style="height:90px;vertical-align:top">${esc(it.topics||'')}</td></tr>
       <tr><th>근거</th><td>${esc(it.cite)}</td></tr></table>
     <table class="sign"><tr><th style="width:50px">번호</th><th>이름</th><th>서명</th></tr>${rows}</table>
-    <div class="small">${it.keep?'보관: '+esc(it.keep)+' · ':''}작성자 서명: ____________________</div>
-    <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`);
-  w.document.close();
+    <div class="small">${it.keep?'보관: '+esc(it.keep)+' · ':''}작성자 서명: ____________________</div></body></html>`;
+  const f=document.createElement('iframe');
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(f);
+  const d=f.contentWindow.document; d.open(); d.write(html); d.close();
+  setTimeout(()=>{
+    try{ f.contentWindow.focus(); f.contentWindow.print(); }
+    catch(e){ toast('이 브라우저에서는 인쇄가 안 돼요. 크롬이나 사파리에서 열어 주세요'); }
+    setTimeout(()=>f.remove(), 120000);   // 인쇄 화면이 떠 있는 동안 지우면 작업이 끊긴다
+  }, 300);
 }
 
 function hrCheckView(){
