@@ -1,4 +1,10 @@
+.firebase/
+.firebaserc
 node_modules/
 package-lock.json
 *-debug.log
 test/firestore.rules
+.env
+.env.*
+.DS_Store
+Thumbs.db
