@@ -108,11 +108,19 @@ snapshot() {
     ok=false; err="$status_out"; status_out=""
   fi
   # git 의 경고 줄(오래된 commit-graph 등)이 상태 목록에 섞이면 깨끗한 저장소가 더럽다고 읽힌다.
-  status_out=$(printf '%s
-' "$status_out" | grep -v -E '^(warning|hint):' || true)
-  head=$(printf '%s
-' "$head" | grep -v -E '^(warning|hint):' | tail -1 || true)
+  status_out=$(printf '%s\n' "$status_out" | grep -v -E '^(warning|hint):' || true)
+  head=$(printf '%s\n' "$head" | grep -v -E '^(warning|hint):' | tail -1 || true)
   recent_out=$(git -c "safe.directory=$p" -C "$p" log -3 --pretty=format:'%h %s' 2>/dev/null) || recent_out=""
+
+  # 기준은 원격이다. 마지막 fetch 기준이라 푸시 여부를 말하려면 먼저 git fetch 를 한다. 빈 값은 upstream 이 없다는 뜻.
+  local remote_url upstream ahead behind lr
+  remote_url=$(git -c "safe.directory=$p" -C "$p" remote get-url origin 2>/dev/null) || remote_url=""
+  upstream=$(git -c "safe.directory=$p" -C "$p" rev-parse --abbrev-ref '@{u}' 2>/dev/null) || upstream=""
+  ahead="null"; behind="null"
+  if [ -n "$upstream" ]; then
+    lr=$(git -c "safe.directory=$p" -C "$p" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null) || lr=""
+    if [ -n "$lr" ]; then ahead=$(printf '%s' "$lr" | awk '{print $1}'); behind=$(printf '%s' "$lr" | awk '{print $2}'); fi
+  fi
 
   local status_json recent_json clean
   status_json=$([ -n "$status_out" ] && printf '%s\n' "$status_out" | jarr || printf '[]')
@@ -120,9 +128,9 @@ snapshot() {
   # A repository git could not read is NOT clean — it is unknown.
   if [ "$ok" = true ] && [ -z "$status_out" ]; then clean=true; else clean=false; fi
 
-  printf '{"path":"%s","branch":"%s","head":"%s","ok":%s,"error":"%s","clean":%s,"status":%s,"recent_commits":%s}' \
+  printf '{"path":"%s","branch":"%s","head":"%s","ok":%s,"error":"%s","clean":%s,"status":%s,"recent_commits":%s,"remote":"%s","upstream":"%s","ahead_of_remote":%s,"behind_remote":%s}' \
     "$(jesc "$p")" "$(jesc "$branch")" "$(jesc "$head")" "$ok" "$(jesc "$err")" \
-    "$clean" "$status_json" "$recent_json"
+    "$clean" "$status_json" "$recent_json" "$(jesc "$remote_url")" "$(jesc "$upstream")" "$ahead" "$behind"
 }
 
 BODY=""; COUNT=0; FIRST=1
