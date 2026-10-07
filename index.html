@@ -555,6 +555,7 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(!Array.isArray(DB.payslips)) DB.payslips=[];
   if(!Array.isArray(DB.resignations)) DB.resignations=[];
   if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
+  eduInit();                                         // 의무교육 — 기준(의원/병원)과 이수 기록
   if(!Array.isArray(DB.duties)) DB.duties=[];        // 담당 분야 — 병원이 직접 만든다
   if(!Array.isArray(DB.vendors)) DB.vendors=[];      // 거래처 · 영업사원 연락처
   if(!Array.isArray(DB.orderReqs)) DB.orderReqs=[];  // 주문 체크 — 재고를 건드리지 않는다
@@ -889,6 +890,8 @@ function computeAlerts(){
     (DB.docReqs||[]).filter(r=>r.status==='제출').forEach(r=>{ const s=staffById(r.staffId);
       a.push({level:'warn',icon:'📋',title:`${docTypeName(r.typeId)} · ${s?s.name:'(직원)'}`,sub:`${fmtDate(String(r.at).slice(0,10))} 신청 · ${r.from}${r.to?'~'+r.to:''}`,tab:'staff'}); });
   }
+  if(isAdmin()){ const n=eduProblemCount();
+    if(n) a.push({level:'warn',icon:'🎓',title:`의무교육 ${n}가지 확인`,sub:'기한이 지났거나 받은 기록이 없는 직원이 있어요',tab:'staff',hr:'edu'}); }
   const me=currentUser();
   if(me) noticeMustUnread(me.id).forEach(n=>
     a.push({level:'warn',icon:'📌',title:`필독 공지 · ${n.title}`,sub:'아직 확인하지 않았어요',tab:'home'}));
@@ -901,7 +904,7 @@ function refreshBell(){ const el=$('#alertBadge'); if(!el) return; const n=compu
 function openAlerts(){
   const a=computeAlerts();
   const body = a.length ? a.map(x=>`
-    <div class="item" style="cursor:pointer" onclick="closeModal(); go('${x.tab}');${x.mode?` setInvMode('${x.mode}');`:''}">
+    <div class="item" style="cursor:pointer" onclick="closeModal(); ${x.hr?`hrView='${x.hr}'; `:''}go('${x.tab}');${x.mode?` setInvMode('${x.mode}');`:''}">
       <div class="avatar" style="background:${x.level==='danger'?'var(--danger-soft)':x.level==='warn'?'var(--warn-soft)':'var(--brand-soft)'};color:${x.level==='danger'?'var(--danger)':x.level==='warn'?'var(--warn)':'var(--brand)'}">${x.icon}</div>
       <div class="grow"><div class="t" style="font-size:14.5px">${esc(x.title)}</div><div class="d tiny muted">${esc(x.sub)}</div></div>
       <span class="tiny muted">›</span>
@@ -5271,6 +5274,324 @@ async function scanContracts(){
   }
   contractGaps=out;
 }
+/* ========================================================================
+   의무교육 — 병·의원이 직원에게 해야 하는 교육과 이수 기록
+   ------------------------------------------------------------------------
+   근거와 확신도는 docs/EDUCATION_RULES.md. 앱은 "빠진 것을 찾는 점검표"이고 판정하지 않는다.
+   교육은 앱 밖에서 받는다(공식 사이트 링크만 건다). 이수는 사용자가 적는다 — 앱이 검증하지 않는다.
+   과태료 금액은 화면에 내지 않는다(법이 자주 바뀐다).
+   기록은 secrets/main(관리자만 읽는 문서)에 둔다. 직원 기기에는 내려가지 않는다.
+   ======================================================================== */
+function eduCatalog(){
+  const L=(t,u)=>({t,u});
+  // applies(c) → [상태, 이유]  상태: yes(기본 켜짐) · maybe(해당되면 켜세요) · no(해당 없음)
+  return [
+    {id:'sexh', g:'edu', name:'직장 내 성희롱 예방교육', cite:'남녀고용평등법 제13조', cycle:12, who:'사업주와 전 직원', scope:'staff',
+      keep:'교육을 했다는 서류 3년', topics:'관련 법령 · 사업장 처리 절차와 조치 기준 · 고충상담과 구제 절차 · 징계 등 제재',
+      links:[L('고용노동부 자체교육 자료(영상·강의안)','https://www.moel.go.kr/policy/policydata/view.do?bbs_seq=20250201607'), L('표준강의안(양성평등교육진흥원)','https://shp.mogef.go.kr/shp/anony/edu/anonyEduLetureStandard.do')],
+      applies:c=>['yes', c.n<10?'직원이 10명 미만이면 교육자료를 게시·배포하는 방식도 돼요.':'직원이 10명 이상이면 게시·배포만으로는 안 돼요. 교육 내용은 직원이 언제든 볼 수 있게 게시해 두어야 해요.']},
+    {id:'disab', g:'edu', name:'직장 내 장애인 인식개선 교육', cite:'장애인고용촉진법 제5조의2', cycle:12, who:'전 직원', scope:'staff',
+      keep:'교육 자료 3년', topics:'장애 이해 · 인권과 차별금지, 정당한 편의 · 관련 법과 제도 (연 1회, 1시간 이상)',
+      links:[L('한국장애인고용공단 교육','https://edu.kead.or.kr'), L('고용노동부 안내','https://www.moel.go.kr/info/etc/dataroom/view.do?bbs_seq=20200600043')],
+      applies:c=>['yes', c.n<50?'직원이 50명 미만이면 자료를 배포·게시·메일로 보내는 방식도 돼요.':'']},
+    {id:'priv', g:'edu', name:'개인정보 보호교육', cite:'개인정보 보호법 제28조제2항', cycle:12, free:true, who:'개인정보를 다루는 직원', scope:'staff',
+      keep:'', note:'횟수·시간 규정은 없고 "정기적으로"만 있어요. 주기는 병원이 정하세요.',
+      links:[L('개인정보배움터(무료·가입 필요)','https://edu.privacy.go.kr')],
+      applies:c=>['yes','']},
+    {id:'child', g:'edu', name:'아동학대 신고의무자 교육', cite:'아동복지법 제26조제3항', cycle:12, who:'의료인·종사자', scope:'staff',
+      keep:'', note:'매년 1시간 이상. 노인·장애인학대 교육과 합쳐서 해도 돼요. 결과는 관계 기관에 제출해야 해요.',
+      links:[L('아동권리보장원 의료기관 종사자 과정(무료)','https://edu.ncrc.or.kr')],
+      applies:c=>['yes','']},
+    {id:'elder', g:'edu', name:'노인학대 신고의무자 교육', cite:'노인복지법 제39조의6제5항', cycle:12, who:'의료인·종사자', scope:'staff',
+      keep:'', note:'1시간 이상. 법 문구로는 의원도 해당하지만 예전 복지부 안내는 요양병원 등으로 적었어요. 아동·장애인학대 교육과 합쳐서 할 수 있어요.',
+      links:[], applies:c=>['yes','']},
+    {id:'dabuse', g:'edu', name:'장애인학대 신고의무자 교육', cite:'장애인복지법 제59조의4제7항', cycle:12, who:'의료인·간호조무사·의료기사', scope:'staff',
+      keep:'', note:'매년 1시간 이상, 집합 또는 인터넷. 아동·노인학대 교육과 합쳐서 할 수 있어요. 장애인 인식개선 교육과는 다른 교육이에요.',
+      links:[], applies:c=>['yes','']},
+    {id:'urgent', g:'edu', name:'긴급복지 신고의무자 교육', cite:'긴급복지지원법 제7조', cycle:12, who:'의료기관 종사자', scope:'staff',
+      keep:'', note:'매년 1시간 이상, 집합 또는 인터넷.', links:[], applies:c=>['yes','']},
+    {id:'tb', g:'edu', name:'결핵 감염 예방·관리 기준 교육', cite:'결핵예방법 시행규칙 제4조의2', cycle:12, free:true, who:'의료기관 종사자', scope:'staff',
+      keep:'', note:'법에는 "정기적으로"만 있어요. 질병관리청 고시를 확인하지 못해 시간·주기는 병원이 정하세요(보건소 안내는 연 1회 이상).',
+      links:[L('대한결핵협회 사이버연수원','https://tbedu.knta.or.kr'), L('질병관리청 교육','https://edu.kdca.go.kr')],
+      applies:c=>['yes','']},
+    {id:'infect', g:'edu', name:'감염병 예방 직원 교육', cite:'의료법 제47조제2항', cycle:12, free:true, who:'소속 의료인·종사자', scope:'staff',
+      keep:'', note:'"정기적으로"만 있고 감염병이 유행하면 2회 이상 해야 해요. 병원 규모와 상관없이 적용돼요. 사설업체의 "코로나 감염안전교육"을 꼭 들어야 한다는 법 근거는 확인되지 않았어요.',
+      links:[], applies:c=>['yes','']},
+    {id:'hand', g:'edu', name:'손 위생 교육', cite:'의료법 시행규칙 제39조의2', cycle:12, free:true, who:'보건의료인', scope:'staff',
+      keep:'', note:'주기·시간 규정은 없어요.', links:[], applies:c=>['yes','']},
+    {id:'safety', g:'edu', name:'산업안전보건 정기·채용 시 교육', cite:'산업안전보건법 제29조 · 시행령 별표 1', cycle:6, who:'전 직원', scope:'staff',
+      keep:'교육 일지(보존 기간 규정은 없어요)', note:'정기교육은 사무직 매반기 6시간, 그 밖의 근로자 매반기 12시간, 채용 시 8시간이에요. 진료직이 어느 쪽인지 공식 해석이 없어 확인이 필요해요.',
+      links:[L('안전보건공단','https://www.kosha.or.kr')],
+      applies:c=> c.kind==='hospital' ? ['yes','병원급은 규모와 상관없이 적용돼요.'] : c.n>=50 ? ['yes','직원이 50명 이상이라 적용돼요.'] : ['no','직원 50명 미만 의원은 적용 제외예요. (조문에서 읽은 해석이고, 직접 다룬 공식 해석은 없어요)']},
+    {id:'pension', g:'edu', name:'퇴직연금 교육', cite:'근로자퇴직급여법 제32조', cycle:12, who:'가입 직원', scope:'staff',
+      keep:'', links:[], applies:c=>['maybe','퇴직연금(DB·DC)을 도입한 병원만 해당해요. 퇴직금 제도만 쓰면 해당 없어요.']},
+    {id:'laundry', g:'edu', name:'세탁물 처리 종사자 감염예방 교육', cite:'의료법 제16조제3항', cycle:12, who:'세탁물 처리 직원', scope:'staff',
+      keep:'결과 기록 유지', note:'연 4시간 이상, 결과를 기록해 두어야 해요.', links:[], applies:c=>['maybe','병원이 세탁물을 직접 처리할 때만 해당해요.']},
+    {id:'suicide', g:'edu', name:'자살예방 교육', cite:'자살예방법 제17조', cycle:12, who:'병원 종사자', scope:'staff',
+      keep:'', note:'결과는 다음 해 1월 31일까지 제출해요.', links:[],
+      applies:c=> c.kind==='hospital' ? ['yes','병원급은 해당해요.'] : ['no','병원급만 해당하고 의원은 제외예요.']},
+    {id:'violence', g:'edu', name:'폭력 예방·대응 교육', cite:'의료법 시행규칙 제39조의6', cycle:12, free:true, who:'병원 종사자', scope:'staff',
+      keep:'', links:[],
+      applies:c=> c.kind!=='hospital' ? ['no','100병상 이상 병원만 해당해요.'] : c.beds>=100 ? ['yes','100병상 이상이라 해당해요.'] : c.beds>0 ? ['no','100병상 미만이라 해당 없어요.'] : ['maybe','병상 수를 넣으면 알려 드려요. 100병상 이상 병원만 해당해요.']},
+    {id:'fire', g:'edu', name:'소방훈련·교육 (근무자)', cite:'화재예방법 시행규칙 제36조', cycle:12, who:'근무자', scope:'staff',
+      keep:'훈련·교육 기록부 2년', links:[L('한국소방안전원','https://www.kfsi.or.kr')],
+      applies:c=>['maybe','소방안전관리자를 선임해야 하는 건물만 해당해요. 입원실이 없고 600㎡ 미만인 치과의원 건물은 대상이 아닌 것으로 읽혀요.']},
+
+    {id:'dentist', g:'person', name:'치과의사 보수교육', cite:'의료법 제30조', cycle:12, who:'치과의사 본인', scope:'person',
+      keep:'이수증 (3년마다 하는 면허 실태신고에 씀)', note:'연 8시간 이상. 면제·유예 사유가 있어요.',
+      links:[L('대한치과의사협회 보수교육','https://edu.kda.or.kr')], applies:c=>['yes','']},
+    {id:'hygiene', g:'person', name:'치과위생사 등 의료기사 보수교육', cite:'의료기사법 제20조', cycle:12, who:'치과위생사·치과기공사·방사선사 본인', scope:'person',
+      keep:'이수증 (3년마다 하는 면허 실태신고에 씀)', note:'연 8시간 이상, 대면 또는 온라인.',
+      links:[L('대한치과위생사협회 치위생교육원(유료)','https://edu.kdha.or.kr')], applies:c=>['yes','']},
+    {id:'radiation', g:'person', name:'진단용 방사선 안전관리책임자 교육', cite:'의료법 제37조', cycle:36, dueRule:'yearEnd3', who:'선임된 안전관리책임자', scope:'person',
+      keep:'수료증', note:'선임 후 1년 이내 선임교육, 이후 3년마다 보수교육(3년째 되는 해 12월 31일까지). 구내촬영기만 쓰는 소형 의원은 선임이 면제될 수 있어요.',
+      links:[L('대한영상치의학회','https://www.dentalsafeimaging.or.kr')],
+      applies:c=>['maybe','진단용 방사선 장치(구내촬영기·파노라마·CBCT 등)를 설치한 병원만 해당해요.']},
+    {id:'narcotic', g:'person', name:'마약류 취급 의료업자 교육', cite:'마약류관리법 제50조', cycle:0, who:'마약류를 투약·처방하는 치과의사', scope:'person',
+      keep:'수료증', note:'1회 2시간. 정기 반복 규정은 없어요. 미이수는 과태료가 아니라 업무정지 처분 대상이에요.',
+      links:[L('마약류통합관리시스템 교육센터','https://www.nims.or.kr')], applies:c=>['maybe','마약·향정신성의약품을 투약하거나 처방하는 치과의사만 해당해요.']},
+    {id:'waste', g:'person', name:'의료폐기물 배출자 교육', cite:'폐기물관리법 제35조', cycle:36, who:'원장 또는 기술담당자', scope:'person',
+      keep:'수료증', note:'최초 교육 후 3년마다예요. 예전 이수자의 재교육 기한은 2026년 5월 30일이었어요. 수료일을 확인하세요. (조문을 이어 읽은 해석이에요)',
+      links:[L('한국폐기물협회 교육','https://kwasteedu.or.kr')], applies:c=>['yes','']},
+    {id:'firemgr', g:'person', name:'소방안전관리자 실무교육', cite:'화재예방법 시행규칙 제29조', cycle:24, who:'선임된 소방안전관리자', scope:'person',
+      keep:'수료증', note:'선임 후 6개월 이내, 이후 2년마다예요.', links:[L('한국소방안전원','https://www.kfsi.or.kr')],
+      applies:c=>['maybe','소방안전관리자를 선임해야 하는 건물만 해당해요.']},
+    {id:'safemgr', g:'person', name:'안전·보건관리자 직무교육', cite:'산업안전보건법 제32조', cycle:24, who:'선임된 안전·보건관리자', scope:'person',
+      keep:'수료증', note:'신규는 선임 후 3개월 이내(의사는 1년), 보수는 2년마다예요.', links:[L('안전보건공단','https://www.kosha.or.kr')],
+      applies:c=> (c.kind==='hospital'||c.n>=50) ? ['maybe','직원 50명 이상이면 안전관리자·보건관리자를 선임해야 해요.'] : ['no','직원 50명 미만 의원은 선임 대상이 아니에요.']},
+
+    {id:'tbcheck', g:'duty', name:'결핵 검진 (종사자)', cite:'결핵예방법 제11조', cycle:12, who:'의료기관 종사자 전원', scope:'staff',
+      keep:'검진 결과', note:'교육이 아니라 검진 의무예요. 매년 받고, 새로 뽑은 직원은 1개월 이내에 첫 검진을 받아요. 다른 법의 건강진단으로 갈음할 수 있는 범위는 확인하지 못했어요.',
+      links:[], applies:c=>['yes','']},
+  ];
+}
+// 교육이 아니라 신고·보고 — 기록하지 않고 알려만 준다
+const EDU_DUTIES=[
+  ['결핵환자를 진단·치료했을 때','소속 의료기관의 장에게 바로 보고하고, 의료기관의 장은 24시간 안에 보건소장에게 신고해요.','결핵예방법 제8조'],
+  ['감염병을 진단했을 때','1급은 즉시, 2·3급은 24시간 안, 4급은 7일 안에 신고해요.','감염병예방법 제11조'],
+  ['병원에서 직접 예방접종을 했을 때','접종 사실을 시장·군수·구청장에게 보고해요.','감염병예방법 제28조'],
+  ['방사선 안전관리책임자를 선임했을 때','선임 후 1개월 안에 신고해요.','의료법 제37조 · 방사선 안전관리 규칙 제10조']
+];
+function eduInit(){
+  if(!DB.edu || typeof DB.edu!=='object') DB.edu={};
+  if(DB.edu.kind!=='hospital') DB.edu.kind='clinic';
+  if(!DB.edu.items || typeof DB.edu.items!=='object') DB.edu.items={};
+  if(!Array.isArray(DB.edu.recs)) DB.edu.recs=[];
+}
+function eduCtx(){ eduInit(); return {kind:DB.edu.kind, n:staffCount(), beds:+DB.edu.beds||0}; }
+function eduState(it){
+  eduInit(); const ov=DB.edu.items[it.id]||{}; const a=it.applies(eduCtx());
+  const on = typeof ov.on==='boolean' ? ov.on : a[0]==='yes';
+  const cyc = +ov.cycle>0 ? +ov.cycle : it.cycle;
+  return {st:a[0], why:a[1], on, cyc, ov};
+}
+function eduLast(itemId, sid){
+  let best=''; DB.edu.recs.forEach(r=>{ if(r.itemId===itemId && (r.staffIds||[]).includes(sid) && r.date>best) best=r.date; });
+  return best;
+}
+function eduDue(it, last, cyc){
+  if(!last) return '';
+  if(it.dueRule==='yearEnd3') return (+last.slice(0,4)+3)+'-12-31';
+  if(!(cyc>0)) return '';
+  const d=new Date(last+'T00:00:00'); d.setMonth(d.getMonth()+cyc); return todayKey(d);
+}
+// 한 교육의 현황 — 미이수·기한 지남·곧 도래
+function eduStatus(it){
+  const s=eduState(it), today=todayKey(), soon=todayKey(new Date(Date.now()+60*DAY_MS));
+  const people = it.scope==='person'
+    ? [...new Set(DB.edu.recs.filter(r=>r.itemId===it.id).flatMap(r=>r.staffIds||[]))].map(staffById).filter(Boolean)
+    : activeStaff();
+  const missing=[], overdue=[]; let next='';
+  people.forEach(p=>{
+    const last=eduLast(it.id,p.id);
+    if(!last){ missing.push(staffLabel(p.id)); return; }
+    const due=eduDue(it,last,s.cyc);
+    if(due && due<today) overdue.push(staffLabel(p.id));
+    else if(due && (!next || due<next)) next=due;
+  });
+  // 한 번도 기록한 적이 없으면 미이수로 몰지 않는다 — 처음 쓰는 병원은 지난 기록부터 옮겨 적어야 한다
+  const any = DB.edu.recs.some(r=>r.itemId===it.id);
+  let level='ok';
+  if(!any) level='none';
+  else if(missing.length||overdue.length) level='bad';
+  else if(next && next<=soon) level='warn';
+  return {people, missing, overdue, next, level, cyc:s.cyc};
+}
+function eduItems(){ return eduCatalog().filter(it=>eduState(it).on); }
+// 챙길 것 개수 — 미이수·기한 지남이 있는 켜진 교육
+function eduProblemCount(){
+  return eduItems().filter(it=>{ const st=eduStatus(it); return st.level==='bad'; }).length;
+}
+function eduSetKind(k){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
+  eduInit(); DB.edu.kind = k==='hospital'?'hospital':'clinic'; saveDB(); renderStaff();
+}
+function eduSetBeds(v){
+  if(!isHR()) return; eduInit(); const n=Math.max(0,parseInt(v,10)||0); DB.edu.beds=n||null; saveDB(); renderStaff();
+}
+function eduCycleWord(c, it){
+  if(it.dueRule==='yearEnd3') return '3년마다(3년째 되는 해 말까지)';
+  if(!(c>0)) return '1회';
+  if(c===12) return '매년'; if(c===6) return '반기마다'; if(c%12===0) return (c/12)+'년마다';
+  return c+'개월마다';
+}
+function hrEduView(){
+  eduInit(); const ctx=eduCtx(), cat=eduCatalog();
+  const on=cat.filter(it=>eduState(it).on), off=cat.filter(it=>!eduState(it).on);
+  const group=(g)=>on.filter(it=>it.g===g);
+  const card=(it)=>{
+    const s=eduState(it), st=eduStatus(it);
+    const col = st.level==='bad'?'danger': st.level==='warn'?'warn': st.level==='none'?'line':'ok';
+    const line =
+      st.level==='none' ? '아직 기록이 없어요. 받은 적이 있으면 이수를 적어 두세요.' :
+      st.level==='ok' ? '모두 이수했어요.'+(st.next?` 다음 기한 ${fmtDateFull(st.next)}`:'') :
+      st.level==='warn' ? `곧 기한이에요 — ${fmtDateFull(st.next)}` : '';
+    const who = st.level==='none' ? '' : (st.missing.length? `<div class="tiny" style="color:var(--danger);font-weight:700;margin-top:5px">기록 없음 · ${st.missing.map(esc).join(', ')}</div>`:'')
+              + (st.overdue.length? `<div class="tiny" style="color:var(--danger);font-weight:700;margin-top:5px">기한 지남 · ${st.overdue.map(esc).join(', ')}</div>`:'');
+    return `<div class="card" style="padding:13px 14px;margin-bottom:8px;border-left:4px solid var(--${col})">
+      <div class="spread" style="align-items:flex-start;gap:10px">
+        <div class="grow" style="min-width:0">
+          <div style="font-weight:800">${esc(it.name)}</div>
+          <div class="tiny muted" style="margin-top:3px">${esc(eduCycleWord(s.cyc,it))}${it.free&&!s.ov.cycle?' · 주기는 병원이 정해요':''} · 대상 ${esc(it.who)}</div>
+          ${line?`<div class="tiny" style="margin-top:4px">${esc(line)}</div>`:''}${who}
+          ${it.note?`<div class="tiny muted" style="margin-top:5px">${esc(it.note)}</div>`:''}
+          ${s.why?`<div class="tiny muted" style="margin-top:3px">${esc(s.why)}</div>`:''}
+          <div class="lawcite" style="margin-top:5px">근거 · ${esc(it.cite)}${it.keep?` · 보관 ${esc(it.keep)}`:''}</div>
+        </div>
+      </div>
+      <div class="row" style="gap:6px;margin-top:9px;flex-wrap:wrap">
+        <button class="btn soft xs" onclick="openEduRec('${it.id}')">＋ 이수 기록</button>
+        ${it.links.map(l=>`<a class="btn soft xs" style="text-decoration:none" href="${esc(l.u)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.t)}</a>`).join('')}
+        <button class="btn soft xs" onclick="openEduItemSet('${it.id}')">⚙︎</button>
+      </div></div>`;
+  };
+  const sec=(title, sub, list)=> list.length? `<h2 class="sec" style="margin:14px 2px 6px">${title}</h2>${sub?`<div class="hint" style="margin-bottom:8px">${sub}</div>`:''}${list.map(card).join('')}`:'';
+  const maybeOff=off.filter(it=>eduState(it).st==='maybe');
+  const noOff=off.filter(it=>eduState(it).st==='no');
+  const prob=eduProblemCount(), blank=on.filter(it=>eduStatus(it).level==='none').length;
+  const tone = prob?'warn' : blank?'brand' : 'ok';
+  return `<div class="card" style="box-shadow:none;background:var(--${tone}-soft);border:0;padding:14px 15px;margin-bottom:12px">
+      <div style="font-weight:900;color:var(--${tone});font-size:15px">${prob?`챙길 교육이 ${prob}가지 있어요`: blank?`기록이 없는 교육이 ${blank}가지 있어요`:'지금 챙길 교육은 없어요'}</div>
+      <div class="tiny muted" style="margin-top:6px">이 화면은 빠진 것을 찾는 점검표이고 "이러면 문제없다"는 판정이 아니에요. 교육은 아래 공식 사이트에서 받고, 받은 뒤 여기에 기록하세요. 이수 기록은 최고관리자·인사담당자만 봐요.</div>
+    </div>
+    <div class="card" style="padding:13px 14px;margin-bottom:8px">
+      <div style="font-weight:800;margin-bottom:8px">우리 병원은</div>
+      <div class="seg" style="margin-bottom:8px">
+        <button class="${ctx.kind==='clinic'?'on':''}" onclick="eduSetKind('clinic')">의원급</button>
+        <button class="${ctx.kind==='hospital'?'on':''}" onclick="eduSetKind('hospital')">병원급</button>
+      </div>
+      ${ctx.kind==='hospital'?`<label class="field"><span>병상 수 (선택)</span><input type="number" inputmode="numeric" min="0" value="${ctx.beds||''}" onchange="eduSetBeds(this.value)" placeholder="예: 30"></label>`:''}
+      <div class="tiny muted">직원 <b>${ctx.n}명</b> 기준이에요. 숫자가 다르면 <b>설정 → 우리 병원 직원 수</b>에서 고치세요.
+        의원급과 병원급은 대부분의 교육이 같고, 산업안전·자살예방·폭력예방·병상 기준 교육만 달라져요.</div>
+    </div>
+    ${sec('직원에게 하는 교육','', group('edu'))}
+    ${sec('한 사람이 받는 교육','보수교육처럼 정해진 사람 본인이 받는 교육이에요. 받은 사람을 골라 기록하세요.', group('person'))}
+    ${sec('교육이 아닌 의무','검진·신고처럼 교육과 달라서 따로 모았어요.', group('duty'))}
+    <div class="card" style="padding:13px 14px;margin-bottom:8px">
+      ${EDU_DUTIES.map(d=>`<div style="margin-bottom:8px"><div style="font-weight:700">${esc(d[0])}</div><div class="tiny muted">${esc(d[1])}</div><div class="lawcite">근거 · ${esc(d[2])}</div></div>`).join('')}
+    </div>
+    ${maybeOff.length? `<h2 class="sec" style="margin:14px 2px 6px">해당되면 켜세요</h2>
+      <div class="hint" style="margin-bottom:8px">병원 사정에 따라 해당하는 교육이에요. 해당하면 ⚙︎ 를 눌러 켜세요.</div>
+      ${maybeOff.map(it=>`<div class="card" style="padding:12px 14px;margin-bottom:8px">
+        <div class="spread"><div class="grow"><div style="font-weight:800">${esc(it.name)}</div>
+          <div class="tiny muted" style="margin-top:3px">${esc(eduState(it).why)}</div>
+          <div class="lawcite" style="margin-top:4px">근거 · ${esc(it.cite)}</div></div>
+          <button class="btn soft xs" onclick="eduToggle('${it.id}',true)">켜기</button></div></div>`).join('')}`:''}
+    ${noOff.length? `<details style="margin:14px 2px"><summary class="tiny muted" style="cursor:pointer">해당 없는 교육 ${noOff.length}가지 보기</summary>
+      ${noOff.map(it=>`<div class="tiny muted" style="margin-top:8px"><b>${esc(it.name)}</b> — ${esc(eduState(it).why)}</div>`).join('')}</details>`:''}
+    <div class="tiny muted" style="margin:10px 2px">근거 조문과 확인하지 못한 것은 저장소의 <b>docs/EDUCATION_RULES.md</b> 에 적혀 있어요. 중요한 결정은 노무사나 관할 기관에 확인하세요.</div>`;
+}
+function eduToggle(id,on){
+  if(!isHR()) return; eduInit(); DB.edu.items[id]=Object.assign(DB.edu.items[id]||{},{on:!!on}); saveDB(); renderStaff();
+}
+function openEduItemSet(id){
+  const it=eduCatalog().find(x=>x.id===id); if(!it) return; const s=eduState(it);
+  const opts=[[0,'1회만'],[6,'6개월마다'],[12,'매년(12개월)'],[24,'2년마다'],[36,'3년마다']];
+  modal(`<h3>${esc(it.name)}</h3>
+    <div class="tiny muted" style="margin-bottom:10px">${esc(it.cite)}</div>
+    <label class="field"><span>이 병원에 적용</span>
+      <select id="eiOn"><option value="1" ${s.on?'selected':''}>적용해요</option><option value="0" ${!s.on?'selected':''}>해당 없어요</option></select></label>
+    ${it.dueRule?`<div class="tiny muted" style="margin-bottom:10px">기한은 이수한 해로부터 3년째 되는 해 12월 31일로 계산해요.</div>`:`
+    <label class="field"><span>주기</span>
+      <select id="eiCyc">${opts.map(o=>`<option value="${o[0]}" ${o[0]===s.cyc?'selected':''}>${o[1]}</option>`).join('')}</select></label>
+    ${it.free?`<div class="tiny muted">법에 정해진 횟수가 없어서 병원이 정하는 주기예요.</div>`:''}`}
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn block" onclick="saveEduItemSet('${id}')">저장</button>
+      <button class="btn ghost block" onclick="closeModal()">닫기</button></div>`);
+}
+function saveEduItemSet(id){
+  if(!isHR()) return; eduInit();
+  const it=eduCatalog().find(x=>x.id===id); const o=DB.edu.items[id]||{};
+  o.on = $('#eiOn').value==='1';
+  const c=$('#eiCyc'); if(c) o.cycle = +c.value>0 ? +c.value : 0;
+  DB.edu.items[id]=o; saveDB(); closeModal(); renderStaff(); toast('저장했어요');
+}
+const EDU_METHODS=['외부 교육(수료증)','자체 교육','자료 게시·배포','온라인 교육'];
+function openEduRec(id){
+  const it=eduCatalog().find(x=>x.id===id); if(!it) return;
+  eduInit();
+  const recs=DB.edu.recs.filter(r=>r.itemId===id).sort((a,b)=>b.date.localeCompare(a.date));
+  const staff=activeStaff();
+  modal(`<h3>${esc(it.name)} — 이수 기록</h3>
+    <div class="tiny muted" style="margin-bottom:10px">${esc(it.who)} · ${esc(it.cite)}</div>
+    <label class="field"><span>받은 날</span><input id="erDate" type="date" value="${todayKey()}"></label>
+    <label class="field"><span>방법</span><select id="erMethod">${EDU_METHODS.map(m=>`<option>${esc(m)}</option>`).join('')}</select></label>
+    <div class="field"><span>받은 사람</span>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+        ${staff.map(s=>`<label class="row" style="gap:8px"><input type="checkbox" class="erWho" value="${s.id}" ${it.scope==='staff'?'checked':''}> ${esc(staffLabel(s.id))}</label>`).join('')}
+      </div></div>
+    <label class="field"><span>서류 보관 위치 (선택)</span><input id="erPlace" placeholder="예: 2층 서류함 3번 칸"></label>
+    <label class="field"><span>메모 (선택)</span><input id="erMemo" placeholder="예: 강사, 교육 기관"></label>
+    <div class="row" style="gap:8px;margin-top:10px"><button class="btn block" onclick="saveEduRec('${id}')">기록하기</button>
+      <button class="btn ghost block" onclick="closeModal()">닫기</button></div>
+    ${recs.length?`<div class="divider"></div><div class="tiny muted" style="margin-bottom:6px">지금까지 기록</div>
+      ${recs.slice(0,8).map(r=>`<div class="item" style="align-items:flex-start">
+        <div class="grow"><div style="font-weight:700">${esc(fmtDateFull(r.date))} · ${esc(r.method||'')}</div>
+          <div class="tiny muted">${(r.staffIds||[]).map(sid=>esc(staffLabel(sid))).filter(Boolean).join(', ')||'-'}${r.place?' · 보관 '+esc(r.place):''}${r.memo?' · '+esc(r.memo):''}</div></div>
+        <button class="btn soft xs" onclick="printEduLog('${r.id}')">🖨 일지</button>
+        <button class="btn soft xs" onclick="delEduRec('${r.id}','${id}')">✕</button></div>`).join('')}`:''}`);
+}
+function saveEduRec(id){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 기록할 수 있어요'); return; }
+  eduInit();
+  const date=$('#erDate').value; if(!date){ toast('받은 날을 넣어 주세요'); return; }
+  const ids=[...document.querySelectorAll('.erWho:checked')].map(x=>x.value);
+  if(!ids.length){ toast('받은 사람을 하나 이상 고르세요'); return; }
+  DB.edu.recs.unshift({id:uid(), itemId:id, date, method:$('#erMethod').value, staffIds:ids,
+    place:$('#erPlace').value.trim(), memo:$('#erMemo').value.trim(), at:now()});
+  saveDB(); closeModal(); renderStaff(); toast('기록했어요');
+}
+function delEduRec(rid,itemId){
+  if(!isHR()) return;
+  if(!confirm('이 기록을 지울까요?')) return;
+  DB.edu.recs=DB.edu.recs.filter(r=>r.id!==rid); saveDB(); openEduRec(itemId); renderStaff();
+}
+// 자체교육 일지 — 인쇄하거나 PDF 로 저장해서 서명받아 보관·팩스한다
+function printEduLog(rid){
+  const r=DB.edu.recs.find(x=>x.id===rid); if(!r) return;
+  const it=eduCatalog().find(x=>x.id===r.itemId); if(!it) return;
+  const names=(r.staffIds||[]).map(staffLabel).filter(Boolean);
+  const rows=names.map((n,i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td></td></tr>`).join('');
+  const w=window.open('','_blank');
+  if(!w){ toast('팝업이 막혀 있어요. 브라우저에서 팝업을 허용해 주세요'); return; }
+  w.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>교육 일지</title>
+    <style>body{margin:28px;color:#111;word-break:keep-all}
+    h1{font-size:20px;margin:0 0 14px}table{border-collapse:collapse;width:100%;margin:10px 0}
+    td,th{border:1px solid #444;padding:8px 10px;font-size:14px;text-align:left}th{background:#eee;width:110px}
+    .sign td:last-child{width:40%;height:34px}.small{font-size:12px;color:#444;margin-top:10px}</style></head><body>
+    <h1>${esc(it.name)} 교육 일지</h1>
+    <table><tr><th>병원</th><td>${esc(DB.hospName||'')}</td></tr>
+      <tr><th>교육 일시</th><td>${esc(r.date)}</td></tr>
+      <tr><th>교육 방법</th><td>${esc(r.method||'')}</td></tr>
+      <tr><th>장소</th><td>&nbsp;</td></tr>
+      <tr><th>강사·기관</th><td>${esc(r.memo||'')}&nbsp;</td></tr>
+      <tr><th>교육 내용</th><td style="height:90px;vertical-align:top">${esc(it.topics||'')}</td></tr>
+      <tr><th>근거</th><td>${esc(it.cite)}</td></tr></table>
+    <table class="sign"><tr><th style="width:50px">번호</th><th>이름</th><th>서명</th></tr>${rows}</table>
+    <div class="small">${it.keep?'보관: '+esc(it.keep)+' · ':''}작성자 서명: ____________________</div>
+    <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`);
+  w.document.close();
+}
+
 function hrCheckView(){
   const all=laborStaff(), ym=monthKey();
   const noContract=all.filter(s=>!contractOf(s.id));
@@ -5298,7 +5619,8 @@ function hrCheckView(){
         </div></div></div>`;
   };
 
-  const bad=[noContract.length,notAgreed.length,gaps.length,noPay.length,pendResign.length,docPending().length].filter(Boolean).length + (noKey?1:0);
+  const eduBad=eduProblemCount();
+  const bad=[noContract.length,notAgreed.length,gaps.length,noPay.length,pendResign.length,docPending().length,eduBad].filter(Boolean).length + (noKey?1:0);
 
   return `<div class="card" style="box-shadow:none;background:${bad?'var(--warn-soft)':'var(--ok-soft)'};border:0;padding:14px 15px;margin-bottom:12px">
       <div style="font-weight:900;color:var(--${bad?'warn':'ok'});font-size:15px">${bad? `지금 챙길 것이 ${bad}가지 있어요` : '지금 챙길 것은 없어요'}</div>
@@ -5335,6 +5657,10 @@ function hrCheckView(){
     ${item(docPending().length,'📋','아직 처리 안 한 신청서',
       '직원이 낸 육아휴직·병가 같은 신청서예요. 승인이든 반려든 답을 줘야 직원이 계획을 세울 수 있습니다.',
       docPending().map(r=>staffLabel(r.staffId)+' ('+docTypeName(r.typeId)+')'), null, "hrTab('docs')")}
+
+    ${item(eduBad,'🎓','의무교육 이수 기록',
+      eduBad? '기한이 지났거나 받은 기록이 없는 직원이 있는 교육이에요. 교육 탭에서 확인하세요.' : '기록이 있는 교육은 모두 기한 안이에요. 아직 기록하지 않은 교육은 교육 탭에서 시작하세요.',
+      null, '성희롱 예방 · 장애인 인식개선 · 학대 신고의무자 · 결핵 등', "hrTab('edu')")}
 
     ${item(pendResign.length,'📄','아직 처리 안 한 사직서',
       '사직서는 받은 날부터 날짜를 셉니다. 처리를 미루면 퇴직일이 뒤로 밀려요.',
@@ -5693,7 +6019,7 @@ function hrTab(v){ hrView=v; renderStaff(); }
 function renderStaff(){
   const wrap=$('#staffWrap'); if(!wrap) return;
   if(!isHR()){ wrap.innerHTML=myPageHtml(); return; }
-  const tabs=[['check','점검'],['list','명단'],['notice','공지'],['contract','근로계약서'],['pay','급여명세서'],['docs','서류']];
+  const tabs=[['check','점검'],['list','명단'],['edu','교육'],['notice','공지'],['contract','근로계약서'],['pay','급여명세서'],['docs','서류']];
   const pend=(DB.resignations||[]).filter(r=>r.status==='제출').length
             +(DB.docReqs||[]).filter(r=>r.status==='제출').length;
   wrap.innerHTML=`<div class="spread" style="margin:4px 2px 12px">
@@ -5705,6 +6031,7 @@ function renderStaff(){
     </div>
     <div>${
       hrView==='check'? hrCheckView() :
+      hrView==='edu'? hrEduView() :
       hrView==='notice'? hrNoticeView() :
       hrView==='contract'? hrContractView() :
       hrView==='pay'? hrPayView() :
@@ -6247,7 +6574,7 @@ function pickRoster(){
 }
 function pickSecrets(){
   const pins={}; (DB.staff||[]).forEach(s=>{ if(s.pin!=null && s.pin!=='') pins[s.id]=String(s.pin); });
-  return { pins, adminPin: DB.adminPin||'', hrLogs: DB.hrLogs||[] };
+  return { pins, adminPin: DB.adminPin||'', hrLogs: DB.hrLogs||[], edu: DB.edu||null };
 }
 function pickPerson(sid){ const o={}; B_PERSON.forEach(k=>{ o[k]=(DB[k]||[]).filter(x=>x && x.staffId===sid); }); return o; }
 function personIds(){
@@ -6417,7 +6744,8 @@ function openData(){
     unsubs.push(refSecrets().onSnapshot(s=>{
       const d=s.data()||{}; if(stale('secrets',d)) return; got.secrets=true;
       pinMap = d.pins || {};
-      applyLocal(()=>{ DB.adminPin=d.adminPin||''; DB.hrLogs=Array.isArray(d.hrLogs)?d.hrLogs:[]; mergeStaff(); });
+      applyLocal(()=>{ DB.adminPin=d.adminPin||''; DB.hrLogs=Array.isArray(d.hrLogs)?d.hrLogs:[];
+        if(d.edu && typeof d.edu==='object') DB.edu=d.edu; ensureSchema(); mergeStaff(); });
     }, e=>reopenSoon('secrets '+((e&&e.code)||e))));
     unsubs.push(wsRef().collection('people').onSnapshot(qs=>{
       got.people=true;
