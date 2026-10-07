@@ -1141,10 +1141,12 @@ function renderInv(){
     const st = i.qty===0? 'var(--danger)' : i.qty<=i.minQty? 'var(--warn)'
       : (f&&f.left<=7)? 'var(--warn)' : (dd!==null&&dd<=30)? 'var(--danger)' : 'var(--ok)';
     // 한 줄만 보여준다. 급한 게 있으면 그것만, 없으면 분류·최소량.
-    const note = i.qty===0? '품절'
-      : i.qty<=i.minQty? `부족 · 최소 ${i.minQty}${esc(i.unit)}`
-      : (f&&f.left<=7)? (f.left<=0?'지금 주문':`${f.left}일 뒤 주문`)
-      : (dd!==null&&dd<0)? '유통기한 만료' : (dd!==null&&dd<=30)? `유통기한 D-${dd}`
+    // 급한 줄에도 보관 위치는 붙인다 — 가지러 가야 하는 때가 위치가 제일 필요한 때다.
+    const where = i.place? ` · ${esc(i.place)}` : '';
+    const note = i.qty===0? '품절'+where
+      : i.qty<=i.minQty? `부족 · 최소 ${i.minQty}${esc(i.unit)}`+where
+      : (f&&f.left<=7)? (f.left<=0?'지금 주문':`${f.left}일 뒤 주문`)+where
+      : (dd!==null&&dd<0)? '유통기한 만료'+where : (dd!==null&&dd<=30)? `유통기한 D-${dd}`+where
       : [esc(i.category||''), esc(i.place||''), f?`하루 ${num1(f.daily)}${esc(i.unit)}`:''].filter(Boolean).join(' · ');
     return `<div class="irow" data-id="${i.id}">
       <span class="dot" style="background:${st}"></span>
