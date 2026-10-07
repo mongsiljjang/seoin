@@ -34,6 +34,9 @@ await ok('개설 때 명단 쓰기 — 조건 다 걸려도 통과',
 await ok('개설 때 PIN 쓰기',   setDoc(P(새기기(),'secrets','main'), {pins:{}}));
 await ok('개설 때 급여 쓰기',  setDoc(P(새기기(),'people','s1'), {pay:1}));
 await ok('개설 때 재고 쓰기',  setDoc(P(새기기(),'shared','main'), {inventory:[]}));
+// 계량기는 meta 와 같은 조건(isAdmin || bootstrapAllowed)이라 조회 개수도 같다.
+// 조건이 다 걸린 자리에서 한 번 확인해 둔다 — 여기서 터지면 병원이 잠긴다.
+await ok('개설 때 계량기 쓰기', setDoc(P(새기기(),'usage','main'), {staffCount:1}));
 
 console.log('\n── 명단이 생긴 뒤 (관리자 경로) ──');
 await ok('관리자가 명단을 읽는다', getDoc(P(새기기(),'roster','main')));
@@ -48,6 +51,8 @@ await ok('복구 문이 열리면 다시 첫 관리자가 된다',
   setDoc(P(원장(),'claims','owner1'), {approved:true, role:'관리자', staffId:'s9'}));
 await ok('그 상태에서 명단 쓰기도 된다',
   setDoc(P(원장(),'roster','main'), {staff:[{id:'s9'}]}));
+await ok('그 상태에서 계량기 쓰기도 된다',
+  setDoc(P(원장(),'usage','main'), {staffCount:2}));
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 await env.cleanup(); process.exit(fail?1:0);
