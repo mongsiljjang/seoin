@@ -21,21 +21,32 @@ $excludedDirectoryNames = @(
   'venv'
 )
 
+# 기준은 원격(GitHub 등)이다. 이 경로는 이 PC 에 받아 둔 복사본일 뿐이라, 로컬이 원격과 얼마나 갈라졌는지도 같이 낸다.
 function Get-RepoSnapshot {
   param([string]$RepoPath)
 
   $ok = $true
   $errorText = ''
 
-  $branch = (& git -C $RepoPath branch --show-current 2>$null)
+  $branch = (& git -c "safe.directory=$($RepoPath -replace '\\','/')" -C $RepoPath branch --show-current 2>$null)
 
-  $head = (& git -C $RepoPath rev-parse --short HEAD 2>&1)
+  $head = (& git -c "safe.directory=$($RepoPath -replace '\\','/')" -C $RepoPath rev-parse --short HEAD 2>&1)
   if ($LASTEXITCODE -ne 0) { $ok = $false; $errorText = "$head"; $head = '' }
 
-  $status = @(& git -C $RepoPath status --short 2>&1)
+  $status = @(& git -c "safe.directory=$($RepoPath -replace '\\','/')" -C $RepoPath status --short 2>&1)
   if ($LASTEXITCODE -ne 0) { $ok = $false; $errorText = ($status -join ' '); $status = @() }
+  $status = @($status | Where-Object { "$_" -notmatch '^(warning|hint):' })
+  if ($head -is [array]) { $head = @($head | Where-Object { "$_" -notmatch '^(warning|hint):' })[-1] }
 
-  $recent = @(& git -C $RepoPath log -3 --pretty=format:'%h %s' 2>$null)
+  $recent = @(& git -c "safe.directory=$($RepoPath -replace '\\','/')" -C $RepoPath log -3 --pretty=format:'%h %s' 2>$null)
+
+  $remoteUrl = (& git -c "safe.directory=$($RepoPath -replace '\\','/')" -C $RepoPath remote get-url origin 2>$null)
+  $upstream = (& git -c "safe.directory=$($RepoPath -replace '\\','/')" -C $RepoPath rev-parse --abbrev-ref '@{u}' 2>$null)
+  $ahead = $null; $behind = $null
+  if ($LASTEXITCODE -eq 0 -and $upstream) {
+    $lr = (& git -c "safe.directory=$($RepoPath -replace '\\','/')" -C $RepoPath rev-list --left-right --count 'HEAD...@{u}' 2>$null)
+    if ($lr -match '^(\d+)\s+(\d+)$') { $ahead = [int]$Matches[1]; $behind = [int]$Matches[2] }
+  }
 
   [pscustomobject]@{
     path = $RepoPath
@@ -47,6 +58,11 @@ function Get-RepoSnapshot {
     clean = ($ok -and $status.Count -eq 0)
     status = $status
     recent_commits = $recent
+    remote = $remoteUrl
+    upstream = $upstream
+    # 마지막 fetch 기준이다. 푸시 여부를 말하려면 먼저 git fetch 를 한다. null 은 upstream 이 없다는 뜻.
+    ahead_of_remote = $ahead
+    behind_remote = $behind
   }
 }
 
@@ -56,7 +72,7 @@ function Get-RepoSnapshot {
 function Test-RepoRoot {
   param([string]$CandidatePath)
 
-  $top = (& git -C $CandidatePath rev-parse --show-toplevel 2>$null)
+  $top = (& git -c "safe.directory=$($CandidatePath -replace '\\','/')" -C $CandidatePath rev-parse --show-toplevel 2>$null)
   if ($LASTEXITCODE -ne 0 -or -not $top) { return $false }
   try {
     $topResolved = (Resolve-Path -LiteralPath $top -ErrorAction Stop).Path
@@ -80,7 +96,7 @@ function Add-RepositoryPath {
   }
 }
 
-$root = (& git -C $resolvedProject rev-parse --show-toplevel 2>$null)
+$root = (& git -c "safe.directory=$($resolvedProject -replace '\\','/')" -C $resolvedProject rev-parse --show-toplevel 2>$null)
 
 if ($LASTEXITCODE -eq 0 -and $root) {
   Add-RepositoryPath -RepoPath $root

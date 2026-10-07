@@ -100,9 +100,11 @@ node test/의무교육.mjs
 - 옮긴 뒤 `diff -q` 로 두 `index.html` 이 같은지 확인하고 결과를 보고에 적는다
 - pilot 의 `README.md` 와 뿌리 `firebase.json` 은 pilot 것이다. **덮지 않는다**
 - 브랜치는 이름으로 고르지 않는다 — 위의 브랜치 절 참고
-- **D: 드라이브 체크아웃(`D:\mediops-pilot\pilot`·`seoin`)은 git 이 소유권 오류를 낸다.** 전역 설정을 바꾸지 말고
-  명령마다 `git -c safe.directory=<경로> -C <경로> …` 로 쓴다. 같은 이유로 `mamuri` 의 `repo_snapshot.ps1` 이 저장소를 **0개**로 읽는다 —
-  빈 결과를 믿지 말고 `git status -sb` · `rev-list --left-right --count HEAD...@{u}` 로 직접 확인한다
+- **기준은 GitHub 이다.** 로컬 경로는 그 PC 에 받아 둔 복사본일 뿐이다(컴퓨터를 바꾸면 사라진다). 클론이 없으면 `gh repo clone mongsiljjang/mediops-pilot`·`mongsiljjang/seoin`.
+  핸드오프·시작 프롬프트에는 로컬 경로 대신 저장소 이름·브랜치·배포 URL 을 쓴다
+- 소유권을 기록하지 않는 드라이브(예: 이 PC 의 `D:`)에서는 git 이 "dubious ownership" 오류를 낸다. 전역 설정을 바꾸지 말고
+  명령마다 `git -c safe.directory=<경로> -C <경로> …` 로 쓴다. `mamuri` 의 `repo_snapshot` 스크립트는 2026-10-07 에 이 예외를 넣어 고쳤다 —
+  그래도 `repository_count` 가 0 이면 믿지 말고 `git status -sb` · `rev-list --left-right --count HEAD...@{u}` 로 직접 확인한다
 - 두 저장소 사이는 **패치**로 옮긴다: `git format-patch -1 -o <임시>` → 다른 쪽에서 `git am`. 끝나면 임시 폴더를 지운다
 - **pilot 은 비공개, seoin 은 공개다**(2026-10-07). 비밀이 아닌 공개 문서만 seoin 에도 올린다
 - 법령 원문은 `WebFetch` 로 본문이 비어 나온다. 국가법령정보센터 오픈 API 로 받는다 —

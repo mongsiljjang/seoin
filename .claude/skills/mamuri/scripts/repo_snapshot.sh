@@ -64,14 +64,14 @@ add_broken() {
 is_repo_root() {
   local dir="$1" abs top
   abs=$(cd "$dir" 2>/dev/null && pwd -P) || return 1
-  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 1
+  top=$(git -c "safe.directory=$dir" -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 1
   [ -n "$top" ] || return 1
   top=$(cd "$top" 2>/dev/null && pwd -P) || return 1
   [ "$abs" = "$top" ]
 }
 
 # The project's own repository, if the path sits inside one.
-if root=$(git -C "$PROJECT_ABS" rev-parse --show-toplevel 2>/dev/null) && [ -n "$root" ]; then
+if root=$(git -c "safe.directory=$PROJECT_ABS" -C "$PROJECT_ABS" rev-parse --show-toplevel 2>/dev/null) && [ -n "$root" ]; then
   add_repo "$root"
 fi
 
@@ -100,14 +100,19 @@ walk() {
 snapshot() {
   local p="$1" branch head status_out recent_out ok err
   ok=true; err=""
-  branch=$(git -C "$p" branch --show-current 2>/dev/null) || true
-  if ! head=$(git -C "$p" rev-parse --short HEAD 2>&1); then
+  branch=$(git -c "safe.directory=$p" -C "$p" branch --show-current 2>/dev/null) || true
+  if ! head=$(git -c "safe.directory=$p" -C "$p" rev-parse --short HEAD 2>&1); then
     ok=false; err="$head"; head=""
   fi
-  if ! status_out=$(git -C "$p" status --short 2>&1); then
+  if ! status_out=$(git -c "safe.directory=$p" -C "$p" status --short 2>&1); then
     ok=false; err="$status_out"; status_out=""
   fi
-  recent_out=$(git -C "$p" log -3 --pretty=format:'%h %s' 2>/dev/null) || recent_out=""
+  # git 의 경고 줄(오래된 commit-graph 등)이 상태 목록에 섞이면 깨끗한 저장소가 더럽다고 읽힌다.
+  status_out=$(printf '%s
+' "$status_out" | grep -v -E '^(warning|hint):' || true)
+  head=$(printf '%s
+' "$head" | grep -v -E '^(warning|hint):' | tail -1 || true)
+  recent_out=$(git -c "safe.directory=$p" -C "$p" log -3 --pretty=format:'%h %s' 2>/dev/null) || recent_out=""
 
   local status_json recent_json clean
   status_json=$([ -n "$status_out" ] && printf '%s\n' "$status_out" | jarr || printf '[]')

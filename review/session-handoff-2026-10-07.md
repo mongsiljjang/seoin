@@ -106,8 +106,8 @@ GitHub Pages `mongsiljjang.github.io/mediops-pilot/` 는 **404**(껐다).
 
 **백업 브랜치는 그대로 갈라져 있다.** `claude/hospital-inventory-hr-app-fw7a9g` 는 `69f34bb` 에 멈춰 있고 거기에만 있는 커밋 5개가 있다. **강제 푸시하면 잃는다 — 하지 않는다.**
 
-**이 PC 의 함정**: `D:` 드라이브는 소유권을 기록하지 않아 git 이 막는다. 전역 설정을 건드리지 않고 `git -c safe.directory=<경로> -C <경로> …` 로 쓴다.
-같은 이유로 `mamuri` 의 `repo_snapshot.ps1` 이 저장소를 0개로 읽는다 — 빈 결과를 믿지 말 것(`AGENTS.md` 에 적었다).
+**이 PC(`D:\mediops-pilot\pilot`·`seoin`)의 함정 — 기준은 GitHub 이고 이 경로는 이 PC 의 복사본이다**: `D:` 드라이브는 소유권을 기록하지 않아 git 이 막는다. 전역 설정을 건드리지 않고 `git -c safe.directory=<경로> -C <경로> …` 로 쓴다.
+같은 이유로 `mamuri` 의 `repo_snapshot.ps1` 이 저장소를 0개로 읽었다 — **같은 날 스크립트를 고쳤고**(경로 하나에만 `safe.directory` 예외, 원격과의 앞섬·뒤처짐도 낸다) 그래도 0개면 믿지 말 것.
 `D:\mediops-pilot\mediops-pilot\` 은 **빈 `.git` 폴더**(첫 세션부터 있던 것, 내가 만든 게 아니다) — 지워도 되는지 사용자 판단.
 
 ## 6. 열린 질문 · 위험 · 미룬 일
@@ -152,7 +152,7 @@ GitHub Pages `mongsiljjang.github.io/mediops-pilot/` 는 **404**(껐다).
 ```
 MediOps 치과 앱 이어서 작업. review/session-handoff-2026-10-07.md 를 먼저 읽어줘 (앞 문서 session-handoff-2026-10-06-02.md 는 배경, 의무교육 근거는 docs/EDUCATION_RULES.md).
 원칙(AGENTS.md): Firebase 유지 · 개인정보 최소(차트번호만·환자정보 X) · 두 저장소 index.html 동일 유지 · 커밋+두 저장소 푸시 · 만든 화면은 deslop-ko 로 점검 · 법 조문은 '근로기준법 제17조' 식으로 풀어 쓰기 · 세션 마무리는 mamuri.
-저장소: 정식본 mongsiljjang/mediops-pilot(main, 비공개, 버셀 배포 https://mediops-pilot.vercel.app/) · 작업본 mongsiljjang/seoin 의 claude/mediops-auth-migration-l0iv4w(공개). 이 PC 는 D:\mediops-pilot\pilot · D:\mediops-pilot\seoin 인데 D: 는 git 소유권 오류가 나니 모든 git 명령은 git -c safe.directory=<경로> -C <경로> 로 쓴다.
+저장소(기준은 GitHub, 로컬 경로는 PC마다 다르다): 정식본 mongsiljjang/mediops-pilot(main, 비공개, 버셀 배포 https://mediops-pilot.vercel.app/) · 작업본 mongsiljjang/seoin 의 claude/mediops-auth-migration-l0iv4w(공개). 클론이 없으면 gh repo clone 으로 받는다. 모든 git 명령은 git -C <경로> 로 쓰고, 소유권 오류(dubious ownership)가 나면 git -c safe.directory=<경로> -C <경로> 로 쓴다(전역 설정은 건드리지 않는다).
 두 저장소를 맞출 때 파일 통복사 금지(git format-patch → git am 또는 diff 읽기). 백업 브랜치 claude/hospital-inventory-hr-app-fw7a9g 에는 거기에만 있는 커밋 5개가 있다. 강제 푸시 금지.
 이미 결론 난 것(다시 묻지 말 것): 배포는 버셀 한 곳 · 전화번호 문자 인증은 접었다(제안 X) · 수첩=재고 반영, 덴트웹 엑셀=월말 대조용(개수로, 환자 열은 버린다) · LLM 은 사진 판독에만, 지금은 보류 · 용어집·노무에는 LLM 안 붙인다 · 의무교육은 점검표지 판정이 아니다(과태료 금액은 화면에 안 낸다) · 참석 확인은 손서명이 아니라 본인 PIN/담당자 확인 · 병원급과 의원급은 일부 교육만 갈린다.
 지금 막혀 있는 것: 덴트웹 엑셀 열 구성(사용자가 글로 알려 주기로 함) · 사진 판독 시험용 수첩 사진.
