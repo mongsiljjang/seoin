@@ -62,10 +62,13 @@ AI 세션은 저마다 `claude/…-xxxxxx` 라는 **새 이름**을 받고 거�
 같은 문구가 `index.html` 에 다시 들어오면 깨진다. 무심코 되살릴 수 없다.
 
 ## 시험
-설치 없이 `node` 로 바로 돈다. 화면 코드를 고쳤으면 셋 다 돌린다.
+설치 없이 `node` 로 바로 돈다. 화면 코드를 고쳤으면 전부 돌린다(10종).
 
 ```
 node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보험페일.mjs
+node test/페일교환.mjs      node test/규격읽기.mjs        node test/장부맞춤.mjs
+node test/주문체크.mjs      node test/전화칸.mjs          node test/용어집.mjs
+node test/의무교육.mjs
 ```
 
 보안규칙 시험은 에뮬레이터가 필요하다 — `test/README.md` 참고
@@ -77,6 +80,8 @@ node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보
 ## 문서 위치
 - 로드맵: `docs/ROADMAP.md` · 데이터 모델: `docs/DATA_MODEL.md`
 - 노무 근거: `docs/LABOR_RULES.md` · **보험 임플란트에 하지 않기로 한 것: `docs/INSURANCE_RULES.md`**
+- **병·의원 의무교육 근거(법령 원문 대조, 확인 못 한 것 포함): `docs/EDUCATION_RULES.md`** · 기능 정리(마케팅용, pilot 에만 있다): `docs/FEATURES.md`
+- 서버가 필요한 기능과 사진 판독(LLM) 비용: `docs/SERVER.md`
 - 실장 통화록(요구사항 원천): `docs/CALL_2026-08-19_REQUIREMENTS.md`
 - 세션 핸드오프: `review/session-handoff-YYYY-MM-DD.md` (가장 최근 것을 먼저 읽는다)
 
@@ -95,6 +100,13 @@ node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보
 - 옮긴 뒤 `diff -q` 로 두 `index.html` 이 같은지 확인하고 결과를 보고에 적는다
 - pilot 의 `README.md` 와 뿌리 `firebase.json` 은 pilot 것이다. **덮지 않는다**
 - 브랜치는 이름으로 고르지 않는다 — 위의 브랜치 절 참고
+- **D: 드라이브 체크아웃(`D:\mediops-pilot\pilot`·`seoin`)은 git 이 소유권 오류를 낸다.** 전역 설정을 바꾸지 말고
+  명령마다 `git -c safe.directory=<경로> -C <경로> …` 로 쓴다. 같은 이유로 `mamuri` 의 `repo_snapshot.ps1` 이 저장소를 **0개**로 읽는다 —
+  빈 결과를 믿지 말고 `git status -sb` · `rev-list --left-right --count HEAD...@{u}` 로 직접 확인한다
+- 두 저장소 사이는 **패치**로 옮긴다: `git format-patch -1 -o <임시>` → 다른 쪽에서 `git am`. 끝나면 임시 폴더를 지운다
+- **pilot 은 비공개, seoin 은 공개다**(2026-10-07). 비밀이 아닌 공개 문서만 seoin 에도 올린다
+- 법령 원문은 `WebFetch` 로 본문이 비어 나온다. 국가법령정보센터 오픈 API 로 받는다 —
+  `https://www.law.go.kr/DRF/lawService.do?OC=test&target=law&type=XML&MST=<일련번호>` (한글 쿼리는 URL 인코딩)
 
 ### 검증 — 마무리 2단계에서 다시 돌린다
 설치 없이 `node` 로 돈다. **seoin·pilot 양쪽에서** 돌리고 숫자를 적는다.
@@ -102,6 +114,8 @@ node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보
 ```
 node test/수첩읽기.mjs   node test/단계별수술.mjs   node test/보험페일.mjs
 node test/페일교환.mjs   node test/규격읽기.mjs     node test/장부맞춤.mjs
+node test/주문체크.mjs   node test/전화칸.mjs       node test/용어집.mjs
+node test/의무교육.mjs
 ```
 
 - 화면을 고쳤으면 **`deslop-ko`** 도 돌린다. 기준선은 **3개 항목 4곳** —
@@ -124,7 +138,7 @@ node test/페일교환.mjs   node test/규격읽기.mjs     node test/장부맞�
 
 **마무리 스킬은 `mamuri`(마무리) 하나다.** `baton`·`wrap` 도 설치돼 있지만 셋 다 같은 말에
 반응해서 사람이 헷갈렸다. `마무리` 가 그 둘을 합친 보완본이고 이 프로젝트 관습
-(두 저장소 동기화·`git -C`·시험 6종·deslop-ko)까지 들고 있다. 원본 둘은 그대로 둔다.
+(두 저장소 동기화·`git -C`·시험 10종·deslop-ko)까지 들고 있다. 원본 둘은 그대로 둔다.
 
 `baton`·`wrap` 도 설치돼 있지만 셋 다 같은 말에 반응해서 사람이 헷갈렸다.
 `mamuri` 가 그 둘을 합친 보완본이다. 원본 저장소는 `mongsiljjang/skills` 다. 원본 둘은 그대로 둔다.
