@@ -5547,6 +5547,7 @@ function openEduRec(id){
       ${recs.slice(0,8).map(r=>`<div class="item" style="align-items:flex-start">
         <div class="grow"><div style="font-weight:700">${esc(fmtDateFull(r.date))} · ${esc(r.method||'')}</div>
           <div class="tiny muted">${(r.staffIds||[]).map(sid=>esc(staffLabel(sid))).filter(Boolean).join(', ')||'-'}${r.place?' · 보관 '+esc(r.place):''}${r.memo?' · '+esc(r.memo):''}</div></div>
+        <button class="btn soft xs" onclick="openEduConfirm('${r.id}')">✓ 확인 ${eduConfDone(r)}/${(r.staffIds||[]).length}</button>
         <button class="btn soft xs" onclick="printEduLog('${r.id}')">🖨 일지</button>
         <button class="btn soft xs" onclick="delEduRec('${r.id}','${id}')">✕</button></div>`).join('')}`:''}`);
 }
@@ -5565,12 +5566,75 @@ function delEduRec(rid,itemId){
   if(!confirm('이 기록을 지울까요?')) return;
   DB.edu.recs=DB.edu.recs.filter(r=>r.id!==rid); saveDB(); openEduRec(itemId); renderStaff();
 }
+/* ---- 참석 확인 — 손서명 대신 남기는 기록 ----------------------------------------
+   근로계약서 확인(openContractAgree)과 같은 방식이다. 교육 담당(실장 = 인사담당자)이 기기를 돌려
+   참석자가 자기 PIN 을 넣거나, 현장에서 담당자가 대신 확인한다. 원장님이 직접 하지 않아도 된다.
+   확인한 사람·방법·시각이 남는다. 제출처가 손서명을 요구하면 일지를 인쇄해 종이에 받는다. */
+function eduConfMake(how, by){ return {at:now(), by:how==='pin'?'pin':'mgr', byId:(by&&by.id)||'', byName:(by&&by.name)||''}; }
+function eduConfOf(r,sid){ return (r && r.conf && r.conf[sid]) || null; }
+function eduConfDone(r){ return (r.staffIds||[]).filter(sid=>eduConfOf(r,sid)).length; }
+function eduConfText(c){
+  if(!c) return '';
+  const d=String(c.at||'').slice(0,10);
+  return c.by==='pin' ? `✓ 본인 확인 ${d} ${fmtTime(c.at)}` : `✓ 담당자 확인(${c.byName||''}) ${d} ${fmtTime(c.at)}`;
+}
+function openEduConfirm(rid){
+  const r=DB.edu.recs.find(x=>x.id===rid); if(!r) return;
+  const it=eduCatalog().find(x=>x.id===r.itemId)||{name:''};
+  const left=(r.staffIds||[]).filter(sid=>!eduConfOf(r,sid)).length;
+  modal(`<h3>✓ 참석 확인</h3>
+    <div class="tiny muted" style="margin-bottom:10px">${esc(it.name)} · ${esc(fmtDateFull(r.date))}<br>
+      참석자가 <b>자기 PIN</b> 을 넣거나, 담당자가 현장에서 대신 확인해요. 확인한 방법과 시각이 기록으로 남아요.</div>
+    ${(r.staffIds||[]).map(sid=>{ const c=eduConfOf(r,sid);
+      return `<div class="item" style="align-items:center;gap:6px">
+        <div class="grow"><div style="font-weight:700">${esc(staffLabel(sid))}</div>
+          <div class="tiny ${c?'':'muted'}" style="${c?'color:var(--ok)':''}">${c?esc(eduConfText(c)):'아직 확인 전'}</div></div>
+        ${c?'':`<button class="btn soft xs" onclick="eduConfPin('${rid}','${sid}')">PIN</button>
+                <button class="btn soft xs" onclick="eduConfMgr('${rid}','${sid}')">담당자 확인</button>`}</div>`; }).join('')}
+    ${left>1?`<button class="btn ghost block" style="margin-top:10px" onclick="eduConfAll('${rid}')">남은 ${left}명을 담당자가 모두 확인</button>`:''}
+    <button class="btn soft block" style="margin-top:8px" onclick="openEduRec('${r.itemId}')">‹ 기록으로</button>`);
+}
+function eduConfPin(rid,sid){
+  const s=staffById(sid); if(!s) return;
+  modal(`<h3>${esc(s.name)} 님 PIN</h3>
+    <div class="hint">참석한 본인이 <b>자기 PIN</b> 을 넣어 주세요. 확인한 시각이 기록으로 남아요.</div>
+    <label class="field"><span>${esc(s.name)} 님 PIN</span>
+      <input id="ecPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    <button class="btn block" onclick="doEduConfPin('${rid}','${sid}')">참석했습니다</button>`, ()=>openEduConfirm(rid));
+}
+function doEduConfPin(rid,sid){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 기록할 수 있어요'); return; }
+  const r=DB.edu.recs.find(x=>x.id===rid), s=staffById(sid); if(!r||!s) return;
+  if(String(s.pin||'')!==($('#ecPin').value||'').trim()){ toast('PIN이 맞지 않아요'); return; }
+  r.conf=r.conf||{}; r.conf[sid]=eduConfMake('pin', s);
+  hrLog('교육', `${s.name} 교육 참석 본인 확인`);
+  saveDB(); openEduConfirm(rid); renderStaff();
+}
+function eduConfMgr(rid,sid){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 기록할 수 있어요'); return; }
+  const r=DB.edu.recs.find(x=>x.id===rid), s=staffById(sid); if(!r||!s) return;
+  if(!confirm(s.name+' 님이 교육에 참석한 것을 담당자로서 확인할까요?')) return;
+  r.conf=r.conf||{}; r.conf[sid]=eduConfMake('mgr', currentUser());
+  hrLog('교육', `${s.name} 교육 참석 담당자 확인`);
+  saveDB(); openEduConfirm(rid); renderStaff();
+}
+function eduConfAll(rid){
+  if(!isHR()){ toast('최고관리자와 인사담당자만 기록할 수 있어요'); return; }
+  const r=DB.edu.recs.find(x=>x.id===rid); if(!r) return;
+  const todo=(r.staffIds||[]).filter(sid=>!eduConfOf(r,sid));
+  if(!todo.length) return;
+  if(!confirm(`남은 ${todo.length}명이 교육에 참석한 것을 담당자로서 모두 확인할까요?`)) return;
+  r.conf=r.conf||{}; const u=currentUser();
+  todo.forEach(sid=>{ r.conf[sid]=eduConfMake('mgr', u); });
+  hrLog('교육', `교육 참석 담당자 확인 ${todo.length}명`);
+  saveDB(); openEduConfirm(rid); renderStaff();
+}
+
 // 자체교육 일지 — 인쇄하거나 PDF 로 저장해서 서명받아 보관·팩스한다
 function printEduLog(rid){
   const r=DB.edu.recs.find(x=>x.id===rid); if(!r) return;
   const it=eduCatalog().find(x=>x.id===r.itemId); if(!it) return;
-  const names=(r.staffIds||[]).map(staffLabel).filter(Boolean);
-  const rows=names.map((n,i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td></td></tr>`).join('');
+  const rows=(r.staffIds||[]).map((sid,i)=>`<tr><td>${i+1}</td><td>${esc(staffLabel(sid))}</td><td>${esc(eduConfText(eduConfOf(r,sid)))}</td></tr>`).join('');
   // 새 창은 폰에서 막히는 일이 많다. 숨은 틀(iframe) 안에 일지를 그리고 그 틀을 인쇄한다.
   // 인쇄 화면에서 PDF 로 저장하거나, 와이파이 복합기를 골라 바로 출력하거나, 복합기 팩스로 보낸다.
   if(IN_APP_BROWSER && !confirm('지금 다른 앱(카톡 등) 안의 창이라 인쇄가 안 될 수 있어요. 크롬이나 사파리에서 이 앱을 연 뒤 다시 눌러 주세요. 그래도 시도할까요?')) return;

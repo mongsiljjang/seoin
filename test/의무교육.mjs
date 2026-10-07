@@ -15,7 +15,7 @@ function grab(name){
   }
   throw new Error(name+' 의 끝을 못 찾았다');
 }
-const names = ['eduCatalog','eduInit','eduCtx','eduState','eduLast','eduDue','eduStatus','eduItems','eduProblemCount'];
+const names = ['eduCatalog','eduInit','eduCtx','eduState','eduLast','eduDue','eduStatus','eduItems','eduProblemCount','eduConfMake','eduConfOf','eduConfDone','eduConfText'];
 const make = (staff, now)=>{
   const ctx = { DB:{ edu:null, staff }, DAY_MS:86400000, now };
   const src = `
@@ -25,6 +25,8 @@ const make = (staff, now)=>{
     const staffById=id=>DB.staff.find(s=>s.id===id);
     const staffLabel=id=>(staffById(id)||{}).name||'';
     const pad=n=>String(n).padStart(2,'0');
+    const now=()=>new Date(ctx.now).toISOString();
+    const fmtTime=iso=>{const d=new Date(iso);return pad(d.getHours())+':'+pad(d.getMinutes());};
     const todayKey=(d=new Date(ctx.now))=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
     ${names.map(grab).join('\n')}
     return {DB, ${names.join(',')}};`;
@@ -95,6 +97,18 @@ const NOW = new Date('2026-10-07T12:00:00');
   st.DB.edu.recs.push({id:'p', itemId:'dentist', date:'2025-01-01', staffIds:['a']});
   const ds=st.eduStatus(st.eduCatalog().find(x=>x.id==='dentist'));
   t('한 사람이 받는 교육은 기록된 사람만 본다(다른 직원을 미이수로 몰지 않음)', ds.people.length===1 && ds.missing.length===0 && ds.overdue.join()==='김원장');
+}
+
+// 5) 참석 확인 — 손서명 대신 남기는 기록
+{ const m=make(S, NOW); m.eduInit();
+  const r={id:'r', itemId:'sexh', date:'2026-10-07', staffIds:['a','b','c']};
+  t('확인 전에는 아무도 확인되지 않았다', m.eduConfDone(r)===0 && m.eduConfText(m.eduConfOf(r,'a'))==='');
+  r.conf={}; r.conf.a=m.eduConfMake('pin', S[0]);
+  t('본인 PIN 확인은 방법이 pin 으로 남는다', r.conf.a.by==='pin' && m.eduConfText(r.conf.a).startsWith('✓ 본인 확인 2026-10-07'));
+  r.conf.b=m.eduConfMake('mgr', {id:'sil', name:'이실장'});
+  t('담당자 확인은 담당자 이름이 남는다', r.conf.b.by==='mgr' && m.eduConfText(r.conf.b).includes('담당자 확인(이실장)'));
+  t('확인한 사람 수를 센다', m.eduConfDone(r)===2);
+  t('확인 기록이 없는 사람은 빈 문자열(손서명용 빈칸)', m.eduConfText(m.eduConfOf(r,'c'))==='');
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
