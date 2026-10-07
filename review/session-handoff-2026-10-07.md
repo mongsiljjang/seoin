@@ -18,6 +18,7 @@
 | **병·의원 의무교육 전수 조사** | ✅ | 법령 원문 대조 7갈래. `docs/EDUCATION_RULES.md`(약 300줄) |
 | **의무교육 탭** (직원 탭 → `교육`, 홈 `🎓 의무교육`) | ✅ | 의원급/병원급 구분·공식 링크·이수 기록·기한·자체교육 일지(인쇄/PDF)·참석 확인(본인 PIN 또는 담당자). `test/의무교육.mjs` 32개 |
 | 기능 정리(마케팅용) | ✅ | `docs/FEATURES.md` — pilot 에만 있다 |
+| **마무리 스킬을 "기준은 원격" 으로 고침** | ✅ | 로컬 경로를 기준처럼 쓰던 것과 스냅샷이 D: 저장소를 0개로 읽던 것을 고쳤다. **원본 스킬 저장소(`mongsiljjang/skills`)에도 같은 수정을 반영**했다. 2장·3장 |
 | 덴트웹 엑셀 | ❌ | 샘플 대기. 방향은 정했다(2장) |
 | 사진 판독(LLM) | ❌ 보류 | 추산·한도 제안만 했다. `docs/SERVER.md` 6장 |
 
@@ -42,6 +43,7 @@
 - **교육 기록은 `secrets/main`(관리자만 읽는 문서)에 둔다.** 직원 기기에 안 내려가고 **`firestore.rules` 를 안 고쳤다**
 - **자체교육 일지 인쇄는 새 창이 아니라 숨은 iframe.** 폰에서 팝업이 막히고, 카톡 앱 안의 창에서는 인쇄가 안 될 수 있어 먼저 묻는다.
   PDF 파일로 만드는 게 아니라 **인쇄 화면에서 PDF 저장/와이파이 복합기 출력** 하는 방식이다. 팩스·이메일 직접 전송은 서버 단계로 미룬다
+- **기준은 GitHub 이고 로컬 경로는 그 PC 의 복사본이다.** 근거: 컴퓨터를 바꾸면 경로가 사라지는데 핸드오프·시작 프롬프트가 이전 PC 경로를 가리켰다. 그래서 핸드오프에는 저장소 이름·브랜치·배포 URL 을 쓰고, 마무리 스냅샷은 원격과의 앞섬·뒤처짐을 같이 낸다. 포기한 것: 핸드오프 안의 로컬 절대 경로
 - **텐센트 클라우드·문자 인증은 제안하지 않는다**(앞 문서와 같음)
 
 버린 것: 손서명 이미지 저장 · 앱이 팩스·이메일을 직접 보내는 것 · 교육을 앱 안에서 진행하는 것(공식 사이트 링크만) · 일반 재고의 창고별 수량(위치 꼬리표만).
@@ -61,7 +63,11 @@
 | 참석 확인 | `3cd0c7b` | `bd7ef3b` |
 | 홈 `🎓 의무교육` 단추 | `9b7c8c0` | `f90ead0` |
 | 기능 정리 | `e6b93f8` | — |
-| **이 마무리** | `git log -1` 로 확인 | `git log -1` 로 확인 |
+| 마무리 핸드오프·AGENTS(시험 10종)·SERVER.md(사진 판독 추산) | `634e8a9` | `c2aef3f` |
+| 마무리 스킬 — 기준은 원격(SKILL.md·스냅샷 스크립트·PRINCIPLES·시작 프롬프트) | `4373cc9` | `14968ed` |
+| 마무리 스킬 — sh 스냅샷도 원격 주소·앞섬/뒤처짐 | `adcf9a4` | `2dfc3dc` |
+| **이 SHA 표를 고친 커밋** | `git log -1` 로 확인 | `git log -1` 로 확인 |
+| 원본 스킬 저장소 `mongsiljjang/skills`(공개, main) | `87e8d13` · `85f95f3` | — |
 
 - 배포: <https://mediops-pilot.vercel.app/> (`?demo=1` 은 로그인 없이 가짜 자료로 둘러본다). `9b7c8c0` 의 Vercel 상태 `success`
 - 구현 위치: `index.html` 의 `eduCatalog()`(교육 목록·조건) · `hrEduView()`(화면) · `eduStatus()`(기한 계산) · `openEduRec`/`openEduConfirm`/`printEduLog`
@@ -84,6 +90,8 @@
 `deslop-ko`: **3개 항목 4곳 — 기준선과 같다**(양쪽). 새 지적 없음. (인쇄 일지에 서체를 넣었다가 한 곳 늘어서 서체 선언을 뺐다)
 데모 화면(`?demo=1`, 412px)에서 직접 확인: 교육 탭 목록·기록·기한 지남/빠진 사람·의원↔병원 전환·참석 확인(틀린 PIN 거절·본인 PIN·담당자·일괄)·일지 서명란 표시·홈 단추 배지·가로 넘침 없음.
 
+마무리 스킬 후속 수정 뒤에도 양쪽 스냅샷 스크립트를 이 PC 에서 돌렸다: PowerShell·sh 모두 `repository_count` 가 맞게 나오고(pilot·seoin 각 1개, 상위 폴더에서 훑으면 빈 폴더 삭제 뒤 3개), `ok=true`·원격 주소·`ahead=0 behind=0` 이 나왔다. seoin 은 `clean=true` 로 읽혔다(git 경고 줄을 걸러서).
+
 ### 안 본 것 (이 줄이 가장 비싸다)
 - **실제 폰에서 아무것도 안 봤다.** 특히 **인쇄 화면(PDF 저장·복합기 출력)**, 카톡 안 창에서의 동작, 직원 탭 위쪽 탭 줄이 7개가 되어 두 줄로 접히는 모양
 - **보안규칙 시험 6종·`browser.*` 2종은 이번 마무리에서 안 돌렸다.** `firestore.rules` 를 안 고쳤다. 규칙 시험은 자바와 에뮬레이터가 필요한데 이 PC 에 없다.
@@ -102,13 +110,15 @@ seoin   claude/mediops-auth-migration-l0iv4w  clean · origin 과 같음 · 공�
 `index.html`·`admin.html`·`resign.html`·`firestore.rules`·`AGENTS.md`·`.gitignore` **양쪽 같다**(blob 비교). `test/` 도 같다.
 GitHub Pages `mongsiljjang.github.io/mediops-pilot/` 는 **404**(껐다).
 
+**원본 스킬 저장소** `mongsiljjang/skills`(공개) 의 `mamuri/` 는 pilot·seoin 의 `.claude/skills/mamuri/` 와 `SKILL.md`·`PRINCIPLES.md`·스냅샷 스크립트 두 개가 **같다**(blob 비교). 스킬을 또 고치면 세 곳을 같이 맞춘다(패치로: `git format-patch` → 원본 스킬 저장소에서는 `git apply -p3`).
+
 **일부러 다른 것**: pilot 에만 `firebase.json`·pilot 용 `README.md`·`docs/FEATURES.md`. seoin 에만 `SETUP-공유버전.md`·`.claude/skills/design-md-styles/`.
 
 **백업 브랜치는 그대로 갈라져 있다.** `claude/hospital-inventory-hr-app-fw7a9g` 는 `69f34bb` 에 멈춰 있고 거기에만 있는 커밋 5개가 있다. **강제 푸시하면 잃는다 — 하지 않는다.**
 
 **이 PC(`D:\mediops-pilot\pilot`·`seoin`)의 함정 — 기준은 GitHub 이고 이 경로는 이 PC 의 복사본이다**: `D:` 드라이브는 소유권을 기록하지 않아 git 이 막는다. 전역 설정을 건드리지 않고 `git -c safe.directory=<경로> -C <경로> …` 로 쓴다.
 같은 이유로 `mamuri` 의 `repo_snapshot.ps1` 이 저장소를 0개로 읽었다 — **같은 날 스크립트를 고쳤고**(경로 하나에만 `safe.directory` 예외, 원격과의 앞섬·뒤처짐도 낸다) 그래도 0개면 믿지 말 것.
-`D:\mediops-pilot\mediops-pilot\` 은 **빈 `.git` 폴더**(첫 세션부터 있던 것, 내가 만든 게 아니다) — 지워도 되는지 사용자 판단.
+`D:\mediops-pilot\mediops-pilot\` 는 `.git` 과 `.gitattributes` 뿐인 **빈 저장소**(커밋·원격 없음, 첫 세션부터 있던 것)였고 **사용자 요청으로 삭제했다.** 지금 `D:\mediops-pilot\` 에는 `pilot`·`seoin` 만 있다.
 
 ## 6. 열린 질문 · 위험 · 미룬 일
 
