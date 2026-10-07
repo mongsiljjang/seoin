@@ -387,6 +387,7 @@
         <button class="btn ghost" onclick="quickInvDialog()">📦 재고 입출고</button>
         <button class="btn ghost" onclick="go('leave'); leaveTab('new')">🌴 연월차 신청</button>
         <button class="btn ghost admin-only" onclick="openStaffForm()">👤 직원 추가</button>
+        <button class="btn ghost admin-only" id="hEduBtn" onclick="openEduFromHome()">🎓 의무교육</button>
         <button class="btn ghost" onclick="openGlossary()">📖 용어 찾기</button>
       </div>
     </div>
@@ -786,6 +787,8 @@ function renderHome(){
   $('#hStatLow').textContent = low.length;
   $('#hStatPend').textContent = pend.length;
   $('#hStatStaff').textContent = DB.staff.length;
+  { const b=$('#hEduBtn'); if(b){ const n=isHR()? eduProblemCount() : 0;     // 챙길 교육이 있을 때만 숫자를 붙인다
+    b.innerHTML = '🎓 의무교육' + (n? ` <span class="pill warn" style="margin-left:4px">${n}</span>` : ''); } }
 
   // 히어로: 오늘 처리할 일(관리자)
   if($('#heroTotal')){
@@ -5501,6 +5504,7 @@ function hrEduView(){
       ${noOff.map(it=>`<div class="tiny muted" style="margin-top:8px"><b>${esc(it.name)}</b> — ${esc(eduState(it).why)}</div>`).join('')}</details>`:''}
     <div class="tiny muted" style="margin:10px 2px">근거 조문과 확인하지 못한 것은 저장소의 <b>docs/EDUCATION_RULES.md</b> 에 적혀 있어요. 중요한 결정은 노무사나 관할 기관에 확인하세요.</div>`;
 }
+function openEduFromHome(){ hrView='edu'; go('staff'); }
 function eduToggle(id,on){
   if(!isHR()) return; eduInit(); DB.edu.items[id]=Object.assign(DB.edu.items[id]||{},{on:!!on}); saveDB(); renderStaff();
 }
