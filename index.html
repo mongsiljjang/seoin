@@ -3874,10 +3874,18 @@ function delStaff(id){
    ======================================================================== */
 
 /* ---- 급여 열쇠 ---------------------------------------------------------
-   PBKDF2 로 열쇠를 만들고 AES-GCM 으로 잠근다. 둘 다 브라우저에 들어 있어
-   라이브러리도 서버도 필요 없다. 다만 https 에서만 동작한다. */
+   잠금은 두 겹이다. 급여·계약서 본문은 무작위 '자료 열쇠' 하나로 잠그고(AES-GCM),
+   그 자료 열쇠를 사람마다 따로 정한 '내 열쇠'(PBKDF2)로 한 번 더 감싸 칸(slots)에 둔다.
+   - 열 수 있는 사람은 칸이 있는 사람이다. 원장님이 권한을 줄 때만 실장님 칸이 생긴다.
+   - 내 열쇠를 바꾸거나 사람을 더하고 빼도 자료는 다시 잠그지 않는다. 칸만 새로 감싼다.
+     그래서 기록이 지워지지 않고 쌓인다.
+   - 복구 코드는 칸이 하나 더 있는 것이다. 종이에 적어 두며 앱에도 서버에도 저장하지 않는다.
+   - 옛 방식(열쇠 하나가 곧 자료 열쇠)은 payLock.slots 가 없는 것으로 알아보고,
+     원장님이 새 방식으로 옮길 때까지 그대로 연다.
+   둘 다 브라우저에 들어 있어 라이브러리도 서버도 필요 없다. 다만 https 에서만 동작한다. */
 const PAY_TTL = 3*60*1000;                 // 3분 지나면 다시 잠긴다
 const PAY_ITER = 250000;
+const PAY_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // 헷갈리는 O·I·0·1 이 없다
 let payKeyCache=null, payKeyAt=0, payAfter=null;
 
 function cryptoOK(){ return !!(window.crypto && window.crypto.subtle && window.isSecureContext); }
@@ -3885,10 +3893,10 @@ function b64e(buf){ let s=''; new Uint8Array(buf).forEach(b=>s+=String.fromCharC
 function b64d(str){ const bin=atob(String(str||'')), a=new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return a; }
 
-async function payDerive(pass, saltB64){
+async function payDerive(pass, saltB64, extractable){
   const base=await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey({name:'PBKDF2', salt:b64d(saltB64), iterations:PAY_ITER, hash:'SHA-256'},
-    base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+    base, {name:'AES-GCM', length:256}, !!extractable, ['encrypt','decrypt']);
 }
 async function payEnc(key, obj){
   const iv=crypto.getRandomValues(new Uint8Array(12));
@@ -3904,6 +3912,68 @@ async function payDec(key, blob){
 }
 function payUnlocked(){ if(payKeyCache && Date.now()-payKeyAt<PAY_TTL) return payKeyCache; payKeyCache=null; return null; }
 function payRelock(){ payKeyCache=null; payKeyAt=0; }
+
+/* -- 칸 · 복구 코드 (화면 없이 계산만 한다) -- */
+function payIsLegacy(){ return !!DB.payLock && !Array.isArray(DB.payLock.slots); }
+function paySlotOf(sid){ return DB.payLock && Array.isArray(DB.payLock.slots) ? DB.payLock.slots.find(s=>s.sid===sid) : null; }
+function payNewDEK(){ return crypto.subtle.generateKey({name:'AES-GCM', length:256}, true, ['encrypt','decrypt']); }
+function payRecoveryMake(){
+  const r=crypto.getRandomValues(new Uint8Array(16));
+  const c=[...r].map(b=>PAY_ALPHA[b%PAY_ALPHA.length]).join('');
+  return c.match(/.{4}/g).join('-');
+}
+function payRecoveryNorm(s){ return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
+// pass 로 자료 열쇠를 감싼 칸 하나를 만든다
+async function payWrap(pass, dek){
+  const salt=b64e(crypto.getRandomValues(new Uint8Array(16)));
+  const kek=await payDerive(pass, salt, false);
+  const raw=await crypto.subtle.exportKey('raw', dek);
+  return {salt, wrap: await payEnc(kek, {k:b64e(raw)})};
+}
+async function payUnwrap(pass, slot){
+  if(!slot || !slot.salt) return null;
+  const kek=await payDerive(pass, slot.salt, false);
+  const o=await payDec(kek, slot.wrap); if(!o || !o.k) return null;
+  return crypto.subtle.importKey('raw', b64d(o.k), {name:'AES-GCM'}, true, ['encrypt','decrypt']);
+}
+// 처음 만들거나(dek 없음) 옛 방식에서 옮긴다(dek 는 옛 열쇠로 만든 자료 열쇠). 복구 코드를 돌려준다
+async function payCreate(sid, pass, dek){
+  dek = dek || await payNewDEK();
+  const code=payRecoveryMake();
+  const slot=Object.assign({sid, at:now()}, await payWrap(pass, dek));
+  const rec=Object.assign({at:now()}, await payWrap(payRecoveryNorm(code), dek));
+  DB.payLock={v:2, slots:[slot], rec, at:now(), by:sid};
+  return {dek, code};
+}
+async function paySetSlot(sid, pass, dek){      // 내 열쇠를 바꾸거나 새 사람 칸을 더한다
+  const slot=Object.assign({sid, at:now()}, await payWrap(pass, dek));
+  const rest=DB.payLock.slots.filter(s=>s.sid!==sid);
+  DB.payLock.slots=[...rest, slot];
+}
+async function payNewRecovery(dek){
+  const code=payRecoveryMake();
+  DB.payLock.rec=Object.assign({at:now()}, await payWrap(payRecoveryNorm(code), dek));
+  return code;
+}
+function payDropSlot(sid){
+  if(!DB.payLock || !Array.isArray(DB.payLock.slots)) return false;
+  if(DB.payLock.slots.length<=1) return false;           // 마지막 칸은 못 뺀다
+  DB.payLock.slots=DB.payLock.slots.filter(s=>s.sid!==sid); return true;
+}
+// 열쇠로 자료 열쇠를 꺼낸다. 틀리면 null
+async function payOpen(pass, sid){
+  if(!DB.payLock) return null;
+  if(payIsLegacy()){
+    const key=await payDerive(pass, DB.payLock.salt, true);
+    const chk=await payDec(key, DB.payLock.check);
+    return (chk && chk.v==='mediops') ? key : null;
+  }
+  return payUnwrap(pass, paySlotOf(sid));
+}
+async function payOpenRecovery(code){
+  if(!DB.payLock || !DB.payLock.rec) return null;
+  return payUnwrap(payRecoveryNorm(code), DB.payLock.rec);
+}
 
 // 급여를 만지는 모든 길목은 여기를 지난다
 function withPayKey(fn){
@@ -3922,13 +3992,22 @@ function hrLog(kind, memo){
 }
 
 function openPayUnlock(){
+  const me=currentUser(), noSlot=!payIsLegacy() && !paySlotOf(me&&me.id);
+  if(noSlot && !isOwner()){
+    modal(`<h3>🔐 급여 열쇠</h3>
+      <div class="hint">급여를 열 권한이 아직 없어요. <b>원장님</b>이 <b>설정 → 급여 열쇠 권한</b> 에서 권한을 주면 열 수 있습니다.</div>`);
+    return;
+  }
   modal(`<h3>🔐 급여 열쇠</h3>
-    <div class="tiny muted" style="margin:-6px 2px 12px">급여와 근로계약서는 잠겨 있어요. 열쇠를 넣으면 <b>3분간</b> 열립니다.</div>
-    <label class="field"><span>급여 열쇠</span>
+    <div class="tiny muted" style="margin:-6px 2px 12px">급여와 근로계약서는 잠겨 있어요. 내 열쇠를 넣으면 <b>3분간</b> 열립니다.</div>
+    ${noSlot?'':`<label class="field"><span>내 급여 열쇠</span>
       <input id="pkPass" type="password" placeholder="열쇠" autocomplete="off"
         onkeydown="if(event.key==='Enter')doPayUnlock()"></label>
-    <button class="btn block" onclick="doPayUnlock()">열기</button>
-    <div class="tiny muted" style="margin-top:12px">열쇠를 잊으셨으면 최고관리자가 <b>설정 → 급여 열쇠</b> 에서 다시 정할 수 있어요(기존 급여 기록은 지워집니다).</div>`);
+    <button class="btn block" onclick="doPayUnlock()">열기</button>`}
+    ${isOwner()&&!payIsLegacy()?`<div class="divider"></div>
+      <button class="btn soft block" onclick="openPayRecoveryEnter()">열쇠를 잊었어요 — 복구 코드로 열기</button>
+      <div class="tiny muted" style="margin-top:8px">복구 코드로 열면 <b>기록은 그대로</b> 두고 내 열쇠만 새로 정합니다.</div>`:''}
+    ${isOwner()?`<div class="tiny muted" style="margin-top:12px">열쇠도 복구 코드도 없으면 <button class="btn soft xs" onclick="doPayKeyReset()">처음부터 다시 정하기</button> — 이때만 기존 급여 기록이 지워집니다.</div>`:''}`);
   setTimeout(()=>{ const e=$('#pkPass'); if(e) e.focus(); },80);
 }
 async function doPayUnlock(){
@@ -3936,61 +4015,145 @@ async function doPayUnlock(){
   const btn=$('#pkPass').parentElement.parentElement.querySelector('.btn');
   if(btn){ btn.disabled=true; btn.textContent='여는 중…'; }
   try{
-    const key=await payDerive(pass, DB.payLock.salt);
-    const chk=await payDec(key, DB.payLock.check);
-    if(!chk || chk.v!=='mediops'){ toast('열쇠가 맞지 않아요'); if(btn){btn.disabled=false;btn.textContent='열기';} return; }
+    const me=currentUser();
+    const key=await payOpen(pass, me&&me.id);
+    if(!key){ toast('열쇠가 맞지 않아요'); if(btn){btn.disabled=false;btn.textContent='열기';} return; }
     payKeyCache=key; payKeyAt=Date.now();
     closeModal();
     const fn=payAfter; payAfter=null; if(fn) fn(key);
   }catch(e){ toast('열지 못했어요'); if(btn){btn.disabled=false;btn.textContent='열기';} }
 }
 
+function openPayRecoveryEnter(){
+  modal(`<h3>🧾 복구 코드로 열기</h3>
+    <div class="hint">종이에 적어 둔 복구 코드를 넣으세요. 맞으면 급여 기록을 그대로 둔 채 <b>내 열쇠를 새로 정하는</b> 화면으로 넘어갑니다.</div>
+    <label class="field"><span>복구 코드</span>
+      <input id="pkRec" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" onkeydown="if(event.key==='Enter')doPayRecoveryOpen()"></label>
+    <button class="btn block" onclick="doPayRecoveryOpen()">확인</button>`);
+  setTimeout(()=>{ const e=$('#pkRec'); if(e) e.focus(); },80);
+}
+async function doPayRecoveryOpen(){
+  const code=($('#pkRec').value||''); if(!code){ toast('복구 코드를 넣어주세요'); return; }
+  const dek=await payOpenRecovery(code);
+  if(!dek){ toast('복구 코드가 맞지 않아요'); return; }
+  payKeyCache=dek; payKeyAt=Date.now();
+  hrLog('열쇠', '복구 코드로 열고 내 열쇠를 다시 정함');
+  openPayMyKey(true);
+}
+
+/* 처음 정하기 / 옛 방식에서 옮기기 — 원장님만 */
 function openPayKeySetup(){
   if(!isOwner()){ toast('급여 열쇠는 최고관리자가 정해요'); return; }
   if(!cryptoOK()){ toast('https 주소로 열어야 급여 잠금을 쓸 수 있어요'); return; }
-  const has=!!DB.payLock;
-  modal(`<h3>🔐 급여 열쇠 ${has?'변경':'정하기'}</h3>
-    <div class="hint">급여와 근로계약서는 이 열쇠로 잠겨 저장돼요. <b>열쇠는 앱에도 서버에도 저장하지 않습니다</b> — 잊으면 아무도 못 엽니다. 종이에 적어 따로 보관하세요.</div>
-    ${has?`<label class="field"><span>지금 열쇠</span><input id="pkOld" type="password" autocomplete="off"></label>`:''}
-    <label class="field"><span>${has?'새 ':''}열쇠 (8자 이상)</span><input id="pkNew" type="password" autocomplete="off"></label>
+  const legacy=payIsLegacy();
+  modal(`<h3>🔐 급여 열쇠 ${legacy?'새 방식으로 바꾸기':'정하기'}</h3>
+    <div class="hint">급여와 근로계약서는 이 열쇠로 잠겨 저장돼요. <b>열쇠는 앱에도 서버에도 저장하지 않습니다.</b>
+      ${legacy?'지금까지 쌓은 <b>기록은 그대로</b> 두고, 열쇠를 사람마다 따로 갖는 방식으로 바꿉니다. 끝나면 종이에 적을 <b>복구 코드</b>가 나옵니다.':'정하고 나면 종이에 적을 <b>복구 코드</b>가 나옵니다. 열쇠를 잊어도 그 코드로 기록을 지키며 다시 열 수 있어요.'}</div>
+    ${legacy?`<label class="field"><span>지금 열쇠</span><input id="pkOld" type="password" autocomplete="off"></label>`:''}
+    <label class="field"><span>${legacy?'새 ':''}열쇠 (8자 이상)</span><input id="pkNew" type="password" autocomplete="off"></label>
     <label class="field"><span>한 번 더</span><input id="pkNew2" type="password" autocomplete="off"></label>
     <div class="tiny muted" style="margin:-4px 2px 12px">직원 로그인 PIN과 <b>다르게</b> 정하세요. PIN은 4자리라 열쇠로 쓰면 잠근 뜻이 없어집니다.</div>
-    <button class="btn block" onclick="doPayKeySave()">${has?'열쇠 바꾸고 다시 잠그기':'이 열쇠로 잠그기'}</button>
-    ${has?`<div class="divider"></div>
-      <button class="btn soft block" style="color:var(--danger)" onclick="doPayKeyReset()">열쇠를 잊었어요 — 다시 정하기</button>
-      <div class="tiny muted" style="margin-top:8px">누르면 <b>지금까지 저장된 급여명세서와 근로계약서 본문이 지워집니다.</b> 원본은 세무사·급여프로그램에 있으니 다시 올리시면 돼요.</div>`:''}`);
+    <button class="btn block" onclick="doPayKeySave()">${legacy?'바꾸기':'이 열쇠로 잠그기'}</button>`);
 }
 async function doPayKeySave(){
-  const has=!!DB.payLock;
+  const legacy=payIsLegacy(), me=currentUser();
+  if(!isOwner() || !me) return;
   const np=($('#pkNew').value||''), np2=($('#pkNew2').value||'');
   if(np.length<8){ toast('열쇠는 8자 이상으로 정해주세요'); return; }
   if(np!==np2){ toast('두 번 넣은 열쇠가 달라요'); return; }
-  const salt=b64e(crypto.getRandomValues(new Uint8Array(16)));
-  const newKey=await payDerive(np, salt);
-  let oldKey=null;
-  if(has){
-    const op=($('#pkOld').value||'');
-    if(!op){ toast('지금 열쇠를 넣어주세요'); return; }
-    oldKey=await payDerive(op, DB.payLock.salt);
-    const chk=await payDec(oldKey, DB.payLock.check);
-    if(!chk || chk.v!=='mediops'){ toast('지금 열쇠가 맞지 않아요'); return; }
-    // 잠긴 것을 모두 열어 새 열쇠로 다시 잠근다
-    const boxes=[...(DB.payslips||[]), ...(DB.contracts||[])];
-    for(const b of boxes){
-      if(!b.enc) continue;
-      const plain=await payDec(oldKey, b.enc);
-      if(plain===null){ toast('예전 기록 하나를 열지 못해 멈췄어요'); return; }
-      b.enc=await payEnc(newKey, plain);
-    }
+  let dek=null;
+  if(legacy){
+    const op=($('#pkOld').value||''); if(!op){ toast('지금 열쇠를 넣어주세요'); return; }
+    dek=await payOpen(op, me.id);
+    if(!dek){ toast('지금 열쇠가 맞지 않아요'); return; }
   }
-  DB.payLock={salt, check:await payEnc(newKey,{v:'mediops'}), at:now(), by:(currentUser()||{}).id||''};
-  payKeyCache=newKey; payKeyAt=Date.now();
-  hrLog('열쇠', has?'급여 열쇠 변경':'급여 열쇠 처음 설정');
-  saveDB(); closeModal(); toast(has?'열쇠를 바꾸고 다시 잠갔어요':'급여 열쇠를 정했어요');
+  const r=await payCreate(me.id, np, dek);
+  payKeyCache=r.dek; payKeyAt=Date.now();
+  hrLog('열쇠', legacy?'급여 열쇠를 사람별 방식으로 바꿈(기록 유지)':'급여 열쇠 처음 설정');
+  saveDB(); showPayRecovery(r.code);
 }
+function showPayRecovery(code){
+  modal(`<h3>🧾 복구 코드</h3>
+    <div class="hint"><b>종이에 적어서 따로 보관하세요.</b> 열쇠를 잊었을 때 급여 기록을 지키며 다시 여는 유일한 길입니다.
+      앱에도 서버에도 남지 않아서 <b>이 화면을 닫으면 다시 볼 수 없어요.</b></div>
+    <div style="font-size:21px;font-weight:900;text-align:center;padding:16px 8px;margin:10px 0;border:2px dashed var(--line);border-radius:12px;user-select:all">${code}</div>
+    <button class="btn block" onclick="closeModal()">적어 두었어요</button>`);
+}
+
+/* 내 열쇠 바꾸기 — 열려 있는 상태에서 누구나(칸이 있는 사람). 기록은 다시 잠그지 않는다 */
+function openPayMyKey(afterRecovery){
+  const go=dek=>{
+    modal(`<h3>🔐 내 급여 열쇠 ${afterRecovery?'다시 정하기':'바꾸기'}</h3>
+      <div class="hint">급여 기록은 그대로 두고 <b>내 열쇠만</b> 바뀝니다. 다른 사람의 열쇠에는 영향이 없어요.</div>
+      <label class="field"><span>새 열쇠 (8자 이상)</span><input id="pkNew" type="password" autocomplete="off"></label>
+      <label class="field"><span>한 번 더</span><input id="pkNew2" type="password" autocomplete="off"></label>
+      <button class="btn block" onclick="doPayMyKeySave()">바꾸기</button>`);
+  };
+  if(afterRecovery){ go(payUnlocked()); return; }
+  withPayKey(go);
+}
+async function doPayMyKeySave(){
+  const me=currentUser(), dek=payUnlocked(); if(!me||!dek) return;
+  const np=($('#pkNew').value||''), np2=($('#pkNew2').value||'');
+  if(np.length<8){ toast('열쇠는 8자 이상으로 정해주세요'); return; }
+  if(np!==np2){ toast('두 번 넣은 열쇠가 달라요'); return; }
+  await paySetSlot(me.id, np, dek);
+  hrLog('열쇠', '내 급여 열쇠 변경');
+  saveDB(); closeModal(); toast('내 열쇠를 바꿨어요. 기록은 그대로예요');
+}
+
+/* 권한 관리 — 원장님만. 누가 급여를 열 수 있는지 정한다 */
+function openPayAccess(){
+  if(!isOwner()){ toast('급여 열쇠 권한은 최고관리자가 정해요'); return; }
+  if(payIsLegacy()){ openPayKeySetup(); return; }
+  withPayKey(dek=>{
+    const slots=DB.payLock.slots||[];
+    const cand=(DB.staff||[]).filter(s=>s.active!==false && (s.role===ROLE_OWNER||s.role===ROLE_HR) && !paySlotOf(s.id));
+    const me=currentUser();
+    modal(`<h3>👥 급여 열쇠 권한</h3>
+      <div class="hint">급여를 열 수 있는 사람입니다. <b>원장님이 허락한 사람만</b> 여기 들어옵니다. 권한이 없는 사람은 급여를 열 수 없어요.</div>
+      ${slots.map(s=>`<div class="spread" style="padding:9px 0;border-bottom:1px solid var(--line)">
+        <div><b>${esc(staffLabel(s.sid))}</b>${s.sid===(me&&me.id)?' <span class="tiny muted">(나)</span>':''}
+          <div class="tiny muted">열쇠 정한 날 ${fmtDateFull(String(s.at||'').slice(0,10))}</div></div>
+        ${slots.length>1?`<button class="btn soft xs" style="color:var(--danger)" onclick="doPayDropSlot('${esc(s.sid)}')">권한 빼기</button>`:''}
+      </div>`).join('')}
+      ${cand.length?`<div class="divider"></div>
+        <label class="field"><span>권한 줄 사람</span><select id="pkWho">${cand.map(s=>`<option value="${esc(s.id)}">${esc(staffLabel(s.id))} (${esc(s.role)})</option>`).join('')}</select></label>
+        <label class="field"><span>처음 열쇠 (8자 이상)</span><input id="pkNew" type="password" autocomplete="off"></label>
+        <div class="tiny muted" style="margin:-4px 2px 10px">이 열쇠를 그분께 직접 알려 주세요. 그분은 열고 나서 <b>내 열쇠 바꾸기</b> 로 자기만 아는 열쇠로 바꿀 수 있어요.</div>
+        <button class="btn block" onclick="doPayAddSlot()">권한 주기</button>`:`<div class="tiny muted" style="margin-top:10px">권한을 줄 수 있는 관리자·인사담당자가 더 없어요.</div>`}
+      <div class="divider"></div>
+      <button class="btn soft block" onclick="doPayNewRecovery()">복구 코드 다시 만들기</button>
+      <div class="tiny muted" style="margin-top:8px">복구 코드 ${DB.payLock.rec?`있음 · ${fmtDateFull(String(DB.payLock.rec.at||'').slice(0,10))}`:'없음'}. 다시 만들면 예전 코드는 못 씁니다.</div>`);
+  });
+}
+async function doPayAddSlot(){
+  const dek=payUnlocked(), sid=($('#pkWho')||{}).value, np=($('#pkNew').value||'');
+  if(!dek||!sid) return;
+  if(np.length<8){ toast('열쇠는 8자 이상으로 정해주세요'); return; }
+  await paySetSlot(sid, np, dek);
+  hrLog('열쇠', `${staffLabel(sid)} 에게 급여 열쇠 권한을 줌`);
+  saveDB(); toast(`${staffLabel(sid)} 에게 권한을 줬어요`); openPayAccess();
+}
+function doPayDropSlot(sid){
+  if(!confirm(`${staffLabel(sid)} 의 급여 열쇠 권한을 뺄까요?\n급여 기록은 그대로 남고, 이분은 앱에서 급여를 열 수 없게 됩니다.`)) return;
+  if(!payDropSlot(sid)){ toast('마지막 한 사람은 뺄 수 없어요'); return; }
+  hrLog('열쇠', `${staffLabel(sid)} 의 급여 열쇠 권한을 뺌`);
+  saveDB(); toast('권한을 뺐어요'); openPayAccess();
+}
+async function doPayNewRecovery(){
+  const dek=payUnlocked(); if(!dek) return;
+  if(!confirm('복구 코드를 새로 만들까요?\n예전 코드는 못 쓰게 됩니다.')) return;
+  const code=await payNewRecovery(dek);
+  hrLog('열쇠', '복구 코드를 다시 만듦');
+  saveDB(); showPayRecovery(code);
+}
+
+/* 열쇠도 복구 코드도 없을 때만 — 잠긴 기록이 지워진다 */
 async function doPayKeyReset(){
+  if(!isOwner()) return;
   const n=(DB.payslips||[]).length+(DB.contracts||[]).length;
-  if(!confirm(`지금까지 저장된 급여명세서·근로계약서 ${n}건이 지워집니다.\n정말 열쇠를 다시 정할까요?`)) return;
+  if(!confirm(`열쇠도 복구 코드도 없을 때만 하세요.\n지금까지 저장된 급여명세서·근로계약서 ${n}건이 지워집니다.\n정말 처음부터 다시 정할까요?`)) return;
   DB.payslips=[]; DB.contracts=[]; DB.payLock=null; payRelock();
   hrLog('열쇠', `열쇠 분실로 재설정 · 잠긴 기록 ${n}건 삭제`);
   saveDB(); toast('열쇠를 지웠어요. 새로 정해주세요'); openPayKeySetup();
@@ -6311,13 +6474,15 @@ function openMenu(){
     <div class="setnote">${isSmallBiz()? `직원 ${staffCount()}명 — 가산이 법정 의무는 아니지만 시간은 남겨둡니다` : `직원 ${staffCount()}명 — 가산이 법으로 정해져 있습니다`}</div>
 
     <div class="divider"></div>
-    ${sechead('🔐 잠금 · 계정 열쇠', '<b>급여 열쇠</b> — 급여명세서와 근로계약서 본문은 이 열쇠로 잠겨 저장됩니다. 열쇠는 앱에도 서버에도 저장하지 않습니다. <b>잊으면 아무도 못 엽니다.</b><br><br><b>최고관리자 아이디·비밀번호</b> — 이걸로 <b>어느 기기에서든</b> 기기 승인 없이 바로 들어갑니다. 원장님과 실장님이 함께 쓰세요.<br><br>둘 다 최고관리자만 정할 수 있습니다.')}
+    ${sechead('🔐 잠금 · 계정 열쇠', '<b>급여 열쇠</b> — 급여명세서와 근로계약서 본문은 잠겨 저장됩니다. 열쇠는 사람마다 따로 정하고 앱에도 서버에도 저장하지 않습니다. <b>급여를 열 사람은 원장님이 정합니다.</b> 열쇠를 잊어도 종이에 적어 둔 <b>복구 코드</b>로 기록을 지키며 다시 열 수 있습니다.<br><br><b>최고관리자 아이디·비밀번호</b> — 이걸로 <b>어느 기기에서든</b> 기기 승인 없이 바로 들어갑니다. 원장님과 실장님이 함께 쓰세요.<br><br>둘 다 최고관리자만 정할 수 있습니다.')}
     <div class="setrow">
-      <button class="btn soft sm owner-only" onclick="openPayKeySetup()">${DB.payLock?'급여 열쇠 바꾸기':'급여 열쇠 정하기'}</button>
+      ${!DB.payLock?'<button class="btn soft sm owner-only" onclick="openPayKeySetup()">급여 열쇠 정하기</button>'
+        : payIsLegacy()?'<button class="btn soft sm owner-only" onclick="openPayKeySetup()">급여 열쇠 새 방식으로 바꾸기</button>'
+        : '<button class="btn soft sm owner-only" onclick="openPayAccess()">👥 급여 열쇠 권한</button><button class="btn soft sm" onclick="openPayMyKey()">내 열쇠 바꾸기</button>'}
       ${payUnlocked()?`<button class="btn soft sm" onclick="payRelock(); closeModal(); toast('급여를 다시 잠갔어요')">지금 바로 잠그기</button>`:''}
       <button class="btn soft sm owner-only" onclick="openOwnerKeySetup()">👑 아이디·비밀번호</button>
     </div>
-    <div class="setnote">급여 열쇠 ${DB.payLock? `<b style="color:var(--ok)">설정됨</b> · ${fmtDateFull(String(DB.payLock.at||'').slice(0,10))}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
+    <div class="setnote">급여 열쇠 ${DB.payLock? `<b style="color:var(--ok)">설정됨</b> · ${payIsLegacy()?'옛 방식(열쇠 하나) — 새 방식으로 바꾸길 권해요':`열 수 있는 사람 ${(DB.payLock.slots||[]).length}명 · 복구 코드 ${DB.payLock.rec?'있음':'없음'}`}` : '<b style="color:var(--warn)">아직 안 정했어요</b>'}</div>
 
     <div class="divider"></div>
     ${sechead('📱 기기 · 출근 체크', '<b>기기 승인</b> — 직원 폰마다 한 번씩 승인해야 데이터가 내려갑니다. 승인 안 한 기기는 아무것도 못 봅니다.<br><br><b>공용 기기 출근 체크</b> — 데스크 PC·태블릿·안 쓰는 폰 아무거나 이 화면을 켜두면 직원이 <b>이름 + 개인 PIN</b> 으로 출퇴근을 찍습니다(개인폰 로그인 불필요). <b>공용 기기 주소 복사</b> 를 눌러 그 기기에 붙여넣고 북마크해 두세요. 나갈 땐 관리자 PIN.')}

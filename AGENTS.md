@@ -62,13 +62,13 @@ AI 세션은 저마다 `claude/…-xxxxxx` 라는 **새 이름**을 받고 거�
 같은 문구가 `index.html` 에 다시 들어오면 깨진다. 무심코 되살릴 수 없다.
 
 ## 시험
-설치 없이 `node` 로 바로 돈다. 화면 코드를 고쳤으면 전부 돌린다(10종).
+설치 없이 `node` 로 바로 돈다. 화면 코드를 고쳤으면 전부 돌린다(11종).
 
 ```
 node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보험페일.mjs
 node test/페일교환.mjs      node test/규격읽기.mjs        node test/장부맞춤.mjs
 node test/주문체크.mjs      node test/전화칸.mjs          node test/용어집.mjs
-node test/의무교육.mjs
+node test/의무교육.mjs      node test/급여열쇠.mjs
 ```
 
 보안규칙 시험은 에뮬레이터가 필요하다 — `test/README.md` 참고
@@ -117,7 +117,7 @@ node test/의무교육.mjs
 node test/수첩읽기.mjs   node test/단계별수술.mjs   node test/보험페일.mjs
 node test/페일교환.mjs   node test/규격읽기.mjs     node test/장부맞춤.mjs
 node test/주문체크.mjs   node test/전화칸.mjs       node test/용어집.mjs
-node test/의무교육.mjs
+node test/의무교육.mjs      node test/급여열쇠.mjs
 ```
 
 - 화면을 고쳤으면 **`deslop-ko`** 도 돌린다. 기준선은 **3개 항목 4곳** —
@@ -140,7 +140,7 @@ node test/의무교육.mjs
 
 **마무리 스킬은 `mamuri`(마무리) 하나다.** `baton`·`wrap` 도 설치돼 있지만 셋 다 같은 말에
 반응해서 사람이 헷갈렸다. `마무리` 가 그 둘을 합친 보완본이고 이 프로젝트 관습
-(두 저장소 동기화·`git -C`·시험 10종·deslop-ko)까지 들고 있다. 원본 둘은 그대로 둔다.
+(두 저장소 동기화·`git -C`·시험 11종·deslop-ko)까지 들고 있다. 원본 둘은 그대로 둔다.
 
 `baton`·`wrap` 도 설치돼 있지만 셋 다 같은 말에 반응해서 사람이 헷갈렸다.
 `mamuri` 가 그 둘을 합친 보완본이다. 원본 저장소는 `mongsiljjang/skills` 다. 원본 둘은 그대로 둔다.
