@@ -20,7 +20,7 @@ function grab(name){
   throw new Error(name+' 의 끝을 못 찾았다');
 }
 const 판 = `const now=()=>1, uid=()=>'x';
-${['parseDL','findVar','caseTally','applyCaseStock','implantLog','healOut','recallStock'].map(grab).join('\n')}`;
+${['parseDL','findVar','caseTally','applyCaseStock','implantLog','healOut','recallStock','caseWho'].map(grab).join('\n')}`;
 
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=got===want; y?pass++:fail++;

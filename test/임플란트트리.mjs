@@ -53,5 +53,8 @@ t('옛 이름(힐링캡)으로 저장된 제품도 힐링 어버트먼트 줄에
 t('트리에는 힐링 어버트먼트 (HA) 로 보인다', m.partShow('힐링 어버트먼트')==='힐링 어버트먼트 (HA)' && m.partShow('픽스처')==='픽스처');
 t('부품 이름에 힐링캡이 더는 안 나온다(화면 코드)', !/part:'힐링캡'|'힐링캡',/.test(js.replace("p.part==='힐링캡'","")));
 
+// 재고 창(칸을 눌렀을 때)에서 바로 규격을 지울 수 있다 — 예전에는 편집 창 안쪽에 숨어 있었다
+t('재고 창에 규격 제거 버튼이 있고 지우기 전에 잃는 숫자를 물어본다', (()=>{ const k=js.indexOf('function openVariant(pid,vid)'); const seg=js.slice(k, js.indexOf('function setPhysical', k)); return seg.includes('delVariant(') && seg.includes('규격 제거') && js.slice(js.indexOf('function delVariant'), js.indexOf('function delVariant')+700).includes('confirm('); })());
+
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);

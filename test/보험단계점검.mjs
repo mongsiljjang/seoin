@@ -16,7 +16,7 @@ function grab(name){
   }
   throw new Error(name+' 의 끝을 못 찾았다');
 }
-const names=['insDayN','insFdiOk','insChecks','insCheckAll'];
+const names=['insDayN','insFdiOk','caseWho','caseSamePerson','insChecks','insCheckAll'];
 const m = new Function(`const INS_PROS_WAIT_DAYS=90; ${names.map(grab).join('\n')}; return {${names.join(',')}};`)();
 let pass=0, fail=0;
 const t=(이름, 참)=>{ if(참){pass++;console.log('  통과 · '+이름);} else {fail++;console.log('  실패 · '+이름);} };
@@ -63,6 +63,19 @@ t('FDI 11~18·21~28·31~38·41~48 은 통과', ['11','18','21','28','31','38','4
   t('다른 환자의 같은 치아는 중복이 아니다', !codes(b,[a,b]).includes('dup')); }
 t('보철 장착일이 있는데 페일이 적혀 있으면 시술중지 불가를 알린다', codes(mk({teeth:[{fdi:36,fail:true}]})).includes('fail3'));
 t('보철 장착일이 없는 페일에는 이 알림이 안 나온다', codes(mk({d3:'',teeth:[{fdi:36,fail:true}]})).includes('fail3')===false);
+
+// 차트번호 없이 이름(가린 모양)+생년월일로 같은 환자를 가른다
+{ const nm=(o)=>mk(Object.assign({chart:'',pname:'김ㅁ수',birth:'1948-03-02'},o));
+  const a=nm({id:'a',d1:'2026-05-01',d0:'2026-04-20',d2:'',d3:''}), b=nm({id:'b',d1:'2026-09-10'});
+  t('차트번호가 없어도 이름·생년월일이 같으면 같은 환자라 같은 치아 중복을 찾는다', codes(b,[a,b]).includes('dup')); }
+{ const a=mk({id:'a',chart:'',pname:'김ㅁ수',birth:'1948-03-02',d1:'2026-05-01',d0:'2026-04-20',d2:'',d3:''}), b=mk({id:'b',chart:'',pname:'김ㅁ수',birth:'1951-07-09'});
+  t('이름이 같아도 생년월일이 다르면 다른 환자다', !codes(b,[a,b]).includes('dup')); }
+{ const a=mk({id:'a',chart:'',pname:'김ㅁ수',birth:'',d1:'2026-05-01',d0:'2026-04-20',d2:'',d3:''}), b=mk({id:'b',chart:'',pname:'김ㅁ수',birth:''});
+  t('이름만 있고 생년월일이 없으면 같은 환자라고 하지 않는다(엉뚱한 알림 방지)', !codes(b,[a,b]).includes('dup')); }
+{ const a=mk({id:'a',chart:'A-1',pname:'김ㅁ수',birth:'1948-03-02'}), b=mk({id:'b',chart:'A-2',pname:'김ㅁ수',birth:'1948-03-02'});
+  t('차트번호가 둘 다 있으면 차트번호가 다르면 다른 환자다', m.caseSamePerson(a,b)===false); }
+t('표시 이름: 차트번호 → 이름 → 둘 다 없으면 (이름 없음)', m.caseWho({chart:'A-1',pname:'김ㅁ수'})==='A-1 김ㅁ수' && m.caseWho({pname:'김ㅁ수'})==='김ㅁ수' && m.caseWho({})==='(이름 없음)');
+t('저장할 때 차트번호나 이름 중 하나만 있으면 된다(화면 코드)', js.includes("if(!chart && !$('#lcName').value.trim())"));
 
 // 정렬 · 판정하는 말 없음
 { const ok=mk({id:'ok',chart:'A-1'}), bad=mk({id:'bad',chart:'A-2',d3:'2026-09-01'}), note=mk({id:'nt',chart:'A-3',d0:''});

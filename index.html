@@ -2432,7 +2432,8 @@ function openVariant(pid,vid){
     <button class="btn soft block" style="margin-bottom:8px${reqFor('imp',pid+'|'+vid)?';color:var(--warn)':''}"
       onclick="openOrderReq('imp','${pid}|${vid}',${jarg(p.brand+' '+(p.line||'')+' '+v.label)},${jarg(p.vendor||'')},()=>openVariant('${pid}','${vid}'))">
       🛒 ${reqFor('imp',pid+'|'+vid)?`주문 필요 체크됨 · ${reqFor('imp',pid+'|'+vid).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
-    <button class="btn soft block" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>`);
+    <div class="row"><button class="btn soft grow" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>
+      <button class="btn soft" style="color:var(--danger)" onclick="delVariant('${pid}','${vid}')">🗑 규격 제거</button></div>`);
 }
 function setPhysical(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
@@ -2967,14 +2968,25 @@ function insGuideRow(){ return sechead('보험 임플란트 청구 안내', insG
 /* ---- 케이스 입력 안내 — 꼭 적을 것 (마우스를 올리면 뜬다) ----------------
    점검(insChecks)과 재고 차감(caseTally)이 실제로 쓰는 칸만 적는다. 칸이 바뀌면 여기도 같이 고친다. */
 function insInputGuideHtml(){
-  return `<b>꼭 적기 (*)</b> — 차트번호 · 구분(보험/일반) · 1차 수술일 · 심은 치아. 이 넷이 있어야 환자·날짜·부위가 구분되고 재고가 맞게 빠져요.
+  return `<b>꼭 적기</b> — 환자(차트번호 <b>또는</b> 이름) · 구분(보험/일반) · 1차 수술일(*) · 심은 치아. 이 넷이 있어야 환자·날짜·부위가 구분되고 재고가 맞게 빠져요.
     <br><br><b>보험이면 날짜를 단계 순서대로</b> — 진단·치료계획일(청구 1단계) → 1차 수술일(청구 2단계) → 보철 장착일(청구 3단계). 날짜가 빠지거나 순서가 뒤바뀌면 대장 위 <b>🔎 보험 단계 점검</b> 에 떠요. 보철은 붙인 날 바로 적으세요(임시 부착도 돼요).
     <br><br><b>재고를 맞추려면</b> — 치아마다 <b>픽스처 규격</b>을 적으세요. 비워 두면 재고가 안 빠지고, 재료 목록에 없는 이름이면 "재고에 없는 규격"이라 못 빼요. 지대주·힐링도 적으면 같이 빠지고, 실패한 치아는 페일에 체크하세요.
-    <br><br><b>환자 구분</b> — 이름은 적어도 성과 마지막 글자만 남고 가운데는 초성으로 저장돼요(김ㅁ수). 같은 환자는 <b>늘 같은 차트번호</b>로 적어야 같은 치아 중복·재식립을 찾아내요. 동명이인은 생년월일(선택)로 가립니다.
+    <br><br><b>환자 구분</b> — 이름은 적어도 성과 마지막 글자만 남고 가운데는 초성으로 저장돼요(김ㅁ수). 같은 환자는 <b>늘 같은 방식</b>(차트번호면 차트번호, 이름이면 이름)으로 적어야 같은 치아 중복·재식립을 찾아내요. 차트번호 없이 이름만 적을 때는 <b>생년월일</b>도 같이 적어 주세요. 가려진 이름이 같은 사람이 있을 수 있어서, 생년월일이 없으면 같은 환자인지 알 수 없어요.
     <br><br><b>날짜는 그날 바로</b> — 나중에 몰아 적으면 빠지거나 순서가 뒤바뀌기 쉬워요.`;
 }
 function insInputRow(){ return sechead('입력할 때 꼭 적을 것', insInputGuideHtml()); }
 
+/* ---- 환자 구분 — 차트번호가 없어도 된다(2026-10-12) ---------------------------------
+   차트번호가 둘 다 있으면 그걸로 같은 환자를 가른다. 없으면 가린 이름 + 생년월일이 같아야 같은 환자로 본다.
+   이름은 가운데 글자가 가려져 김ㅁ수 가 여럿일 수 있으므로 생년월일이 둘 다 없으면 같다고 하지 않는다(엉뚱한 알림을 안 낸다). */
+function caseWho(c){ return [c&&c.chart, c&&c.pname].filter(Boolean).join(' ') || '(이름 없음)'; }
+function caseSamePerson(a, b){
+  if(!a || !b) return false;
+  if(a.chart && b.chart) return String(a.chart).trim()===String(b.chart).trim();
+  if(!a.pname || !b.pname || !a.birth || !b.birth) return false;
+  const d=v=>String(v).replace(/[^0-9]/g,'');
+  return a.pname===b.pname && d(a.birth)===d(b.birth);
+}
 /* ---- 보험 임플란트 단계 점검 ---------------------------------------------
    앞뒤가 안 맞는 기록을 알리는 점검표다. 청구 판정이 아니다 — 근거는 docs/INSURANCE_STEPS.md 5장.
    앱의 칸과 청구 단계: d0 진단·치료계획일 = 1단계 · d1 1차 수술일 = 2단계(고정체 식립) · d3 보철 장착일 = 3단계.
@@ -3004,7 +3016,7 @@ function insChecks(c, cases, today){
   if(!teeth.length) add('fdi','warn','치식(심은 치아)이 비어 있어요 — 치식번호가 빠지면 지급불능이 돼요');
   else if(bad.length) add('fdi','warn','치식번호가 11~48 범위를 벗어났어요: '+bad.join(' ')+' — 치식번호가 틀리면 지급불능이 돼요');
   // 같은 환자·같은 치아가 보험 케이스에 두 번 — 뒤에 적은 쪽에 알린다
-  (cases||[]).filter(o=>o!==c && o.id!==c.id && o.insur==='보험' && o.chart===c.chart).forEach(o=>{
+  (cases||[]).filter(o=>o!==c && o.id!==c.id && o.insur==='보험' && caseSamePerson(o,c)).forEach(o=>{
     const later=(c.d1||c.createdAt||'')>=(o.d1||o.createdAt||'');
     if(!later) return;
     (c.teeth||[]).forEach(t=>{
@@ -3026,7 +3038,7 @@ function insCheckBox(cases, today){
   const nWarn=all.reduce((s,x)=>s+x.items.filter(i=>i.lv==='warn').length,0);
   if(!all.length) return `<div class="tiny" style="margin:0 2px 10px;color:var(--ok);font-weight:800">✓ 보험 케이스 ${ins.length}건 · 단계 점검에 걸린 것이 없어요</div>`;
   const rows=all.slice(0,8).map(x=>`<div class="trow" style="gap:8px;align-items:flex-start;cursor:pointer" onclick="openCaseForm('${x.c.id}')">
-      <div class="grow" style="min-width:0"><b>${esc(x.c.chart)}</b>
+      <div class="grow" style="min-width:0"><b>${esc(caseWho(x.c))}</b>
         ${x.items.map(i=>`<div class="tiny" style="margin-top:2px;color:var(--${i.lv==='warn'?'warn':'sub'})">${i.lv==='warn'?'⚠️':'ℹ️'} ${esc(i.text)}</div>`).join('')}</div>
       <span class="chev">›</span></div>`).join('');
   return `<div class="card" style="padding:12px 14px;margin-bottom:10px">
@@ -3096,7 +3108,7 @@ function openRecall(id){
   const c=caseById(id); if(!c) return;
   const out=healOut(c), late=healLate(c);
   const sizes={}; (c.teeth||[]).forEach(t=>{ const k=String(t.heal||'').trim(); if(k) sizes[k]=(sizes[k]||0)+1; });
-  modal(`<h3>📥 힐링 회수 · ${esc(c.chart)}</h3>
+  modal(`<h3>📥 힐링 회수 · ${esc(caseWho(c))}</h3>
     <div class="tiny muted" style="margin:-6px 2px 12px">2차 수술 ${esc(c.d2||'—')} · 나간 힐링 <b>${out}개</b>${late>0?` · <b style="color:var(--danger)">${late}일 지남</b>`:''}</div>
     <div class="card" style="box-shadow:none;background:var(--bg);margin-bottom:12px;padding:10px 12px">
       ${Object.keys(sizes).map(k=>`<div class="spread" style="padding:2px 0"><span class="tiny">${esc(k)}</span><b class="tiny">${sizes[k]}개</b></div>`).join('')}
@@ -3127,7 +3139,7 @@ function recallStock(c, back){
     left-=take; done+=take;
     const {p,v}=f, before=v.qty; v.qty=before+take;
     v[cat]=Math.max(0,(+v[cat]||0)-take);
-    implantLog(p.id,v.id,'in',null,take,before,v.qty,`힐링 회수 · ${c.chart}`);
+    implantLog(p.id,v.id,'in',null,take,before,v.qty,`힐링 회수 · ${caseWho(c)}`);
   });
   return done;
 }
@@ -3192,7 +3204,7 @@ function renderLedger(){
       ${outs.slice(0,6).map(c=>{ const late=healLate(c);
         return `<div class="trow" style="gap:8px">
           <div class="grow" style="min-width:0">
-            <div style="font-weight:700;font-size:14px">${esc(c.chart)}${c.pname?' <span class="muted">'+esc(c.pname)+'</span>':''} <span class="tiny muted">×${healOut(c)}</span></div>
+            <div style="font-weight:700;font-size:14px">${esc(c.chart||c.pname||'(이름 없음)')}${c.chart&&c.pname?' <span class="muted">'+esc(c.pname)+'</span>':''} <span class="tiny muted">×${healOut(c)}</span></div>
             <div class="tiny" style="color:${late>0?'var(--danger)':'var(--muted)'}">${late>0?`${late}일 지남`:`${mdy(healDue(c))} 회수 예정`}</div>
           </div>
           <button class="btn soft xs" onclick="event.stopPropagation();openRecall('${c.id}')">회수</button>
@@ -3210,7 +3222,7 @@ function renderLedger(){
     return `<div class="irow" style="align-items:flex-start" onclick="openCaseForm('${c.id}')">
       <span class="dot" style="background:${st};margin-top:5px"></span>
       <div class="grow" style="min-width:0">
-        <div class="nm">${esc(c.chart)}${c.pname?` <span class="muted" style="font-weight:700">${esc(c.pname)}</span>`:''}
+        <div class="nm">${esc(c.chart||c.pname||'(이름 없음)')}${c.chart&&c.pname?` <span class="muted" style="font-weight:700">${esc(c.pname)}</span>`:''}
           <span class="pill ${c.insur==='보험'?'pend':'info'}" style="margin-left:4px">${esc(c.insur||'일반')}</span>
           ${fails?`<span class="pill danger">페일 ${fails}</span>`:''}${insChecks(c,DB.implantCases,todayKey()).some(i=>i.lv==='warn')?`<span class="pill warn" title="보험 단계 점검">점검</span>`:''}</div>
         <div class="tiny muted" style="margin-top:2px">${c.birth?esc(c.birth)+' · ':''}${esc(teeth)}</div>
@@ -3551,8 +3563,8 @@ function openCaseForm(id){
     <datalist id="abList">${lcOpts('어버트').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <datalist id="gfList">${lcOpts('골이식').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <div class="two">
-      <label class="field"><span>차트번호 *</span><input id="lcChart" value="${c?esc(c.chart):''}" placeholder="A-1234"></label>
-      <label class="field"><span>환자</span><input id="lcName" value="${c?esc(c.pname||''):''}" placeholder="김민수"></label>
+      <label class="field"><span>차트번호 (이름이 있으면 비워도 돼요)</span><input id="lcChart" value="${c?esc(c.chart):''}" placeholder="A-1234"></label>
+      <label class="field"><span>환자 이름 (차트번호가 있으면 비워도 돼요)</span><input id="lcName" value="${c?esc(c.pname||''):''}" placeholder="김민수"></label>
     </div>
     <label class="field"><span>생년월일</span><input id="lcBirth" value="${c?esc(c.birth||''):''}" placeholder="1948-03-02 또는 480302" inputmode="numeric"></label>
     <div class="tiny muted" style="margin:-4px 2px 10px">이름은 <b>성과 마지막 글자만 남기고 가운데는 초성</b>으로 저장돼요 (김민수 → 김ㅁ수).
@@ -3602,7 +3614,7 @@ function openCaseForm(id){
 function saveCase(id){
   lcAbsorb();
   const chart=$('#lcChart').value.trim();
-  if(!chart){ toast('차트번호를 입력하세요'); return; }
+  if(!chart && !$('#lcName').value.trim()){ toast('차트번호나 이름 중 하나는 적어 주세요'); return; }
   if(!lcSel.length){ toast('심은 치아를 골라주세요'); return; }
   if(!$('#lcD1').value){ toast('1차 수술일을 입력하세요'); return; }
   const data={ chart, pname:maskName($('#lcName').value),   // 이름 원본은 저장하지 않는다
@@ -7061,13 +7073,18 @@ function setBar(id, html, bg){
     'line-height:1.6;font-weight:700;text-align:center;word-break:keep-all';
   el.innerHTML=html;
 }
+/* 띠를 이번에 연 화면에서만 숨긴다 — 테스트하는 동안 화면 아래가 가려지는 것을 막으려는 것이다.
+   복구 문이 실제로 닫힌 것은 아니라서, 앱을 다시 열면 띠는 다시 뜬다. */
+function barDismissed(id){ try{ return sessionStorage.getItem('barOff:'+id)==='1'; }catch(e){ return false; } }
+function dismissBar(id){ try{ sessionStorage.setItem('barOff:'+id,'1'); }catch(e){} setBar(id,''); }
 function watchRecovery(){
   if(!fdb) return;
   baseUnsubs.push(wsRef().collection('recovery').doc('open').onSnapshot(s=>{
     recoveryOn = !!(s.exists && (s.data()||{}).open===true);
-    setBar('recoveryBar', recoveryOn
+    setBar('recoveryBar', recoveryOn && !barDismissed('recoveryBar')
       ? '🔓 복구 문이 열려 있어요 — 누구나 관리자를 만들 수 있는 상태입니다.<br>'+
-        '<span style="font-weight:400">Firebase 콘솔에서 <b>recovery</b> 컬렉션을 지워 닫아주세요.</span>'
+        '<span style="font-weight:400">Firebase 콘솔에서 <b>recovery</b> 컬렉션을 지워 닫아주세요.</span>'+
+        ' <button type="button" onclick="dismissBar(&quot;recoveryBar&quot;)" style="margin-left:6px;border:1px solid rgba(255,255,255,.55);background:transparent;color:#fff;border-radius:8px;padding:2px 10px;font-size:12px;font-weight:700;cursor:pointer">이번엔 숨기기</button>'
       : '', '#7a2e0c');
   }, ()=>{}));
 }
