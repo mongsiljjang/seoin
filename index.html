@@ -2873,6 +2873,19 @@ function applyCaseStock(oldT, oldIns, newT, newIns, memo){
   return {out,back,miss,missing:[...missing]};
 }
 
+/* ---- 보험 임플란트 청구 안내 (마우스를 올리면 뜬다) ---------------------
+   근거는 docs/INSURANCE_STEPS.md (공단 Q&A 원문). 안내일 뿐 청구 지침이 아니다.
+   수가 금액·급여 여부 판정은 넣지 않는다(INSURANCE_RULES 2장). 앱의 1차 수술 = 청구 2단계. */
+function insGuideHtml(){
+  return `<b>상병명</b> — 주 상병은 <b>K08.1</b> (사고, 발치 또는 국한성 치주병에 의한 치아상실). 명세서 특정내역 <b>MT014</b> 에 공단 사전등록번호 13자리를 적고, 치식번호가 틀리거나 빠지면 지급불능이 됩니다.
+    <br><br><b>1단계 · 진단과 치료계획</b> — 사전등록을 먼저 해야 시작할 수 있고 <b>소급은 안 됩니다.</b> 진찰료·약제·치료재료는 단계 비용에 들어 있어 따로 못 받습니다.
+    <br><br><b>2단계 · 고정체 식립</b> (앱의 <b>1차 수술</b>) — 고정체 재료는 따로 청구합니다. 골유착에 실패해 다시 심으면 <b>1회만</b> 인정되고, 그 전에 공단에 <b>시술중지 → 재등록</b>을 해야 합니다.
+    <br><br><b>3단계 · 보철수복</b> — 지대주는 따로 청구하고 <b>맞춤형 지대주는 비급여</b>입니다. 보철 재료가 비귀금속도재관(PFM) 외이면 <b>시술 전체가 비급여</b>입니다. 임시로 붙여도 완료로 봅니다. <b>3단계를 청구한 뒤에는 시술중지 등록이 안 됩니다.</b>
+    <br><br><b>모든 단계</b> — 단계마다 <b>끝난 뒤에</b> 청구하고, 순서대로 하는 것이 원칙입니다. 진료 도중 다른 병원으로 옮기면 급여가 안 됩니다. 1인당 평생 2개입니다. 보철을 끝낸 다음 날부터 3개월은 진찰료만 받습니다.
+    <div class="lawcite" style="margin-top:8px">근거 · 국민건강보험공단 치과임플란트 급여 Q&A · 안내일 뿐이에요. 실제 청구는 전자차트와 보험청구 담당이 합니다.</div>`;
+}
+function insGuideRow(){ return sechead('보험 임플란트 청구 안내', insGuideHtml()); }
+
 /* ---- 보험 페일 → 시술중지 안내 -----------------------------------------
    보험 케이스에 페일이 새로 적히면 공단 시술중지 등록을 물어본다.
    근거는 docs/INSURANCE_RULES.md 3장. 재시술 급여가 인정되는 길은
@@ -3008,6 +3021,7 @@ function renderLedger(){
         <button class="btn sm" onclick="openCaseForm()">＋ 케이스</button>
       </div>
     </div>
+    ${insGuideRow()}
     <div class="summary3">
       <div class="stat"><div class="n">${monT}</div><div class="l">이번 달 식립</div></div>
       <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">이번 달 지대주</div></div>
@@ -3398,6 +3412,7 @@ function openCaseForm(id){
       <label class="field"><span>1차 수술일</span><input id="lcD1" type="date" value="${c?esc(c.d1||''):todayKey()}"></label>
     </div>
     <label class="field"><span>2차 수술일 (선택)</span><input id="lcD2" type="date" value="${c?esc(c.d2||''):''}"></label>
+    ${insGuideRow()}
 
     <div class="divider"></div>
     <div class="spread" style="margin-bottom:4px"><b style="font-size:14px">심은 치아</b>
