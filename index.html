@@ -1952,21 +1952,85 @@ function recentUse(pid,days){
   return o;
 }
 
+/* ---- 임플란트 회사 → 부품 → 제품 트리 ----------------------------------------
+   회사는 DB.implants 의 brand 글자로 묶는다(따로 저장하는 회사 목록은 없다).
+   오스템·메가젠·네오·디오는 제품이 없어도 맨 앞에 늘 보이고, 나머지는 제품을 하나 만들면 나타난다. */
+const IMP_BRANDS_FIRST=['오스템','메가젠','네오','디오'];
+const IMP_PART_ORDER=['픽스처','어버트먼트','힐링캡','커버스크류','골이식','코핑','기타'];
+let currentBrand=null;
+const impOpen=new Set();                     // 펼친 부품 줄 — '회사|부품'
+function impBrandOrder(list){
+  const out=IMP_BRANDS_FIRST.slice();
+  (list||[]).forEach(p=>{ const b=String(p.brand||'').trim(); if(b && !out.includes(b)) out.push(b); });
+  return out;
+}
+function impTree(list, brand){
+  const ps=(list||[]).filter(p=>String(p.brand||'').trim()===brand);
+  const parts=[]; ps.forEach(p=>{ const k=p.part||'기타'; if(!parts.includes(k)) parts.push(k); });
+  const ord=k=>{ const i=IMP_PART_ORDER.indexOf(k); return i<0?99:i; };
+  parts.sort((a,b)=>ord(a)-ord(b) || a.localeCompare(b,'ko'));
+  return parts.map(k=>{
+    const items=ps.filter(p=>(p.part||'기타')===k), vs=items.flatMap(p=>p.variants||[]);
+    return {part:k, items, qty:vs.reduce((s,v)=>s+(+v.qty||0),0),
+      low:vs.filter(v=>(+v.qty||0)>0 && (+v.qty||0)<=(+v.minQty||0)).length, zero:vs.filter(v=>(+v.qty||0)===0).length};
+  });
+}
+function impAddGuideHtml(){
+  return `<b>회사 추가</b> — <b>＋ 회사</b> 를 누르고 회사 이름·부품 종류(픽스처·어버트먼트·힐링캡 등)·제품 라인을 적어 추가하세요. 이어서 규격을 넣는 창이 열려요.
+    <br><br><b>같은 회사에 힐링·어버트먼트 더하기</b> — 회사 이름을 <b>똑같이</b> 적으면 한 회사 아래로 묶여요. 오스템과 오스템임플란트처럼 다르게 쓰면 따로 생깁니다. 부품 줄 오른쪽 ＋ 를 누르면 회사 이름과 부품이 미리 채워져요.
+    <br><br><b>기본 회사</b> 오스템·메가젠·네오·디오는 제품이 없어도 맨 앞에 늘 보여요. 그 밖의 회사는 제품을 하나 추가하면 나타나고, 그 회사 제품을 모두 지우면 사라집니다.`;
+}
+function selectBrand(b){
+  currentBrand=b;
+  const t=impTree(DB.implants,b);
+  currentImplantId=t.length? t[0].items[0].id : null;
+  if(t.length) impOpen.add(b+'|'+t[0].part);
+  renderImplant();
+}
+function toggleImpGroup(b,part){ const k=b+'|'+part; if(impOpen.has(k)) impOpen.delete(k); else impOpen.add(k); renderImplant(); }
+function impTreeHtml(brand, curId){
+  const list=DB.implants||[], tree=impTree(list,brand);
+  if(!tree.length) return `<div class="card" style="padding:14px;margin-bottom:10px;text-align:center">
+      <div class="tiny muted" style="margin-bottom:8px">아직 ${esc(brand)} 제품이 없어요</div>
+      <button class="btn sm" onclick="openImplantForm('',${jarg(brand)})">＋ ${esc(brand)} 제품 추가</button></div>`;
+  const pill=(n,cls,w)=>n?`<span class="pill ${cls}">${w} ${n}</span>`:'';
+  return `<div class="card" style="padding:4px 12px;margin-bottom:10px">`+tree.map(g=>{
+    const open=impOpen.has(brand+'|'+g.part);
+    return `<div class="trow" style="cursor:pointer" onclick="toggleImpGroup(${jarg(brand)},${jarg(g.part)})">
+        <span style="width:14px;color:var(--sub)">${open?'▾':'▸'}</span>
+        <b class="grow">${esc(g.part)}</b>
+        ${pill(g.zero,'danger','품절')}${pill(g.low,'warn','부족')}
+        <span class="tiny muted">제품 ${g.items.length} · ${g.qty}개</span>
+        <button class="btn soft xs" title="이 회사에 ${esc(g.part)} 제품 추가" onclick="event.stopPropagation();openImplantForm('',${jarg(brand)},${jarg(g.part)})">＋</button></div>`
+      + (open? g.items.map(p=>{ const vs=p.variants||[], q=vs.reduce((s,v)=>s+(+v.qty||0),0);
+          return `<div class="trow" style="cursor:pointer;padding-left:22px;border-radius:8px;${p.id===curId?'background:var(--brand-soft)':''}" onclick="selectImplant('${p.id}')">
+            <span class="muted">└</span><span class="grow" style="font-weight:${p.id===curId?800:600}">${esc(p.line||p.part||'제품')}</span>
+            <span class="tiny muted">${vs.length}규격 · ${q}개</span></div>`; }).join('') : '');
+  }).join('')+`</div>`;
+}
+
 function renderImplant(){
   const box=$('#invImplant'); const list=DB.implants||[];
   let total=0, low=0, zero=0;
   list.forEach(p=>p.variants.forEach(v=>{ total+=(+v.qty||0); if(v.qty===0)zero++; else if(v.qty<=(+v.minQty||0))low++; }));
   const head=`<div class="spread" style="margin:2px 2px 10px"><h2 class="sec" style="margin:0">🦷 임플란트</h2>
     <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div>`;
-  if(!list.length){ box.innerHTML = head+`<div class="card">${emptyBox('🦷','등록된 임플란트가 없어요.<br>＋제품으로 브랜드·부품·규격을 직접 추가하세요.')}</div>`; refreshBell(); return; }
-  if(!currentImplantId || !implantById(currentImplantId)) currentImplantId=list[0].id;
+  // 어느 제품을 보고 있는지에서 회사를 거꾸로 잡는다(알림·다른 화면에서 들어올 때도 맞게)
+  let cur=currentImplantId? implantById(currentImplantId):null;
+  if(!cur) currentImplantId=null;
+  const brands=impBrandOrder(list);
+  if(cur) currentBrand=String(cur.brand||'').trim();
+  if(!currentBrand || !brands.includes(currentBrand)) currentBrand=brands[0];
+  if(!cur){ const t=impTree(list,currentBrand); if(t.length){ cur=t[0].items[0]; currentImplantId=cur.id; } }
+  if(cur) impOpen.add(currentBrand+'|'+(cur.part||'기타'));
   const summary=`<div class="summary3">
     <div class="stat"><div class="n">${total}</div><div class="l">전체 수량</div></div>
     <div class="stat"><div class="n" style="color:var(--warn)">${low}</div><div class="l">부족 규격</div></div>
     <div class="stat"><div class="n" style="color:var(--danger)">${zero}</div><div class="l">품절 규격</div></div></div>`;
-  const chips=`<div class="chips">${list.map(p=>`<button class="chip ${p.id===currentImplantId?'on':''}" onclick="selectImplant('${p.id}')">${esc(p.brand)} ${esc(p.line||'')}</button>`).join('')}
-    <button class="chip" onclick="openImplantForm()">＋ 제품</button></div>`;
-  box.innerHTML = head+summary+chips+implantCard(implantById(currentImplantId));
+  const chips=`<div class="chips">${brands.map(b=>{ const n=list.filter(p=>String(p.brand||'').trim()===b).length;
+      return `<button class="chip ${b===currentBrand?'on':''}" onclick="selectBrand(${jarg(b)})">${esc(b)}${n?'':' <span class="tiny" style="opacity:.6">없음</span>'}</button>`; }).join('')}
+    <button class="chip" onclick="openImplantForm('','')">＋ 회사</button></div>`;
+  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+impTreeHtml(currentBrand, cur&&cur.id)+(cur?implantCard(cur):'');
   refreshBell();
 }
 function selectImplant(id){ currentImplantId=id; renderImplant(); }
@@ -2203,15 +2267,15 @@ function specGuess(text, part){
   }
   return out;
 }
-function openImplantForm(edit){
+function openImplantForm(edit, preBrand, prePart){
   const p=edit?implantById(edit):null;
-  modal(`<h3>${p?'임플란트 제품 수정':'임플란트 제품 추가'}</h3>
+  modal(`<h3>${p?'임플란트 제품 수정':(preBrand?esc(preBrand)+' ':'')+'제품 추가'}</h3>
     <div class="two">
-      <label class="field"><span>브랜드 *</span><input id="ipBrand" value="${p?esc(p.brand):''}" placeholder="예: 오스템"></label>
+      <label class="field"><span>브랜드 *</span><input id="ipBrand" value="${p?esc(p.brand):esc(preBrand||'')}" placeholder="예: 오스템"></label>
       <label class="field"><span>제품라인</span><input id="ipLine" value="${p?esc(p.line||''):''}" placeholder="예: TS III"></label>
     </div>
     <label class="field"><span>부품 종류 *</span>
-      <input id="ipPart" list="partList" value="${p?esc(p.part||'픽스처'):'픽스처'}" placeholder="픽스처">
+      <input id="ipPart" list="partList" value="${p?esc(p.part||'픽스처'):esc(prePart||'픽스처')}" placeholder="픽스처">
       <datalist id="partList">${PARTS.map(x=>`<option value="${x}">`).join('')}</datalist></label>
     <div class="tiny muted" style="margin:-4px 2px 10px">픽스처는 규격이 "지름×길이"면 자동 매트릭스로 보여요.</div>
     <div class="two">
