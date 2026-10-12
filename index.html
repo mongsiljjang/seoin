@@ -2033,7 +2033,7 @@ function renderImplant(){
   const chips=`<div class="chips"><button class="chip ${!currentBrand?'on':''}" onclick="selectBrand('')">선택</button>${brands.map(b=>{ const n=list.filter(p=>String(p.brand||'').trim()===b).length;
       return `<button class="chip ${b===currentBrand?'on':''}" onclick="selectBrand(${jarg(b)})">${esc(b)}${n?'':' <span class="tiny" style="opacity:.6">없음</span>'}</button>`; }).join('')}
     <button class="chip" onclick="openImplantForm('','')">＋ 회사</button></div>`;
-  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0], true) : ''));
+  box.innerHTML = head+summary+gapBox(DB.implants, DB.implantCases, todayKey())+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0], true) : ''));
   refreshBell();
 }
 // 그 제품이 들어 있는 부품 줄을 펼친다 — 고를 때만 한다(그릴 때마다 열면 접을 수가 없다)
@@ -3081,6 +3081,50 @@ function insCheckBox(cases, today){
         <span class="tiny" style="color:var(--${nWarn?'warn':'sub'});font-weight:800">${all.length}건${nWarn?' · 확인 '+nWarn:''}</span></div>
       <div class="tiny muted" style="margin-bottom:6px">앞뒤가 안 맞는 기록을 알리는 점검표예요. 청구 판정이 아니고, 누르면 그 케이스가 열려요.</div>
       ${rows}${all.length>8?`<div class="tiny muted" style="margin-top:6px">외 ${all.length-8}건</div>`:''}</div>`;
+}
+
+/* ---- 입력 빠짐 확인 -----------------------------------------------------
+   사용자 요청: '입고·장부·남은 재고가 어긋나거나 입력이 안 된 것이 체크되게'.
+   잡아내는 일은 하되 간판에 걸지 않는다(AGENTS.md '화면에 내지 않는 것'):
+   홈에는 안 내고, 숫자를 빨갛게 세지 않고, '오차'가 아니라 '할 일' 말투로 쓴다.
+   판정이 아니라 알림이다. 순수 함수 — DB 를 읽기만 한다. */
+const GAP_COUNT_DAYS=30;                       // 남은 재고를 센 지 이만큼 지나면 다시 세어 보자고 알린다
+function inputGaps(implants, cases, today){
+  const T=insDayN(today), out=[];
+  const list=implants||[];
+  const short=[], stale=[];
+  list.forEach(p=>(p.variants||[]).forEach(v=>{
+    const name=`${p.brand||''} ${v.label||''}`.replace(/\s+/g,' ').trim();
+    const got=vOpen(v)+(+v.inTot||0)+exIn(v);
+    if(vUse(v)>got) short.push({name, text:`${name} — 쓴 ${vUse(v)}개가 들어온 ${got}개보다 많아요. 입고나 이월재고를 빠뜨렸는지 봐 주세요`});
+    if(vUse(v)>0 || (+v.qty||0)>0){
+      const at=insDayN(v.physAt), d=(at==null||T==null)? null : T-at;
+      if(at==null) stale.push({name, days:null});
+      else if(d>=GAP_COUNT_DAYS) stale.push({name, days:d});
+    }
+  }));
+  short.forEach(s=>out.push({code:'inShort', kind:'입고', text:s.text}));
+  const never=stale.filter(s=>s.days==null).length, old=stale.filter(s=>s.days!=null);
+  if(old.length) out.push({code:'countOld', kind:'재고 확인', text:`남은 재고를 센 지 ${GAP_COUNT_DAYS}일 넘은 규격이 ${old.length}개 있어요 (가장 오래된 것: ${old.sort((a,b)=>b.days-a.days)[0].name} ${old[0].days}일)`});
+  if(never) out.push({code:'countNone', kind:'재고 확인', text:`남은 재고를 한 번도 안 센 규격이 ${never}개 있어요`});
+  // 케이스: 적은 규격이 재고 목록에 없으면 재고에서 안 빠진다 / 치아 줄이 비어 있다
+  const missing=new Set(); let blank=0;
+  (cases||[]).forEach(c=>(c.teeth||[]).forEach(t=>{
+    const labs=[t.fx,t.heal,t.ab].map(x=>String(x||'').trim()).filter(Boolean);
+    if(!labs.length && !(t.graft)) { blank++; return; }
+    labs.forEach(lb=>{ if(!findVar(lb)) missing.add(lb); });
+  }));
+  if(missing.size) out.push({code:'noSpec', kind:'케이스', text:`케이스에 적었는데 재고 목록에 없는 규격이 ${missing.size}개 있어요 (${[...missing].slice(0,3).join(', ')}${missing.size>3?' 외':''}) — 재고에서 안 빠지고 있어요`});
+  if(blank) out.push({code:'blankTooth', kind:'케이스', text:`고정체·힐링·지대주가 모두 빈 치아 줄이 ${blank}개 있어요`});
+  return out;
+}
+function gapBox(implants, cases, today){
+  const g=inputGaps(implants,cases,today);
+  if(!g.length) return `<div class="tiny" style="margin:0 2px 10px;color:var(--ok);font-weight:800">✓ 빠진 입력이 보이지 않아요</div>`;
+  return `<div class="card" style="padding:12px 14px;margin-bottom:10px">
+      <div class="spread" style="margin-bottom:6px"><b style="font-size:14.5px">📝 빠진 입력 확인</b><span class="tiny muted">${g.length}가지</span></div>
+      <div class="tiny muted" style="margin-bottom:6px">장부와 입력이 맞는지 살피는 목록이에요. 판정이 아니라 확인할 거리예요.</div>
+      ${g.map(i=>`<div class="tiny" style="margin-top:4px"><b>${esc(i.kind)}</b> · ${esc(i.text)}</div>`).join('')}</div>`;
 }
 
 /* ---- 보험 페일 → 시술중지 안내 -----------------------------------------
