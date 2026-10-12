@@ -3063,7 +3063,7 @@ function renderLedger(){
           <span class="pill ${c.insur==='보험'?'pend':'info'}" style="margin-left:4px">${esc(c.insur||'일반')}</span>
           ${fails?`<span class="pill danger">페일 ${fails}</span>`:''}</div>
         <div class="tiny muted" style="margin-top:2px">${c.birth?esc(c.birth)+' · ':''}${esc(teeth)}</div>
-        <div class="tiny" style="margin-top:2px;color:${st}">1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}${c.recallAt?` · 회수 ${c.recallAt}${c.recallLost?` (분실 ${c.recallLost})`:''}`:''}</div>
+        <div class="tiny" style="margin-top:2px;color:${st}">${c.d0?`진단 ${c.d0} · `:''}1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}${c.recallAt?` · 회수 ${c.recallAt}${c.recallLost?` (분실 ${c.recallLost})`:''}`:''}</div>
       </div>
       <div class="qty">${t.length}<u>개</u></div>
       <span class="chev">›</span>
@@ -3411,6 +3411,7 @@ function openCaseForm(id){
         <option ${!c||c.insur!=='보험'?'selected':''}>일반</option></select></label>
       <label class="field"><span>1차 수술일</span><input id="lcD1" type="date" value="${c?esc(c.d1||''):todayKey()}"></label>
     </div>
+    <label class="field"><span>진단·치료계획일 — 청구 1단계 (선택)</span><input id="lcD0" type="date" value="${c?esc(c.d0||''):''}"></label>
     <label class="field"><span>2차 수술일 (선택)</span><input id="lcD2" type="date" value="${c?esc(c.d2||''):''}"></label>
     ${insGuideRow()}
 
@@ -3451,7 +3452,7 @@ function saveCase(id){
   if(!chart){ toast('차트번호를 입력하세요'); return; }
   if(!lcSel.length){ toast('심은 치아를 골라주세요'); return; }
   const data={ chart, pname:maskName($('#lcName').value),   // 이름 원본은 저장하지 않는다
-    birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d1:$('#lcD1').value, d2:$('#lcD2').value,
+    birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d0:$('#lcD0').value, d1:$('#lcD1').value, d2:$('#lcD2').value,
     memo:$('#lcMemo').value.trim(),
     teeth:lcSel.map(n=>({fdi:n, ...(lcTeeth[n]||{})})), updatedAt:now() };
   const old=id?caseById(id):null;

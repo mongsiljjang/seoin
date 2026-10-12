@@ -34,5 +34,11 @@ t('수가 금액이 없다(원 · 점수 · 상한금액)', !/\d[\d,]*\s*원/.te
 t('안내일 뿐이라는 말과 근거가 붙어 있다', text.includes('안내일 뿐') && text.includes('국민건강보험공단'));
 t('케이스 폼과 임플란트 대장 머리에 안내가 걸려 있다', (js.match(/insGuideRow\(\)/g)||[]).length>=3 && js.includes('function insGuideRow'));
 
+// 청구 1단계(진단·치료계획일) 칸 — 케이스 폼에 있고, 저장되고, 목록에 보인다
+t('케이스 폼에 청구 1단계 날짜 칸(lcD0)이 있다', js.includes('id="lcD0"') && js.includes('진단·치료계획일 — 청구 1단계'));
+t('저장할 때 d0 으로 담긴다', js.includes("d0:$('#lcD0').value"));
+t('목록 줄에 진단일이 보인다', js.includes('진단 ${c.d0} · '));
+t('옛 케이스(d0 없음)는 칸이 비어 있어도 목록이 깨지지 않는다', js.includes('${c.d0?'));
+
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);
