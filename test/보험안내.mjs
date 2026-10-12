@@ -28,7 +28,8 @@ t('앱의 1차 수술이 청구 2단계라는 대응이 적혀 있다', /2단계
 t('1단계: 사전등록 소급 불가', /사전등록/.test(text) && text.includes('소급'));
 t('2단계: 재식립은 1회, 시술중지→재등록', text.includes('1회') && text.includes('시술중지') && text.includes('재등록'));
 t('3단계: 청구 뒤에는 시술중지 등록이 안 된다', /3단계를 청구한 뒤에는 시술중지 등록이 안 됩니다/.test(text));
-t('3단계: 맞춤형 지대주 비급여 · PFM 외 재료는 시술 전체 비급여', text.includes('맞춤형 지대주는 비급여') && text.includes('PFM') && text.includes('시술 전체가 비급여'));
+t('3단계: 맞춤형 지대주 비급여 · PFM 또는 지르코니아 외 재료는 시술 전체 비급여', text.includes('맞춤형 지대주는 비급여') && text.includes('PFM') && text.includes('지르코니아') && text.includes('시술 전체가 비급여'));
+t('지르코니아가 비급여라고 안내하지 않는다(2025-02-01 급여)', !/지르코니아[^.]{0,20}비급여/.test(text));
 t('공통: 끝난 뒤 청구 · 병원 이동 불가 · 평생 2개 · 사후 3개월', ['끝난 뒤에','옮기면','평생 2개','3개월'].every(s=>text.includes(s)));
 t('수가 금액이 없다(원 · 점수 · 상한금액)', !/\d[\d,]*\s*원/.test(text) && !/\d+\s*만\s*원/.test(text) && !text.includes('상한금액') && !/\d[\d,.]*\s*점/.test(text));
 t('안내일 뿐이라는 말과 근거가 붙어 있다', text.includes('안내일 뿐') && text.includes('국민건강보험공단'));

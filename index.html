@@ -2994,7 +2994,7 @@ function insGuideHtml(){
   return `<b>상병명</b> — 주 상병은 <b>K08.1</b> (사고, 발치 또는 국한성 치주병에 의한 치아상실). 명세서 특정내역 <b>MT014</b> 에 공단 사전등록번호 13자리를 적고, 치식번호가 틀리거나 빠지면 지급불능이 됩니다.
     <br><br><b>1단계 · 진단과 치료계획</b> — 사전등록을 먼저 해야 시작할 수 있고 <b>소급은 안 됩니다.</b> 진찰료·약제·치료재료는 단계 비용에 들어 있어 따로 못 받습니다.
     <br><br><b>2단계 · 고정체 식립</b> (앱의 <b>1차 수술</b>) — 고정체 재료는 따로 청구합니다. 골유착에 실패해 다시 심으면 <b>1회만</b> 인정되고, 그 전에 공단에 <b>시술중지 → 재등록</b>을 해야 합니다.
-    <br><br><b>3단계 · 보철수복</b> — 지대주는 따로 청구하고 <b>맞춤형 지대주는 비급여</b>입니다. 보철 재료가 비귀금속도재관(PFM) 외이면 <b>시술 전체가 비급여</b>입니다. 임시로 붙여도 완료로 봅니다. <b>3단계를 청구한 뒤에는 시술중지 등록이 안 됩니다.</b>
+    <br><br><b>3단계 · 보철수복</b> — 지대주는 따로 청구하고 <b>맞춤형 지대주는 비급여</b>입니다(2022년 공단 Q&A 기준, 이후 바뀌었는지는 확인하지 못했어요). 보철 재료는 비귀금속도재관(PFM)이나 <b>지르코니아(2025년 2월 1일부터)</b>만 급여이고, 메탈·금·PFG 등 그 밖의 재료이면 <b>시술 전체가 비급여</b>입니다. 임시로 붙여도 완료로 봅니다. <b>3단계를 청구한 뒤에는 시술중지 등록이 안 됩니다.</b>
     <br><br><b>모든 단계</b> — 단계마다 <b>끝난 뒤에</b> 청구하고, 순서대로 하는 것이 원칙입니다. 진료 도중 다른 병원으로 옮기면 급여가 안 됩니다. 1인당 평생 2개입니다. 보철을 끝낸 다음 날부터 3개월은 진찰료만 받습니다.
     <div class="lawcite" style="margin-top:8px">근거 · 국민건강보험공단 치과임플란트 급여 Q&A · 안내일 뿐이에요. 실제 청구는 전자차트와 보험청구 담당이 합니다.</div>`;
 }
@@ -3233,6 +3233,34 @@ function saveRecall(id){
 }
 
 let lcQ='';
+/* 식립·지대주 집계 기간 — 기본은 이번 달, ◀ ▶ 로 달을 옮기고 '전체' · '기간' 도 고른다. 순수 함수라 시험이 쓴다. */
+let lcMode='month', lcYm='', lcFrom='', lcTo='';
+function ledgerPeriod(cases, mode, ym, from, to, today){
+  const cur=String(today).slice(0,7);
+  let f='', t='', label='전체';
+  if(mode==='month'){ const m=ym||cur; f=m+'-01'; t=m+'-31';
+    label = m===cur ? '이번 달' : (m.slice(0,4)===cur.slice(0,4) ? (+m.slice(5))+'월' : m.slice(0,4)+'년 '+(+m.slice(5))+'월'); }
+  else if(mode==='range'){ f=from||''; t=to||''; label='선택 기간'; }
+  const mon=(cases||[]).filter(c=>{ const d=String(c.d1||''); return d && (!f||d>=f) && (!t||d<=t); });
+  return {from:f, to:t, label, n:mon.length,
+    t:mon.reduce((s,c)=>s+(c.teeth||[]).length,0), a:mon.reduce((s,c)=>s+abCount(c),0)};
+}
+function lcShift(n){
+  const m=lcYm||todayKey().slice(0,7); const d=new Date(+m.slice(0,4), +m.slice(5)-1+n, 1);
+  lcMode='month'; lcYm=d.getFullYear()+'-'+pad(d.getMonth()+1); renderLedger();
+}
+function lcSetMode(m){ lcMode=m; if(m==='month') lcYm=''; if(m==='range' && !lcFrom && !lcTo){ lcFrom=todayKey().slice(0,7)+'-01'; lcTo=todayKey(); } renderLedger(); }
+function lcPeriodBar(){
+  const cur=todayKey().slice(0,7), m=lcYm||cur;
+  const chip=(k,label)=>`<button class="chip ${lcMode===k?'on':''}" onclick="lcSetMode('${k}')">${label}</button>`;
+  const mid = lcMode==='month' ? `<button class="btn xs soft" onclick="lcShift(-1)" aria-label="이전 달">◀</button>
+      <b style="min-width:88px;text-align:center">${m.slice(0,4)}년 ${+m.slice(5)}월</b>
+      <button class="btn xs soft" onclick="lcShift(1)" aria-label="다음 달">▶</button>`
+    : lcMode==='range' ? `<input type="date" value="${esc(lcFrom)}" onchange="lcFrom=this.value;renderLedger()" style="flex:0 0 140px"> ~
+      <input type="date" value="${esc(lcTo)}" onchange="lcTo=this.value;renderLedger()" style="flex:0 0 140px">` : '';
+  return `<div class="row wrap" style="gap:6px;margin:0 2px 8px;align-items:center">${mid}
+    <span style="flex:1"></span>${chip('month','달')}${chip('range','기간')}${chip('all','전체')}</div>`;
+}
 function renderLedger(){
   const box=$('#invLedger');
   const all=(DB.implantCases||[]).slice().sort((a,b)=>String(b.d1||'').localeCompare(String(a.d1||'')));
@@ -3247,10 +3275,8 @@ function renderLedger(){
   };
   const list=q? all.filter(hit) : all;
 
-  const ym=todayKey().slice(0,7);
-  const mon=all.filter(c=>String(c.d1||'').startsWith(ym));
-  const monT=mon.reduce((s,c)=>s+(c.teeth||[]).length,0);
-  const monA=mon.reduce((s,c)=>s+abCount(c),0);
+  const per=ledgerPeriod(all, lcMode, lcYm, lcFrom, lcTo, todayKey());
+  const monT=per.t, monA=per.a;
   const wait=all.filter(c=>c.d1 && !c.d2).length;
 
   const head=`<div class="spread" style="margin:4px 2px 12px">
@@ -3264,9 +3290,10 @@ function renderLedger(){
     </div>
     ${insGuideRow()}
     ${insCheckBox(DB.implantCases, todayKey())}
+    ${lcPeriodBar()}
     <div class="summary3">
-      <div class="stat"><div class="n">${monT}</div><div class="l">이번 달 식립</div></div>
-      <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">이번 달 지대주</div></div>
+      <div class="stat"><div class="n">${monT}</div><div class="l">${per.label} 식립</div></div>
+      <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">${per.label} 지대주</div></div>
       <div class="stat"><div class="n" style="color:var(--warn)">${(DB.implantCases||[]).filter(isOut).reduce((s,c)=>s+healOut(c),0)}</div><div class="l">나가 있는 힐링</div></div>
     </div>
     <div class="search"><span class="ic">🔎</span><input id="lcSearch" name="lcq" autocomplete="off" placeholder="차트번호·이름·생년월일 검색"
