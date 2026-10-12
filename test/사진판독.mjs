@@ -8,7 +8,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const scan = require('../api/scan.js');
 const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const apiSrc = fs.readFileSync(new URL('../api/scan.js', import.meta.url), 'utf8');
+const apiSrc = fs.readFileSync(new URL('../api/scan.js', import.meta.url), 'utf8') + fs.readFileSync(new URL('../api/_core.js', import.meta.url), 'utf8');
 const js = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]).join('\n');
 function grab(name){
   const i = js.indexOf('function '+name+'(');
@@ -85,7 +85,7 @@ t('사진은 올리기 전에 줄인다(긴 변 1600, JPEG)', (()=>{ const f=new
 // 두 길을 고를 수 있다 — 글로 붙여넣기 / 사진으로 올리기
 t('수첩 화면 맨 위에서 글로 붙여넣기와 사진으로 올리기를 고를 수 있다', js.includes('id="noteSeg"') && js.includes("setNoteMode('text')") && js.includes("setNoteMode('photo')") && js.includes('function setNoteMode(m)'));
 t('고른 길을 기억한다(다음에 열면 그대로)', js.includes("localStorage.setItem('noteMode',m)") && js.includes("localStorage.getItem('noteMode')"));
-t('AI 사진 읽기가 꺼져 있으면(서버에 키가 없으면) 사진 버튼을 끄고 글로 붙여넣기를 안내한다', js.includes("fetch('/api/scan')") && js.includes('AI 사진 읽기가 아직 꺼져 있어요') && js.includes("setNoteMode('text')"));
+t('AI 사진 읽기가 꺼져 있으면(서버에 키가 없으면) 사진 버튼을 끄고 글로 붙여넣기를 안내한다', js.includes("fetch(scanUrl())") && js.includes('AI 사진 읽기가 아직 꺼져 있어요') && js.includes("setNoteMode('text')"));
 t('글 붙여넣기 쪽에 사진에서 글자 복사하는 법(아이폰·안드로이드·PC) 안내(i)가 있다', (()=>{ const f=new Function(grab('noteCopyGuideHtml')+'; return noteCopyGuideHtml();')(); const x=f.replace(/<[^>]+>/g,' '); return ['아이폰','안드로이드','PC','복사','붙여넣기','AI 서비스 없이'].every(s=>x.includes(s)); })());
 
 // 5) 여러 AI 서비스 · 내 키 · 라벨
@@ -134,6 +134,18 @@ t('LOT 읽기 순서: 바코드(AI 없이) → AI(라벨 모드) → 직접 적�
 t('읽은 LOT 는 눈으로 확인하라고 알려 준다(AI 가 읽은 경우)', js.includes('AI가 읽음 — 눈으로 확인하세요'));
 t('키 오류(vendor_auth)·무료 한도(vendor_quota)·직원 아님·한도 초과를 사람 말로 안내한다', ['vendor_auth','vendor_quota','병원 직원으로 승인된 기기','사진 한도'].every(s=>js.includes(s)));
 t('내 키가 있으면 서버가 꺼져 있어도 AI 사진 읽기를 켜진 것으로 본다', js.includes('(DEMO || scanOwn().key) ? true : noteAiOn'));
+
+// 8) 서버를 옮길 수 있게 — 핵심(_core.js)은 버셀에 묶이지 않는다
+const core = require('../api/_core.js');
+t('핵심(_core.js)에는 버셀 전용 코드가 없다(req/res·VERCEL 을 모른다)', (()=>{ const s=fs.readFileSync(new URL('../api/_core.js', import.meta.url), 'utf8'); return !/VERCEL|@vercel|res\.status|req\.method|setHeader/.test(s.replace(/\/\*[\s\S]*?\*\//g,'')); })());
+t('버셀 껍데기(scan.js)는 얇다 — handle() 에 넘기고 응답만 돌려준다', (()=>{ const s=fs.readFileSync(new URL('../api/scan.js', import.meta.url), 'utf8'); return s.includes('core.handle(') && s.split('\n').length<40; })());
+{ // 다른 서버(여기서는 Express 모양)가 핵심만 가져다 같은 계약을 지키는지
+  const expressLike = async (method, body, env) => { const r = await core.handle({ method, body, env }); return r; };
+  const g = await expressLike('GET', null, {});
+  const calls=[]; const savedF=globalThis.fetch; globalThis.fetch = fakeFetch(200, '김민수 보험 #46 오스템 4.0*12', calls);
+  const p = await expressLike('POST', {image:PNG, ws:'hosp1', idToken:tokenFor('mv1')}, {ANTHROPIC_API_KEY:'k'}); globalThis.fetch = savedF;
+  t('핵심만으로 계약이 지켜진다: GET 은 { enabled }, POST 는 { status, json }', g.status===200 && g.json.enabled===false && p.status===200 && p.json.lines[0]==='김ㅁ수 보험 #46 오스템 4.0*12'); }
+t('앱의 서버 주소는 한 곳(scanUrl)이라 별도 서버로 옮기면 window.SCAN_API_BASE 만 채운다', js.includes('function scanUrl()') && js.includes('window.SCAN_API_BASE') && !js.includes("fetch('/api/scan'"));
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);

@@ -3466,6 +3466,7 @@ let noteText='';
 /* ---- 사진으로 올리기 — 서버 함수(api/scan.js)가 AI 로 읽어 수첩 줄로 돌려준다 (docs/SERVER.md 6장) --------
    사진은 올리기 전에 줄이고, 서버는 읽은 뒤 바로 버린다. 읽은 줄은 아래 수첩 확인 표로 들어가 사람이 보고 넘긴다. */
 const SCAN_MAX_SIDE=1600;
+function scanUrl(){ return (window.SCAN_API_BASE||'') + '/api/scan'; }   // 별도 서버로 옮기면 window.SCAN_API_BASE 에 그 주소(CORS 허용 필요)를 넣는다
 /* 내 AI 키 — 병원이 직접 만든 키를 이 기기에만 저장한다(서버에는 저장하지 않고, 읽을 때만 함께 보낸다). 요금은 키 주인에게 간다. */
 function scanOwn(){ try{ return {prov:localStorage.getItem('scanProv')||'gemini', key:localStorage.getItem('scanKey')||''}; }catch(e){ return {prov:'gemini', key:''}; } }
 function scanOwnRender(){
@@ -3482,7 +3483,7 @@ function scanOwnSave(){
 function scanOwnClear(){ try{ localStorage.removeItem('scanKey'); }catch(e){} scanOwnRender(); noteAiState(); toast('내 키를 지웠어요'); }
 async function scanAvail(){                       // 사진 읽기를 쓸 수 있나 — 내 키가 있거나 서버가 켜져 있으면
   if(DEMO || scanOwn().key) return true;
-  if(noteAiOn===null){ try{ const j=await (await fetch('/api/scan')).json(); noteAiOn=!!(j&&j.enabled); }catch(e){ noteAiOn=false; } }
+  if(noteAiOn===null){ try{ const j=await (await fetch(scanUrl())).json(); noteAiOn=!!(j&&j.enabled); }catch(e){ noteAiOn=false; } }
   return !!noteAiOn;
 }
 // 서버 함수 부르기 — mode: 'note'(수첩) · 'label'(상자·라벨의 LOT)
@@ -3492,7 +3493,7 @@ async function scanCall(mode, file){
   const [idToken, image]=await Promise.all([u.getIdToken(), scanCompress(file)]);
   const own=scanOwn(), body={image, ws:WS(), idToken, mode};
   if(own.key){ body.userKey=own.key; body.provider=own.prov; }
-  const r=await fetch('/api/scan',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)});
+  const r=await fetch(scanUrl(),{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)});
   return {status:r.status, ok:r.ok, j:await r.json().catch(()=>({}))};
 }
 function scanErr(res){                            // 실패를 사람 말로
@@ -3594,7 +3595,7 @@ function noteAiState(){                           // 켜져 있는지 서버에 
 }
 function noteAiCheck(){
   if(DEMO || noteAiOn!==null){ noteAiState(); return; }
-  fetch('/api/scan').then(r=>r.json()).then(j=>{ noteAiOn=!!(j&&j.enabled); noteAiState(); }).catch(()=>{ noteAiOn=false; noteAiState(); });
+  fetch(scanUrl()).then(r=>r.json()).then(j=>{ noteAiOn=!!(j&&j.enabled); noteAiState(); }).catch(()=>{ noteAiOn=false; noteAiState(); });
 }
 function openNotePaste(){
   noteModeLoad();
