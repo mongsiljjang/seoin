@@ -2520,8 +2520,16 @@ const FDI_ALL=[...FDI_UP,...FDI_LO];
 const fdiSort=(a,b)=>FDI_ALL.indexOf(a)-FDI_ALL.indexOf(b);
 const CHO='ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
 function chosung(ch){ const c=ch.charCodeAt(0)-0xAC00; return (c>=0&&c<11172)? CHO[Math.floor(c/588)] : ch; }
-// 성은 그대로, 나머지는 초성만. 덴트웹에서 초성으로 찾히면서 이름은 앱에 안 남는다.
+// 성과 마지막 글자는 그대로, 가운데 글자만 초성(김민수 → 김ㅁ수). 두 글자 이름은 가운데가 없어 성만 남긴다(김수 → 김ㅅ).
+// 이름 원본은 앱에 남지 않는다. 한 번 가린 이름을 다시 가려도 그대로다(김ㅁ수 → 김ㅁ수).
 function maskName(name){
+  const a=[...(name||'').replace(/\s/g,'')]; if(!a.length) return '';
+  if(a.length===1) return a[0];
+  if(a.length===2) return a[0]+chosung(a[1]);
+  return a[0] + a.slice(1,-1).map(chosung).join('') + a[a.length-1];
+}
+// 2026-10-12 이전에 저장된 이름은 성만 남긴 모양이다(김ㅁㅅ). 2차수술 줄을 옛 케이스에 붙일 때만 쓴다.
+function maskNameOld(name){
   const t=(name||'').replace(/\s/g,''); if(!t) return '';
   return t[0] + t.slice(1).split('').map(chosung).join('');
 }
@@ -2962,7 +2970,7 @@ function insInputGuideHtml(){
   return `<b>꼭 적기 (*)</b> — 차트번호 · 구분(보험/일반) · 1차 수술일 · 심은 치아. 이 넷이 있어야 환자·날짜·부위가 구분되고 재고가 맞게 빠져요.
     <br><br><b>보험이면 날짜를 단계 순서대로</b> — 진단·치료계획일(청구 1단계) → 1차 수술일(청구 2단계) → 보철 장착일(청구 3단계). 날짜가 빠지거나 순서가 뒤바뀌면 대장 위 <b>🔎 보험 단계 점검</b> 에 떠요. 보철은 붙인 날 바로 적으세요(임시 부착도 돼요).
     <br><br><b>재고를 맞추려면</b> — 치아마다 <b>픽스처 규격</b>을 적으세요. 비워 두면 재고가 안 빠지고, 재료 목록에 없는 이름이면 "재고에 없는 규격"이라 못 빼요. 지대주·힐링도 적으면 같이 빠지고, 실패한 치아는 페일에 체크하세요.
-    <br><br><b>환자 구분</b> — 이름은 적어도 성과 초성만 저장돼요(김ㅁㅅ). 같은 환자는 <b>늘 같은 차트번호</b>로 적어야 같은 치아 중복·재식립을 찾아내요. 동명이인은 생년월일(선택)로 가립니다.
+    <br><br><b>환자 구분</b> — 이름은 적어도 성과 마지막 글자만 남고 가운데는 초성으로 저장돼요(김ㅁ수). 같은 환자는 <b>늘 같은 차트번호</b>로 적어야 같은 치아 중복·재식립을 찾아내요. 동명이인은 생년월일(선택)로 가립니다.
     <br><br><b>날짜는 그날 바로</b> — 나중에 몰아 적으면 빠지거나 순서가 뒤바뀌기 쉬워요.`;
 }
 function insInputRow(){ return sechead('입력할 때 꼭 적을 것', insInputGuideHtml()); }
@@ -3381,9 +3389,9 @@ function noteParse(text){
 // 여러 건이 걸리면 고르지 않는다. 조용히 갖다 붙이면 틀렸을 때 못 찾는다.
 function noteLink(r){
   if(r.stage!==2 || !r.name || !r.teeth.length) return null;
-  const nm=maskName(r.name);
+  const nm=maskName(r.name), old=maskNameOld(r.name);
   const hit=(DB.implantCases||[]).filter(c=>
-    (c.pname||'')===nm && !c.d2 &&
+    ((c.pname||'')===nm || (c.pname||'')===old) && !c.d2 &&
     r.teeth.every(f=>(c.teeth||[]).some(t=>String(t.fdi)===String(f))));
   return hit.length===1 ? hit[0] : (hit.length ? 'many' : null);
 }
@@ -3547,7 +3555,7 @@ function openCaseForm(id){
       <label class="field"><span>환자</span><input id="lcName" value="${c?esc(c.pname||''):''}" placeholder="김민수"></label>
     </div>
     <label class="field"><span>생년월일</span><input id="lcBirth" value="${c?esc(c.birth||''):''}" placeholder="1948-03-02 또는 480302" inputmode="numeric"></label>
-    <div class="tiny muted" style="margin:-4px 2px 10px">이름은 <b>성만 남기고 나머지는 초성</b>으로 저장돼요 (김민수 → 김ㅁㅅ).
+    <div class="tiny muted" style="margin:-4px 2px 10px">이름은 <b>성과 마지막 글자만 남기고 가운데는 초성</b>으로 저장돼요 (김민수 → 김ㅁ수).
       동명이인은 <b>차트번호와 생년월일</b>로 가립니다.</div>
     <div class="two">
       <label class="field"><span>구분</span><select id="lcIns">

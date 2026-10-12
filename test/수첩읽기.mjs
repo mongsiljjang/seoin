@@ -18,7 +18,7 @@ function grab(name){
   }
   throw new Error(name+' 의 끝을 못 찾았다');
 }
-const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName',
+const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName','maskNameOld',
                 'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','noteSaveAll',
                 'esc','newFails','failNotice'];
 
@@ -54,7 +54,7 @@ function 새판(){
     implantCases:[], implantLogs:[] };
   DB.implants[0].variants.push({id:'h1',label:'Ø4.5 GH3',qty:10,minQty:5,uNor:0,uIns:0,uFail:0});
   const f = new Function('DB', 판 +
-    '; return {noteParse,noteFx,noteBad,noteLink,applyCaseStock,maskName,'
+    '; return {noteParse,noteFx,noteBad,noteLink,applyCaseStock,maskName,maskNameOld,'
     + 'run:t=>{lastModal=\'\'; noteRows=noteParse(t); noteSaveAll(); return lastToast;}, 안내:()=>lastModal};');
   return { DB, ...f(DB) };
 }
@@ -164,6 +164,28 @@ console.log('\n── 단계를 안 적어도 나간 물건으로 가른다 ─�
   ok('픽스처 규격이면 1차', noteParse('박소영 #46 오스템 4.0×10')[0].stage, 1);
   ok('힐링만 있으면 2차',   noteParse('박소영 #46 Ø4.5 GH3')[0].stage, 2);
   ok('2차수술이라 적으면 2차', noteParse('박소영 #46 2차수술')[0].stage, 2);
+}
+
+console.log('\n── 이름 가리기: 성과 마지막 글자는 그대로, 가운데만 초성 ──');
+{
+  const {maskName,maskNameOld} = 새판();
+  ok('세 글자: 김민수 → 김ㅁ수', maskName('김민수'), '김ㅁ수');
+  ok('네 글자: 남궁민수 → 남ㄱㅁ수', maskName('남궁민수'), '남ㄱㅁ수');
+  ok('두 글자는 가운데가 없어 성만 남긴다: 김수 → 김ㅅ', maskName('김수'), '김ㅅ');
+  ok('한 글자·빈 값', [maskName('김'), maskName(''), maskName(null)], ['김','','']);
+  ok('공백은 버린다', maskName(' 김 민 수 '), '김ㅁ수');
+  ok('한 번 가린 이름을 다시 가려도 그대로(저장 폼에서 다시 저장해도 안 바뀐다)', [maskName('김ㅁ수'), maskName('김ㅅ'), maskName('김ㅁㅅ')], ['김ㅁ수','김ㅅ','김ㅁㅅ']);
+  ok('원래 이름 글자는 성·마지막 글자 말고 안 남는다', /민/.test(maskName('김민수')), false);
+  ok('옛 모양(성만 남김)은 따로 만들 수 있다: 김민수 → 김ㅁㅅ', maskNameOld('김민수'), '김ㅁㅅ');
+}
+
+console.log('\n── 옛 모양으로 저장된 케이스에도 2차수술 줄이 붙는다 ──');
+{
+  const {DB,run} = 새판();
+  run('박소영 보험 #46 오스템 4.0*12');
+  DB.implantCases[0].pname='박ㅅㅇ';                 // 이름 가리는 방식을 바꾸기 전에 저장된 모양
+  run('박소영 #46 2차수술 Ø4.5 GH3');
+  ok('옛 이름 모양 케이스에 2차가 붙는다(새로 안 생긴다)', [DB.implantCases.length, !!DB.implantCases[0].d2], [1, true]);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
