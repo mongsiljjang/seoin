@@ -2110,7 +2110,7 @@ function matrixHtml(p,parsed){
   let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 남은 재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 남은 재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
   t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th title="눌러서 빼기" onclick="dropAxis('${p.id}','s',${l})" style="cursor:pointer">${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
   dias.forEach(d=>{ t+=`<tr><td class="rowh" title="눌러서 빼기" onclick="dropAxis('${p.id}','b',${d})" style="cursor:pointer">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
-    if(!c) return `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
+    if(!c) return (p.cellHide||[]).includes(specNum(d)+'|'+specNum(l)) ? '<td></td>' : `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
     const df=vDiff(c.v);
     const dot = df!=null&&df!==0?`<span style="position:absolute;top:3px;right:4px;width:8px;height:8px;border-radius:50%;background:${df<0?'var(--danger)':'var(--warn)'}"></span>`:'';
     return `<td><div class="cell ${vState(c.v)}" style="position:relative" onclick="openVariant('${p.id}','${c.v.id}')">${dot}${c.v.qty}<span class="u">개</span></div></td>`;
@@ -2378,6 +2378,7 @@ function saveVariant(pid,vid){
     const asOpen = $('#vOrigin') && $('#vOrigin').value==='open';
     const nv={id:uid(), ...data, inTot:asOpen?0:qty, opening:asOpen?qty:0, uNor:0, uIns:0, uFail:0, phys:null, physAt:null};
     p.variants.push(nv);
+    { const dl=parseDL(label); if(dl && Array.isArray(p.cellHide)) p.cellHide=p.cellHide.filter(k=>k!==specNum(dl.d)+'|'+specNum(dl.l)); }   // 가렸던 칸에 규격을 만들면 다시 보인다
     if(qty>0) implantLog(pid,nv.id, asOpen?'open':'in', null, qty, 0, qty, asOpen?'이월재고 등록':'초기 등록'); }
   saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
 }
@@ -2399,14 +2400,33 @@ function openVariantRemove(pid){
       <button class="btn danger xs" onclick="delVariant('${p.id}','${v.id}')">빼기</button>
     </div>`).join('')}</div>`);
 }
-// 규격 추가 창에서 쓴다 — 창에 적힌 규격이 이미 등록돼 있으면 그것을 지운다(지우기 전에 잃는 숫자를 물어본다)
+// 규격 추가 창의 삭제 — 경고 없이 지워진다.
+//  · 등록된 규격이면 그 규격을 지운다(숫자가 쌓인 규격은 잃는 것을 한 번 물어본다)
+//  · 아직 등록 안 한 칸이면 그 두께 줄·길이 칸을 표에서 뺀다. 둘 다 다른 규격이 걸려 있어 못 빼면 그 칸 하나만 가린다.
+function axisHideOne(p, which, n){
+  const hide = which==='b'? 'axisHideB' : 'axisHideS', man = which==='b'? 'axisB' : 'axisS';
+  if(Array.isArray(p[man])) p[man]=p[man].filter(x=>+x!==+n);
+  if(!Array.isArray(p[hide])) p[hide]=[];
+  if(!p[hide].includes(+n)) p[hide].push(+n);
+}
 function delVariantByInput(pid){
   const p=implantById(pid); if(!p) return;
-  const label = hasAxis(p.part)? dlLabel(($('#vB')||{}).value, ($('#vS')||{}).value) : ((($('#vLabel')||{}).value)||'').trim();
-  if(!label){ toast('지울 규격을 위 칸에 적어 주세요'); return; }
-  const v=(p.variants||[]).find(x=>sameSpec(x.label,label));
-  if(!v){ toast(label+' 은 등록된 규격이 아니에요'); return; }
-  delVariant(pid, v.id);
+  if(!hasAxis(p.part)){                                   // 표가 없는 부품 — 이름으로 찾아 지운다
+    const label=((($('#vLabel')||{}).value)||'').trim();
+    const v=label && (p.variants||[]).find(x=>sameSpec(x.label,label));
+    if(v) delVariant(pid, v.id); else closeModal();
+    return;
+  }
+  const b=parseFloat(($('#vB')||{}).value), s=parseFloat(($('#vS')||{}).value);
+  if(!isFinite(b)||!isFinite(s)){ toast('지울 두께와 길이를 위 칸에 적어 주세요'); return; }
+  const label=dlLabel(b,s), v=(p.variants||[]).find(x=>sameSpec(x.label,label));
+  if(v){ delVariant(pid, v.id); return; }
+  const hideB=!axisHasVariants(p,'b',b), hideS=!axisHasVariants(p,'s',s);
+  if(hideB) axisHideOne(p,'b',b);
+  if(hideS) axisHideOne(p,'s',s);
+  if(!hideB && !hideS){ if(!Array.isArray(p.cellHide)) p.cellHide=[]; const k=specNum(b)+'|'+specNum(s); if(!p.cellHide.includes(k)) p.cellHide.push(k); }
+  saveDB(); closeModal(); renderImplant();
+  toast(hideB&&hideS? label+' 을 표에서 뺐어요' : hideB? '두께 '+specNum(b)+' 줄을 표에서 뺐어요' : hideS? '길이 '+specNum(s)+' 칸을 표에서 뺐어요' : label+' 칸을 표에서 가렸어요');
 }
 function delVariant(pid,vid){
   const p=implantById(pid); const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return;

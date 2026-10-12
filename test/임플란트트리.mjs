@@ -67,7 +67,7 @@ t('회사를 누르면 이전에 펼친 부품 줄을 접고 제품 선택을 �
 t('코드 어디에도 실사 라는 말이 없다(심평원 실사 이야기만 예외)', !js.split(String.fromCharCode(10)).some(l=>l.includes('실사') && !l.includes('심평원')));
 
 // 규격 추가 창에서 삭제 — 적힌 규격이 등록돼 있으면 지운다
-t('규격 추가 창에도 삭제 버튼이 있고(추가 옆), 적힌 규격으로 찾아 지운다', js.includes('delVariantByInput(') && js.includes('function delVariantByInput(pid)') && js.includes('등록된 규격이 아니에요'));
+t('규격 추가 창에도 삭제 버튼이 있고(추가 옆), 적힌 규격이 없으면 경고 대신 표에서 뺀다', js.includes('delVariantByInput(') && js.includes('function delVariantByInput(pid)') && !js.includes('등록된 규격이 아니에요'));
 
 // 제품을 눌렀을 때 — 규격 표 자리로 데려가고, 부품 줄은 접을 수 있다
 t('제품을 누르면 규격 표 자리(impCard)로 스크롤한다', js.includes("getElementById('impCard')") && js.includes('scrollIntoView'));
@@ -79,6 +79,10 @@ t('코드 어디에도 실재고 라는 말이 없다(남은 재고로 바꿈)',
 // 선택 칸 — 제품 이름 머리와 재고 요약은 빼고 규격 표만
 t('implantCard 에 bare 가 있어 머리·재고 요약·구분선을 건너뛴다', js.includes('function implantCard(p, bare)') && js.includes("bare? '' : head+recon+"));
 t('선택일 때만 bare 로 그린다(회사를 고르면 머리·요약이 그대로 나온다)', js.includes('cardBox(list[0], true)') && js.includes('(cur?cardBox(cur):')) ;
+
+// 규격 추가 창의 삭제 — 경고 대신 표에서 빼고, 가린 칸은 규격을 만들면 다시 보인다
+t('등록 안 된 규격의 삭제는 두께 줄·길이 칸을 빼고, 둘 다 못 빼면 그 칸만 가린다', js.includes('function axisHideOne(') && js.includes('p.cellHide.push(k)') && js.includes("(p.cellHide||[]).includes(specNum(d)+'|'+specNum(l))"));
+t('가렸던 칸에 규격을 새로 만들면 다시 보이게 한다', js.includes("p.cellHide=p.cellHide.filter(k=>k!==specNum(dl.d)+'|'+specNum(dl.l))"));
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);
