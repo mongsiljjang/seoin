@@ -32,6 +32,8 @@ AI 세션은 저마다 `claude/…-xxxxxx` 라는 **새 이름**을 받고 거�
 - **개인정보 최소.** 환자 정보는 넣지 않는다. 환자 식별이 필요하면 **차트번호(가명)** 만 쓴다(이름·주민번호·전화 금지).
   차트번호는 필수가 아니다(2026-10-12 사용자 결정) — **차트번호 또는 이름 중 하나**면 된다. 차트번호가 없을 때는 가린 이름 + 생년월일이 같아야 같은 환자로 본다(`caseSamePerson`).
   예외(2026-10-12 사용자 결정): 이름은 입력해도 **성과 마지막 글자만 남기고 가운데는 초성**으로 가려 저장한다(김민수 → 김ㅁ수, `maskName`). 원본 이름은 저장하지 않는다. 사진·수첩에 적힌 이름도 같은 방식으로 가린다.
+- **Firebase 는 접촉면 함수 안에서만 부른다**(`docs/DB_MIGRATION.md` 3장 · `test/DB접촉면.mjs` 가 지킨다). 나중에 다른 클라우드·DB 로 옮길 때 비용이 커지지 않게 하려는 것이다(2026-10-12 사용자 결정 — 이전은 정해진 바 없다).
+  새 기능은 `DB` 에 값을 넣고 기존 저장 경로(`cloudPush`)를 타게 하고, Firestore 전용 값(serverTimestamp·FieldValue·트랜잭션·배치)과 새 컬렉션 구조는 쓰지 않는다.
 - 화면/페이지를 만들거나 고치면 **`deslop-ko` 스킬로 한글 AI-티(조판·저대비 등)를 점검**한다.
 - 작업은 **커밋 후 두 저장소 모두 푸시**한다(designated 브랜치 유지).
 - 앱은 서버 없는 정적 웹 + Firebase다. 문자/카톡 알림·거래처 로그인 등 **서버가 필요한 기능은 상용화 Phase로 미룬다**(현재는 인앱 알림만).
@@ -64,13 +66,13 @@ AI 세션은 저마다 `claude/…-xxxxxx` 라는 **새 이름**을 받고 거�
 같은 문구가 `index.html` 에 다시 들어오면 깨진다. 무심코 되살릴 수 없다.
 
 ## 시험
-설치 없이 `node` 로 바로 돈다. 화면 코드를 고쳤으면 전부 돌린다(15종).
+설치 없이 `node` 로 바로 돈다. 화면 코드를 고쳤으면 전부 돌린다(16종).
 
 ```
 node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보험페일.mjs
 node test/페일교환.mjs      node test/규격읽기.mjs        node test/장부맞춤.mjs
 node test/주문체크.mjs      node test/전화칸.mjs          node test/용어집.mjs
-node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs
+node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs      node test/DB접촉면.mjs
 ```
 
 보안규칙 시험은 에뮬레이터가 필요하다 — `test/README.md` 참고
@@ -119,7 +121,7 @@ node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험
 node test/수첩읽기.mjs   node test/단계별수술.mjs   node test/보험페일.mjs
 node test/페일교환.mjs   node test/규격읽기.mjs     node test/장부맞춤.mjs
 node test/주문체크.mjs   node test/전화칸.mjs       node test/용어집.mjs
-node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs
+node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs      node test/DB접촉면.mjs
 ```
 
 - 화면을 고쳤으면 **`deslop-ko`** 도 돌린다. 기준선은 **3개 항목 4곳** —
@@ -142,7 +144,7 @@ node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험
 
 **마무리 스킬은 `mamuri`(마무리) 하나다.** `baton`·`wrap` 도 설치돼 있지만 셋 다 같은 말에
 반응해서 사람이 헷갈렸다. `마무리` 가 그 둘을 합친 보완본이고 이 프로젝트 관습
-(두 저장소 동기화·`git -C`·시험 15종·deslop-ko)까지 들고 있다. 원본 둘은 그대로 둔다.
+(두 저장소 동기화·`git -C`·시험 16종·deslop-ko)까지 들고 있다. 원본 둘은 그대로 둔다.
 
 `baton`·`wrap` 도 설치돼 있지만 셋 다 같은 말에 반응해서 사람이 헷갈렸다.
 `mamuri` 가 그 둘을 합친 보완본이다. 원본 저장소는 `mongsiljjang/skills` 다. 원본 둘은 그대로 둔다.
