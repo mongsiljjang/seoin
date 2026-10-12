@@ -2349,7 +2349,7 @@ function openVariantForm(pid, editVid, preset){
     ${v?'':`<label class="field"><span>이 수량은 어디서 왔나요?</span>
       <select id="vOrigin"><option value="in">이번에 산 것 (매입)</option><option value="open">전부터 있던 것 (이월재고)</option></select></label>
     <div class="tiny muted" style="margin:-6px 2px 12px">앱을 쓰기 전부터 선반에 있던 물건이면 <b>이월재고</b>예요. 매입에 섞이면 산 개수가 부풀어요.</div>`}
-    <label class="field"><span>LOT / 제조번호 (선택)</span><input id="vLot" value="${v?esc(v.lot||''):''}"></label>
+    <label class="field"><span>LOT / 제조번호 (선택)</span><div class="row" style="gap:6px"><input id="vLot" value="${v?esc(v.lot||''):''}" style="flex:1"><button type="button" class="btn soft" onclick="lotScan(this)" title="라벨을 찍어 LOT 읽기">📷</button></div></label>
     <div class="row"><button class="btn block" onclick="saveVariant('${pid}','${v?v.id:''}')">${v?'저장':'추가'}</button>
       <button class="btn danger" onclick="${v?`delVariant('${pid}','${v.id}')`:`delVariantByInput('${pid}')`}">삭제</button></div>`);
 }
@@ -2504,7 +2504,7 @@ function adjustVariant(pid,vid,type){
     <label class="field"><span>수량</span><input id="ivAmt" type="number" inputmode="numeric" value="1" style="font-size:22px;text-align:center;font-weight:800"></label>
     <div class="row wrap" style="margin-bottom:12px">${[1,2,5,10].map(n=>`<button class="btn xs soft" onclick="ivAmt.value=${n}">${n}</button>`).join('')}</div>
     ${catRow}
-    <label class="field"><span>LOT / 제조번호 (선택)</span><input id="ivLot" value="${esc(v.lot||'')}"></label>
+    <label class="field"><span>LOT / 제조번호 (선택)</span><div class="row" style="gap:6px"><input id="ivLot" value="${esc(v.lot||'')}" style="flex:1"><button type="button" class="btn soft" onclick="lotScan(this)" title="라벨을 찍어 LOT 읽기">📷</button></div></label>
     <button class="btn ${type==='in'?'ok':'warn'} block" onclick="doVariantAdjust('${pid}','${vid}','${type}')">${type==='in'?'입고 처리':'사용 처리'}</button>`);
 }
 function setIvCat(k){ ivCat=k; $$('#ivCat button').forEach(b=>b.classList.toggle('on',b.dataset.c===k)); }
@@ -3307,7 +3307,7 @@ function lcRenderTeeth(){
       <div class="grow" style="min-width:0">
         <input data-k="fx" list="fxList" placeholder="픽스처 규격" value="${esc(d.fx||'')}" style="margin-bottom:4px">
         <div class="row" style="gap:4px">
-          <input data-k="lot" placeholder="LOT" value="${esc(d.lot||'')}" style="flex:1.2">
+          <input data-k="lot" placeholder="LOT" value="${esc(d.lot||'')}" style="flex:1.2"><button type="button" class="btn soft xs" onclick="lotScan(this)" title="라벨을 찍어 LOT 읽기">📷</button>
           <input data-k="heal" list="hlList" placeholder="힐링" value="${esc(d.heal||'')}" style="flex:1">
         </div>
         <div class="row" style="gap:4px;margin-top:4px">
@@ -3466,6 +3466,109 @@ let noteText='';
 /* ---- 사진으로 올리기 — 서버 함수(api/scan.js)가 AI 로 읽어 수첩 줄로 돌려준다 (docs/SERVER.md 6장) --------
    사진은 올리기 전에 줄이고, 서버는 읽은 뒤 바로 버린다. 읽은 줄은 아래 수첩 확인 표로 들어가 사람이 보고 넘긴다. */
 const SCAN_MAX_SIDE=1600;
+/* 내 AI 키 — 병원이 직접 만든 키를 이 기기에만 저장한다(서버에는 저장하지 않고, 읽을 때만 함께 보낸다). 요금은 키 주인에게 간다. */
+function scanOwn(){ try{ return {prov:localStorage.getItem('scanProv')||'gemini', key:localStorage.getItem('scanKey')||''}; }catch(e){ return {prov:'gemini', key:''}; } }
+function scanOwnRender(){
+  const el=$('#scanOwnState'); if(!el) return; const o=scanOwn();
+  el.innerHTML = o.key ? '✓ 이 기기에 <b>'+(o.prov==='anthropic'?'Anthropic':'구글 Gemini')+'</b> 키가 저장돼 있어요 (끝 4자리 '+esc(o.key.slice(-4))+')' : '저장된 내 키가 없어요';
+  const sel=$('#scanProv'); if(sel) sel.value=o.prov;
+}
+function scanOwnSave(){
+  const prov=$('#scanProv').value, key=($('#scanKey').value||'').trim();
+  if(!key){ toast('키를 붙여넣어 주세요'); return; }
+  try{ localStorage.setItem('scanProv',prov); localStorage.setItem('scanKey',key); }catch(e){ toast('이 브라우저는 키를 저장할 수 없어요'); return; }
+  $('#scanKey').value=''; scanOwnRender(); noteAiState(); toast('이 기기에 내 키를 저장했어요');
+}
+function scanOwnClear(){ try{ localStorage.removeItem('scanKey'); }catch(e){} scanOwnRender(); noteAiState(); toast('내 키를 지웠어요'); }
+async function scanAvail(){                       // 사진 읽기를 쓸 수 있나 — 내 키가 있거나 서버가 켜져 있으면
+  if(DEMO || scanOwn().key) return true;
+  if(noteAiOn===null){ try{ const j=await (await fetch('/api/scan')).json(); noteAiOn=!!(j&&j.enabled); }catch(e){ noteAiOn=false; } }
+  return !!noteAiOn;
+}
+// 서버 함수 부르기 — mode: 'note'(수첩) · 'label'(상자·라벨의 LOT)
+async function scanCall(mode, file){
+  const u=(typeof firebase!=='undefined' && firebase.auth)? firebase.auth().currentUser : null;
+  if(!fdb || !u) return {status:401, ok:false, j:{error:'login'}};
+  const [idToken, image]=await Promise.all([u.getIdToken(), scanCompress(file)]);
+  const own=scanOwn(), body={image, ws:WS(), idToken, mode};
+  if(own.key){ body.userKey=own.key; body.provider=own.prov; }
+  const r=await fetch('/api/scan',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)});
+  return {status:r.status, ok:r.ok, j:await r.json().catch(()=>({}))};
+}
+function scanErr(res){                            // 실패를 사람 말로
+  const e=(res.j&&res.j.error)||'';
+  if(res.status===401) return '로그인한 기기에서만 쓸 수 있어요';
+  if(res.status===503) return 'AI 사진 읽기가 꺼져 있어요 — 내 AI 키를 넣거나 글로 붙여넣기를 쓰세요';
+  if(res.status===403) return '병원 직원으로 승인된 기기에서만 쓸 수 있어요';
+  if(res.status===429) return '오늘 사진 한도('+((res.j&&res.j.perDay)||5)+'장)를 다 썼어요 — 내 키를 넣거나 글로 붙여넣기를 쓰세요';
+  if(res.status===413) return '사진이 너무 커요 — 다시 찍어 주세요';
+  if(e==='vendor_auth') return '넣은 키가 맞지 않거나 권한이 없어요 — 키를 다시 확인하세요';
+  if(e==='vendor_quota') return 'AI 서비스의 사용 한도를 다 썼어요 — 잠시 뒤에 다시 하거나 다른 키를 쓰세요';
+  return '사진을 읽지 못했어요 — 다시 찍거나 직접 적어 주세요';
+}
+/* 제품 바코드(GS1)에서 LOT·유효기한을 꺼낸다 — (10)LOT (17)유효기한 (01)GTIN (21)일련번호. 괄호 있는 글과 없는 글(구분자 GS) 둘 다 읽는다. */
+function parseGS1(s){
+  const out={}, GS=String.fromCharCode(29); let t=String(s||'');
+  if(t.startsWith(']d2')||t.startsWith(']C1')||t.startsWith(']Q3')) t=t.slice(3);
+  const ymd=v=>{ if(!/^[0-9]{6}$/.test(v)) return ''; const y=2000+(+v.slice(0,2)), m=+v.slice(2,4); let d=+v.slice(4,6);
+    if(m<1||m>12) return ''; if(d===0) d=new Date(y,m,0).getDate(); return y+'-'+pad(m)+'-'+pad(d); };
+  const put=(ai,v)=>{ if(!v) return; if(ai==='01') out.gtin=v; else if(ai==='10' && /^[\x21-\x7e]{1,20}$/.test(v)) out.lot=v; else if(ai==='17') out.exp=ymd(v)||out.exp; else if(ai==='21') out.serial=v; };
+  if(t.includes('(')){
+    let i=0; while(i<t.length){ const a=t.indexOf('(',i); if(a<0) break; const b=t.indexOf(')',a); if(b<0) break;
+      const n=t.indexOf('(',b); put(t.slice(a+1,b), t.slice(b+1, n<0? t.length : n).trim()); if(n<0) break; i=b+1; }
+  } else {
+    const fixed={'00':18,'01':14,'02':14,'11':6,'12':6,'13':6,'15':6,'16':6,'17':6,'20':2}, vari={'10':20,'21':20,'30':8,'37':8};
+    let i=0; while(i<t.length){
+      if(t[i]===GS){ i++; continue; }
+      const ai=t.slice(i,i+2);
+      if(fixed[ai]){ put(ai, t.slice(i+2,i+2+fixed[ai])); i+=2+fixed[ai]; }
+      else if(vari[ai]){ let k=i+2; while(k<t.length && t[k]!==GS && k-(i+2)<vari[ai]) k++; put(ai, t.slice(i+2,k)); i=k; }
+      else break;
+    }
+  }
+  return out;
+}
+// 폰·브라우저의 바코드 읽기로 LOT 를 찾는다(AI 서비스 없이). 못 찾으면 null — 그때 AI 로 넘어간다.
+async function lotFromBarcode(file){
+  let raws=[];
+  if(typeof BarcodeDetector!=='undefined'){
+    let fm=['data_matrix','code_128','qr_code','code_39','ean_13']; try{ const sup=await BarcodeDetector.getSupportedFormats(); fm=fm.filter(x=>sup.includes(x)); }catch(e){}
+    if(fm.length){ const bmp=await createImageBitmap(file); raws=(await new BarcodeDetector({formats:fm}).detect(bmp)).map(c=>c.rawValue); }
+  } else {                                                  // 사파리 등 — 읽기 라이브러리를 필요할 때만 불러온다
+    await new Promise((ok,no)=>{ if(window.ZXing) return ok(); const s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js'; s.onload=ok; s.onerror=no; document.head.appendChild(s); });
+    const url=URL.createObjectURL(file);
+    try{ const r=await new ZXing.BrowserMultiFormatReader().decodeFromImageUrl(url); raws=[r.getText()]; } finally{ URL.revokeObjectURL(url); }
+  }
+  for(const raw of raws){ const g=parseGS1(raw); if(g.lot) return g; }
+  return null;
+}
+// LOT 칸 옆 📷 — 바코드 → 안 되면 AI(라벨 모드) → 그것도 안 되면 직접 적게 한다. 읽은 값은 눈으로 확인하게 알려 준다.
+function lotFill(inp, lot, exp, note){
+  inp.value=lot; inp.dispatchEvent(new Event('input',{bubbles:true})); inp.dispatchEvent(new Event('change',{bubbles:true}));
+  toast('LOT '+lot+(exp?' · 유효 '+exp:'')+(note||''));
+}
+function lotScan(btn){
+  const inp=btn.previousElementSibling; if(!inp || inp.tagName!=='INPUT') return;
+  const pick=document.createElement('input'); pick.type='file'; pick.accept='image/*'; pick.setAttribute('capture','environment');
+  pick.onchange=async()=>{
+    const f=pick.files&&pick.files[0]; if(!f) return;
+    const old=btn.textContent; btn.disabled=true; btn.textContent='…';
+    try{
+      if(DEMO){ await new Promise(r=>setTimeout(r,500)); lotFill(inp,'DEMO-2301X45','2028-06-30',' (보기용)'); return; }
+      let g=null; try{ g=await lotFromBarcode(f); }catch(e){}
+      if(g&&g.lot){ lotFill(inp,g.lot,g.exp,' (바코드)'); return; }
+      if(!(await scanAvail())){ toast('바코드를 못 읽었어요 — LOT 를 직접 적어 주세요 (AI 사진 읽기는 꺼져 있어요)'); return; }
+      const res=await scanCall('label', f);
+      if(!res.ok){ toast(scanErr(res)); return; }
+      const L=res.j.label||{};
+      if(!L.lot){ toast('LOT 를 못 읽었어요 — 라벨을 더 가까이 밝게 다시 찍어 보세요'); return; }
+      lotFill(inp,L.lot,L.exp,' (AI가 읽음 — 눈으로 확인하세요)');
+    }catch(e){ toast('LOT 를 못 읽었어요 — 직접 적어 주세요'); }
+    finally{ btn.disabled=false; btn.textContent=old; }
+  };
+  pick.click();
+}
 function scanTarget(w,h,max){ const m=Math.max(w,h); if(m<=max) return {w,h}; const k=max/m; return {w:Math.round(w*k), h:Math.round(h*k)}; }
 async function scanCompress(file){
   const bmp=await createImageBitmap(file), s=scanTarget(bmp.width,bmp.height,SCAN_MAX_SIDE);
@@ -3485,9 +3588,9 @@ function setNoteMode(m){
 }
 function noteAiState(){                           // 켜져 있는지 서버에 물어 사진 버튼을 켜거나 끈다
   const box=$('#noteScanBtn'), msg=$('#noteAiMsg'); if(!box) return;
-  const on = DEMO ? true : noteAiOn;
+  const on = (DEMO || scanOwn().key) ? true : noteAiOn;
   box.style.opacity = on===false ? '.45' : ''; box.style.pointerEvents = on===false ? 'none' : '';
-  if(msg) msg.innerHTML = on===false ? '<b style="color:var(--warn)">AI 사진 읽기가 아직 꺼져 있어요.</b> 지금은 <b>글로 붙여넣기</b>를 쓰세요(폰의 글자 복사로 사진에서 글자를 뽑을 수 있어요).' : (on===null? '' : '');
+  if(msg) msg.innerHTML = on===false ? '<b style="color:var(--warn)">AI 사진 읽기가 아직 꺼져 있어요.</b> 아래 <b>내 AI 키</b>를 넣거나, <b>글로 붙여넣기</b>를 쓰세요(폰의 글자 복사로 사진에서 글자를 뽑을 수 있어요).' : (on===null? '' : '');
 }
 function noteAiCheck(){
   if(DEMO || noteAiOn!==null){ noteAiState(); return; }
@@ -3504,6 +3607,14 @@ function openNotePaste(){
       <label class="btn soft block" id="noteScanBtn" style="margin-bottom:8px;cursor:pointer"><span id="noteScanTxt">📷 사진 고르기 · 찍기</span>
         <input type="file" accept="image/*" capture="environment" style="display:none" onchange="noteScanFile(this.files&&this.files[0]); this.value=''"></label>
       <div class="tiny muted" id="noteAiMsg" style="margin:0 2px 6px"></div>
+      <details id="scanOwnBox" style="margin:0 2px 10px"><summary class="tiny" style="cursor:pointer;font-weight:800">내 AI 키로 쓰기 (선택)</summary>
+        <div class="tiny muted" style="margin:6px 0">병원이 직접 만든 키를 쓰면 <b>요금은 그 키 주인에게</b> 가요. 키는 <b>이 기기 안에만</b> 저장되고 서버에는 저장되지 않아요(읽을 때만 함께 보냄). <b>공용 PC에는 넣지 마세요.</b></div>
+        <select id="scanProv" style="margin-bottom:6px"><option value="gemini">구글 Gemini</option><option value="anthropic">Anthropic Claude</option></select>
+        <input id="scanKey" type="password" autocomplete="off" placeholder="API 키 붙여넣기">
+        <div class="row" style="gap:6px;margin-top:6px"><button type="button" class="btn sm grow" onclick="scanOwnSave()">저장</button><button type="button" class="btn soft sm" onclick="scanOwnClear()">지우기</button></div>
+        <div class="tiny" id="scanOwnState" style="margin-top:6px"></div>
+        <div class="tiny muted" style="margin-top:6px"><b>구글 무료 키 주의</b> — 무료 등급은 보낸 내용을 구글이 서비스 개선에 쓸 수 있어요. 이름·차트번호가 보이는 사진은 <b>유료 키</b>로, 무료 키는 이름을 가린 사진으로만 쓰세요. 키는 aistudio.google.com 에서 구글 로그인으로 만들어요.</div>
+      </details>
       <div class="tiny muted" style="margin:0 2px 12px">폰이면 바로 찍고, PC면 사진 파일을 골라요. 사진은 <b>AI 서비스로 보내 글자를 읽고, 읽은 뒤 바로 버려요.</b> 저장하지 않아요.
         이름은 성과 끝 글자만 남고 가운데는 초성으로 가려져요. 읽은 결과는 아래 칸에 채워지고, 표로 먼저 보여 드려요. 바코드 라벨은 따로 찍어 주세요.</div>
     </div>
@@ -3517,7 +3628,7 @@ function openNotePaste(){
       placeholder="박소영  보험 #46 오스템 4.0*12&#10;        일반 #21덴티움 2.8*20">${esc(noteText)}</textarea>
     <div class="tiny muted" style="margin:8px 2px 12px">순서는 바뀌어도 되고, <b>이름을 비우면 윗줄과 같은 환자</b>로 봅니다. 날짜를 안 적으면 오늘로 잡고, 표에서 고칠 수 있어요.</div>
     <button class="btn block" onclick="noteRead()">읽기</button>`);
-  noteAiCheck();
+  noteAiCheck(); scanOwnRender();
 }
 // 사진에서 글자를 뽑아 붙이는 법 — AI 서비스 없이 폰의 기능을 쓴다
 function noteCopyGuideHtml(){
@@ -3544,17 +3655,10 @@ async function noteScanFile(file){
       await new Promise(r=>setTimeout(r,700));
       lines=['10/12 김ㅁ수 보험 #46 오스템 4.0*12','박ㅅ영 일반 #21 오스템 3.5*10'];
     } else {
-      const u=(typeof firebase!=='undefined' && firebase.auth)? firebase.auth().currentUser : null;
-      if(!fdb || !u){ toast('로그인한 기기에서만 쓸 수 있어요'); return; }
-      const [idToken, image]=await Promise.all([u.getIdToken(), scanCompress(file)]);
-      const r=await fetch('/api/scan',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({image, ws:WS(), idToken})});
-      const j=await r.json().catch(()=>({}));
-      if(r.status===503){ noteAiOn=false; noteAiState(); setNoteMode('text'); toast('AI 사진 읽기는 아직 꺼져 있어요 — 글로 붙여넣기를 쓰세요'); return; }
-      if(r.status===403){ toast('병원 직원으로 승인된 기기에서만 쓸 수 있어요'); return; }
-      if(r.status===429){ toast('오늘 사진 한도('+(j.perDay||5)+'장)를 다 썼어요 — 글로 붙여넣어 주세요'); return; }
-      if(r.status===413){ toast('사진이 너무 커요 — 다시 찍어 주세요'); return; }
-      if(!r.ok){ toast('사진을 읽지 못했어요 — 다시 찍거나 글로 붙여넣어 주세요'); return; }
-      lines=j.lines||[];
+      const res=await scanCall('note', file);
+      if(res.status===503){ noteAiOn=false; noteAiState(); setNoteMode('text'); }
+      if(!res.ok){ toast(scanErr(res)); return; }
+      lines=res.j.lines||[];
     }
     if(!lines.length){ toast('읽은 줄이 없어요 — 더 가까이, 밝게 다시 찍어 보세요'); return; }
     const ta=$('#noteText'); if(ta) ta.value=(ta.value.trim()? ta.value.trim()+String.fromCharCode(10) : '')+lines.join(String.fromCharCode(10));

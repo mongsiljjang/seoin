@@ -1,16 +1,24 @@
-/* 수첩 사진 판독 — 버셀 서버 함수 (docs/SERVER.md 6장)
+/* 수첩·라벨 사진 판독 — 버셀 서버 함수 (docs/SERVER.md 6장)
 
-   앱 → (이 함수) → AI 서비스. API 키는 이 함수의 환경변수에만 있고 브라우저에는 없다.
+   앱 → (이 함수) → AI 서비스.  AI 서비스는 둘 중 고른다: Google Gemini · Anthropic Claude.
+   키는 세 가지 길로 들어온다(위에서부터 먼저):
+     ① 요청에 실린 "내 키" — 병원(사용자)이 자기 키를 자기 기기에 넣어 쓴다. 이 함수는 받아서 쓰기만 하고 저장하지도 로그에 남기지도 않는다.
+     ② 서버 환경변수 GEMINI_API_KEY / ANTHROPIC_API_KEY — 운영자 키.
+   요금은 키 주인에게 청구된다. 그래서 ①을 쓰면 운영자는 요금도 키 보관도 맡지 않는다.
+
    - 사진은 읽은 뒤 바로 버린다. 저장하지 않고 로그에도 남기지 않는다(환자 이름이 찍힐 수 있다).
-   - 이름은 AI 에게 성과 마지막 글자만 남기고 가운데는 초성으로 적으라고 시키고, 여기서 한 번 더 가린다.
-   - 주민번호·전화번호처럼 보이는 숫자는 결과에서 지운다. 생년월일은 옮기지 않는다.
+   - 수첩 모드: 이름은 AI 에게 성과 마지막 글자만 남기고 가운데는 초성으로 적으라고 시키고, 여기서 한 번 더 가린다.
+     주민번호·전화번호처럼 보이는 숫자는 결과에서 지운다. 생년월일은 옮기지 않는다.
+   - 라벨 모드: 임플란트 상자·라벨에서 LOT·REF·유효기한만 읽는다(환자 정보 없음).
    - 로그인한 병원 직원만 쓴다 — 앱이 보낸 사용자 토큰으로 Firestore 의 공유 문서를 읽어 보고, 보안규칙이 허락하면 통과시킨다.
-   - 결과는 지금의 수첩 확인 표로 들어간다. 사람이 보고 넘기기 전에는 재고에 반영되지 않는다.
+   - 결과는 앱의 확인 표/칸으로 들어가고, 사람이 보고 넘기기 전에는 재고에 반영되지 않는다.
 
-   환경변수:  ANTHROPIC_API_KEY (필수) · SCAN_MODEL (기본 claude-sonnet-5-5) · FIREBASE_PROJECT_ID (기본 hospital-d0819)
-              SCAN_PER_DAY (기본 5 — 사용자별 하루 한도, 서버가 다시 뜨면 0 으로 돌아가는 임시 장치) */
+   환경변수:  GEMINI_API_KEY · ANTHROPIC_API_KEY (둘 다 선택 — 하나도 없고 요청에 키도 없으면 꺼진 것)
+              SCAN_PROVIDER (gemini | anthropic — 비우면 키가 있는 쪽, 둘 다 있으면 gemini)
+              SCAN_MODEL_GEMINI (기본 gemini-2.5-flash) · SCAN_MODEL_ANTHROPIC (기본 claude-sonnet-5-5)
+              FIREBASE_PROJECT_ID (기본 hospital-d0819) · SCAN_PER_DAY (서버 키 사용자별 하루 한도, 기본 5 — 서버가 다시 뜨면 0 으로 돌아가는 임시 장치) */
 
-const MODEL_DEFAULT = 'claude-sonnet-5-5';
+const MODEL_DEFAULTS = { gemini: 'gemini-2.5-flash', anthropic: 'claude-sonnet-5-5' };
 const PROJECT_DEFAULT = 'hospital-d0819';
 const MAX_IMAGE_B64 = 3_200_000;          // 버셀 요청 본문 한도(4.5MB) 안쪽
 const BRANDS = ['오스템', '메가젠', '네오', '디오', '덴티움', '스트라우만', '신흥', '덴티스', '메디톡스'];
@@ -45,6 +53,15 @@ const SYSTEM_PROMPT = [
   '- 수술 기록이 아닌 메모나 낙서는 건너뜁니다. 기록이 하나도 없으면 아무것도 출력하지 않습니다.'
 ].join('\n');
 
+const LABEL_PROMPT = [
+  '당신은 의료기기(치과 임플란트) 상자나 라벨 사진에서 제품 식별 정보를 읽는 도구입니다.',
+  '아래 세 줄 형식으로만 출력하세요. 다른 설명은 쓰지 않습니다. 없는 항목은 줄을 빼세요.',
+  'LOT: 로트(제조번호) — 보이는 글자와 숫자를 그대로, 대소문자와 하이픈도 그대로',
+  'REF: 제품 번호(REF, 카탈로그 번호)',
+  'EXP: 유효기한 YYYY-MM-DD',
+  '글자를 읽을 수 없으면 추측하지 말고 그 자리에 ? 를 적습니다. 환자 정보는 라벨에 없지만 있어도 옮기지 않습니다.'
+].join('\n');
+
 // 모델이 낸 글을 수첩 줄로 정리한다 — 장식을 떼고, 이름을 다시 가리고, 개인정보처럼 보이는 숫자를 지운다
 function cleanLines(text) {
   const out = [];
@@ -63,6 +80,21 @@ function cleanLines(text) {
     out.push(toks.join(' '));
   });
   return out;
+}
+
+// 라벨 읽기 결과 — LOT·REF·EXP 한 줄씩. 모양이 이상한 값은 버린다(? 가 섞였으면 못 읽은 것이다)
+function parseLabel(text) {
+  const r = {};
+  String(text || '').split(/\r?\n/).forEach(raw => {
+    const m = /^\s*(LOT|REF|EXP)\s*[:：]\s*(.+?)\s*$/i.exec(raw.replace(/[`*]/g, ''));
+    if (!m) return;
+    const k = m[1].toUpperCase(), v = m[2].trim();
+    if (v.includes('?')) return;
+    if (k === 'LOT' && /^[A-Za-z0-9][A-Za-z0-9._\/-]{2,29}$/.test(v)) r.lot = v;
+    else if (k === 'REF' && /^[A-Za-z0-9][A-Za-z0-9._\/ -]{1,39}$/.test(v)) r.ref = v;
+    else if (k === 'EXP' && /^\d{4}-\d{2}-\d{2}$/.test(v)) r.exp = v;
+  });
+  return r;
 }
 
 function parseDataUrl(s) {
@@ -89,43 +121,97 @@ function uidOf(idToken) {                  // 한도 칸 이름에만 쓴다(검
   try { return JSON.parse(Buffer.from(String(idToken).split('.')[1], 'base64').toString('utf8')).user_id || 'x'; } catch (e) { return 'x'; }
 }
 
+// 어떤 AI 서비스를 어떤 키로 부를지 — 요청에 실린 내 키가 먼저, 없으면 서버 키
+function pickProvider(userProv, userKey, env) {
+  if (userKey) {
+    const p = userProv === 'anthropic' ? 'anthropic' : 'gemini';
+    return { provider: p, key: String(userKey).trim(), own: true };
+  }
+  const want = env.SCAN_PROVIDER;
+  const g = env.GEMINI_API_KEY, a = env.ANTHROPIC_API_KEY;
+  if (want === 'anthropic' && a) return { provider: 'anthropic', key: a, own: false };
+  if (want === 'gemini' && g) return { provider: 'gemini', key: g, own: false };
+  if (g) return { provider: 'gemini', key: g, own: false };
+  if (a) return { provider: 'anthropic', key: a, own: false };
+  return null;
+}
+
+async function askAI(pick, img, system, userText, env) {
+  if (pick.provider === 'gemini') {
+    const model = env.SCAN_MODEL_GEMINI || MODEL_DEFAULTS.gemini;
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': pick.key },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ inlineData: { mimeType: img.type, data: img.data } }, { text: userText }] }],
+        generationConfig: { maxOutputTokens: 1500, temperature: 0, thinkingConfig: { thinkingBudget: 0 } }
+      })
+    });
+    if (!r.ok) throw Object.assign(new Error('vendor'), { status: r.status });
+    const j = await r.json();
+    const parts = ((j.candidates || [])[0] || {}).content;
+    return ((parts && parts.parts) || []).map(p => p.text || '').join('\n');
+  }
+  const model = env.SCAN_MODEL_ANTHROPIC || MODEL_DEFAULTS.anthropic;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': pick.key, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model, max_tokens: 1500, system,
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: img.type, data: img.data } },
+        { type: 'text', text: userText }] }]
+    })
+  });
+  if (!r.ok) throw Object.assign(new Error('vendor'), { status: r.status });
+  const j = await r.json();
+  return (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
+}
+
 async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (req.method === 'GET') return res.status(200).json({ enabled: !!key });      // 앱이 사진 버튼을 켤지 정하려고 묻는다 — 키는 안 알려 준다
+  const env = process.env;
+  if (req.method === 'GET') {                 // 앱이 사진 버튼을 켤지 정하려고 묻는다 — 키는 알려 주지 않는다
+    const p = pickProvider('', '', env);
+    return res.status(200).json({ enabled: !!p, provider: p ? p.provider : null });
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
-  if (!key) return res.status(503).json({ error: 'not_configured' });
   let b = req.body; if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = null; } }
   if (!b) return res.status(400).json({ error: 'bad_request' });
+  const pick = pickProvider(b.provider, b.userKey, env);
+  if (!pick) return res.status(503).json({ error: 'not_configured' });
   const img = parseDataUrl(b.image);
   if (!img) return res.status(400).json({ error: 'bad_image' });
   if (img.data.length > MAX_IMAGE_B64) return res.status(413).json({ error: 'too_big' });
-  const project = process.env.FIREBASE_PROJECT_ID || PROJECT_DEFAULT;
+  const project = env.FIREBASE_PROJECT_ID || PROJECT_DEFAULT;
   if (!(await isMember(b.idToken, b.ws, project))) return res.status(403).json({ error: 'not_member' });
-  const perDay = Math.max(1, parseInt(process.env.SCAN_PER_DAY || '5', 10) || 5);
-  if (overLimit(uidOf(b.idToken), perDay)) return res.status(429).json({ error: 'daily_limit', perDay });
-  let r;
+  if (!pick.own) {                            // 운영자 키는 한도를 건다. 내 키는 그 키 주인이 알아서 쓴다
+    const perDay = Math.max(1, parseInt(env.SCAN_PER_DAY || '5', 10) || 5);
+    if (overLimit(uidOf(b.idToken), perDay)) return res.status(429).json({ error: 'daily_limit', perDay });
+  }
+  const label = b.mode === 'label';
+  let text;
   try {
-    r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: process.env.SCAN_MODEL || MODEL_DEFAULT, max_tokens: 1500, system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: img.type, data: img.data } },
-          { type: 'text', text: '이 수첩 사진을 규칙대로 옮겨 적어 주세요.' }] }]
-      })
-    });
-  } catch (e) { return res.status(502).json({ error: 'vendor_unreachable' }); }
-  if (!r.ok) return res.status(502).json({ error: 'vendor_error', status: r.status });
-  let j; try { j = await r.json(); } catch (e) { return res.status(502).json({ error: 'vendor_bad_json' }); }
-  const text = (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
-  return res.status(200).json({ lines: cleanLines(text) });
+    text = await askAI(pick, img, label ? LABEL_PROMPT : SYSTEM_PROMPT,
+      label ? '이 사진에서 LOT, REF, 유효기한을 읽어 주세요.' : '이 수첩 사진을 규칙대로 옮겨 적어 주세요.', env);
+  } catch (e) {
+    if (e && e.status) {
+      if (e.status === 400 || e.status === 401 || e.status === 403) return res.status(502).json({ error: 'vendor_auth', status: e.status, provider: pick.provider });
+      if (e.status === 429) return res.status(502).json({ error: 'vendor_quota', status: 429, provider: pick.provider });
+      return res.status(502).json({ error: 'vendor_error', status: e.status, provider: pick.provider });
+    }
+    return res.status(502).json({ error: 'vendor_unreachable' });
+  }
+  return res.status(200).json(label ? { label: parseLabel(text), provider: pick.provider } : { lines: cleanLines(text), provider: pick.provider });
 }
 
 module.exports = handler;
 module.exports.cleanLines = cleanLines;
+module.exports.parseLabel = parseLabel;
 module.exports.maskName = maskName;
 module.exports.parseDataUrl = parseDataUrl;
+module.exports.pickProvider = pickProvider;
 module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
+module.exports.LABEL_PROMPT = LABEL_PROMPT;
 module.exports._resetLimit = () => hits.clear();
