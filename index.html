@@ -1980,7 +1980,7 @@ function impTree(list, brand){
 function impAddGuideHtml(){
   return `<b>회사 추가</b> — <b>＋ 회사</b> 를 누르고 회사 이름·부품 종류(픽스처·어버트먼트·힐링 어버트먼트 등)·제품 라인을 적어 추가하세요. 이어서 규격을 넣는 창이 열려요.
     <br><br><b>같은 회사에 힐링·어버트먼트 더하기</b> — 회사 이름을 <b>똑같이</b> 적으면 한 회사 아래로 묶여요. 오스템과 오스템임플란트처럼 다르게 쓰면 따로 생깁니다. 부품 줄 오른쪽 ＋ 를 누르면 회사 이름과 부품이 미리 채워져요.
-    <br><br><b>선택</b> 칸이 눌려 있을 때는 회사 줄 없이 첫 제품의 규격 표만 보여요. 회사를 누르면 그 회사의 부품·제품과 규격 표가 나오고, 부품 줄을 누르면 접고 펼 수 있어요.<br><br><b>기본 회사</b> 오스템·메가젠·네오·디오는 제품이 없어도 맨 앞에 늘 보여요. 그 밖의 회사는 제품을 하나 추가하면 나타나고, 그 회사 제품을 모두 지우면 사라집니다.`;
+    <br><br><b>선택</b> 칸이 눌려 있을 때는 제품 이름·재고 요약 없이 첫 제품의 규격 표만 보여요. 회사를 누르면 그 회사의 부품·제품과 규격 표가 나오고, 부품 줄을 누르면 접고 펼 수 있어요.<br><br><b>기본 회사</b> 오스템·메가젠·네오·디오는 제품이 없어도 맨 앞에 늘 보여요. 그 밖의 회사는 제품을 하나 추가하면 나타나고, 그 회사 제품을 모두 지우면 사라집니다.`;
 }
 function selectBrand(b){
   currentBrand=b||null; currentImplantId=null;                 // 비우면 '선택' — 트리 없이 첫 제품 규격 표. 회사면 그리기에서 그 회사의 첫 제품을 잡는다
@@ -2015,7 +2015,7 @@ function renderImplant(){
   list.forEach(p=>p.variants.forEach(v=>{ total+=(+v.qty||0); if(v.qty===0)zero++; else if(v.qty<=(+v.minQty||0))low++; }));
   const head=`<div class="spread" style="margin:2px 2px 10px"><h2 class="sec" style="margin:0">🦷 임플란트</h2>
     <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div>`;
-  // 처음에는 '선택' 이 눌려 있어 트리 없이 첫 제품의 규격 표만 보인다. 회사를 누르면 예전 그대로 그 회사의 트리와 첫 제품 규격 표가 보인다.
+  // 처음에는 '선택' 이 눌려 있어 트리와 제품 머리·재고 요약 없이 첫 제품의 규격 표만 보인다. 회사를 누르면 예전 그대로 그 회사의 트리와 첫 제품 규격 표가 보인다.
   // 다른 화면에서 제품을 지정해 들어오면 그 제품의 회사로 맞춘다.
   let cur=currentImplantId? implantById(currentImplantId):null;
   if(!cur) currentImplantId=null;
@@ -2027,11 +2027,11 @@ function renderImplant(){
     <div class="stat"><div class="n">${total}</div><div class="l">전체 수량</div></div>
     <div class="stat"><div class="n" style="color:var(--warn)">${low}</div><div class="l">부족 규격</div></div>
     <div class="stat"><div class="n" style="color:var(--danger)">${zero}</div><div class="l">품절 규격</div></div></div>`;
-  const cardBox=p=>'<div id="impCard">'+implantCard(p)+'</div>';   // '선택' 일 때는 트리 없이 첫 제품의 규격 표만 보인다
+  const cardBox=(p,bare)=>'<div id="impCard">'+implantCard(p,bare)+'</div>';   // '선택' 일 때는 트리도, 제품 머리·재고 요약도 없이 첫 제품의 규격 표만 보인다
   const chips=`<div class="chips"><button class="chip ${!currentBrand?'on':''}" onclick="selectBrand('')">선택</button>${brands.map(b=>{ const n=list.filter(p=>String(p.brand||'').trim()===b).length;
       return `<button class="chip ${b===currentBrand?'on':''}" onclick="selectBrand(${jarg(b)})">${esc(b)}${n?'':' <span class="tiny" style="opacity:.6">없음</span>'}</button>`; }).join('')}
     <button class="chip" onclick="openImplantForm('','')">＋ 회사</button></div>`;
-  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0]) : ''));
+  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0], true) : ''));
   refreshBell();
 }
 // 그 제품이 들어 있는 부품 줄을 펼친다 — 고를 때만 한다(그릴 때마다 열면 접을 수가 없다)
@@ -2041,7 +2041,8 @@ function selectImplant(id){
   // 규격 표는 트리 아래에 그려진다 — 눌렀는데 아무 일도 없는 것처럼 보이지 않게 그 자리로 데려간다
   const el=document.getElementById('impCard'); if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'start'});
 }
-function implantCard(p){
+// bare=true 면 제품 이름 머리와 재고 대사 요약(누적 매입·사용·현재고…)을 빼고 규격 표와 버튼만 그린다 — '선택' 칸에서 쓴다
+function implantCard(p, bare){
   const meta=[p.part||'', p.vendor?esc(p.vendor):'', p.price?won(p.price):''].filter(Boolean).join(' · ');
   const head=`<div class="spread"><div><div class="t" style="font-weight:900;font-size:16px">${esc(p.brand)} ${esc(p.line||'')}</div>
     <div class="d tiny muted">${meta}</div></div>
@@ -2073,7 +2074,7 @@ function implantCard(p){
   const stk = p.variants.length ? `<button class="btn soft sm grow" onclick="openStocktake('${p.id}')">📋 재고 확인</button>` : '';
   // 바꿀 페일이 생겼을 때만 문을 낸다 — 늘 떠 있으면 눈에 안 들어온다
   const fx = (pFailOpen(p)||pFailWait(p)) ? `<button class="btn soft sm grow" onclick="openFailExchange()">🔄 페일 교환${pFailOpen(p)?` <b>${pFailOpen(p)}</b>`:''}</button>` : '';
-  return `<div class="card">${head}${recon}<div class="divider"></div>${body}
+  return `<div class="card">${bare? '' : head+recon+'<div class="divider"></div>'}${body}
     <div class="btnrow" style="margin-top:12px"><button class="btn sm grow" onclick="openVariantForm('${p.id}')">＋ 규격 추가</button>${del}${bulk}</div>
     ${stk||fx?`<div class="btnrow" style="margin-top:8px">${stk}${fx}</div>`:''}</div>`;
 }
