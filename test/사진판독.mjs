@@ -70,15 +70,23 @@ t('가린 뒤 원래 가운데 글자(민·소)가 줄에 남지 않는다', !li
   t('하루 한도(여기서는 3장)를 넘으면 429', last.code===429 && last.body.error==='daily_limit'); }
 { scan._resetLimit(); const r=await call({image:PNG, ws:'hosp1', idToken:tokenFor('u3')}, {ANTHROPIC_API_KEY:'k'}, async url=>String(url).includes('firestore')? {status:200,ok:true} : {ok:false,status:500});
   t('AI 서비스가 실패하면 502', r.code===502 && r.body.error==='vendor_error'); }
-{ const res=mkRes(); await scan({method:'GET'}, res); t('POST 가 아니면 405', res.code===405); }
+{ const res=mkRes(); await scan({method:'PUT'}, res); t('POST·GET 이 아니면 405', res.code===405); }
+{ const saved=process.env.ANTHROPIC_API_KEY; process.env.ANTHROPIC_API_KEY=''; const r1=mkRes(); await scan({method:'GET'}, r1); process.env.ANTHROPIC_API_KEY='k'; const r2=mkRes(); await scan({method:'GET'}, r2); if(saved===undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY=saved;
+  t('GET 은 켜져 있는지만 알려 준다(키가 없으면 false, 있으면 true, 키 값은 안 나온다)', r1.body.enabled===false && r2.body.enabled===true && !JSON.stringify(r2.body).includes('k"')); }
 t('서버 함수는 사진·글자를 로그에 남기지 않는다(console 사용 없음)', !/console\./.test(apiSrc));
-{ const r=mkRes(); await scan({method:'GET'}, r); t('응답은 캐시하지 않는다(no-store)', r.headers['Cache-Control']==='no-store'); }
+{ const r=mkRes(); await scan({method:'PUT'}, r); t('응답은 캐시하지 않는다(no-store)', r.headers['Cache-Control']==='no-store'); }
 
 // 4) 앱 쪽 연결
 t('수첩 화면에 사진 올리기 버튼과 안내(AI 로 읽음 · 저장 안 함 · 이름 가림)가 있다', js.includes('noteScanFile(') && js.includes('📷 사진으로 올리기') && js.includes('저장하지 않아요') && js.includes('AI'));
 t('결과는 수첩 확인 표(noteRead)로 넘기고 바로 재고에 넣지 않는다', (()=>{ const s=js.slice(js.indexOf('async function noteScanFile'), js.indexOf('function noteSet(')); return s.includes('noteRead()') && !s.includes('noteSaveAll'); })());
 t('서버가 켜지지 않았을 때(503)·직원 아님(403)·한도(429) 안내가 있다', ['not_configured','not_member','daily_limit'].every(k=>js.includes(k)) || (js.includes('503') && js.includes('403') && js.includes('429')));
 t('사진은 올리기 전에 줄인다(긴 변 1600, JPEG)', (()=>{ const f=new Function(grab('scanTarget')+'; return scanTarget;')(); const a=f(4000,3000,1600), b=f(1000,800,1600), c=f(3000,4000,1600); return a.w===1600 && a.h===1200 && b.w===1000 && b.h===800 && c.w===1200 && c.h===1600; })());
+
+// 두 길을 고를 수 있다 — 글로 붙여넣기 / 사진으로 올리기
+t('수첩 화면 맨 위에서 글로 붙여넣기와 사진으로 올리기를 고를 수 있다', js.includes('id="noteSeg"') && js.includes("setNoteMode('text')") && js.includes("setNoteMode('photo')") && js.includes('function setNoteMode(m)'));
+t('고른 길을 기억한다(다음에 열면 그대로)', js.includes("localStorage.setItem('noteMode',m)") && js.includes("localStorage.getItem('noteMode')"));
+t('AI 사진 읽기가 꺼져 있으면(서버에 키가 없으면) 사진 버튼을 끄고 글로 붙여넣기를 안내한다', js.includes("fetch('/api/scan')") && js.includes('AI 사진 읽기가 아직 꺼져 있어요') && js.includes("setNoteMode('text')"));
+t('글 붙여넣기 쪽에 사진에서 글자 복사하는 법(아이폰·안드로이드·PC) 안내(i)가 있다', (()=>{ const f=new Function(grab('noteCopyGuideHtml')+'; return noteCopyGuideHtml();')(); const x=f.replace(/<[^>]+>/g,' '); return ['아이폰','안드로이드','PC','복사','붙여넣기','AI 서비스 없이'].every(s=>x.includes(s)); })());
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);

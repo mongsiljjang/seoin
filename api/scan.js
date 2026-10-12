@@ -91,8 +91,9 @@ function uidOf(idToken) {                  // 한도 칸 이름에만 쓴다(검
 
 async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
   const key = process.env.ANTHROPIC_API_KEY;
+  if (req.method === 'GET') return res.status(200).json({ enabled: !!key });      // 앱이 사진 버튼을 켤지 정하려고 묻는다 — 키는 안 알려 준다
+  if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
   if (!key) return res.status(503).json({ error: 'not_configured' });
   let b = req.body; if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = null; } }
   if (!b) return res.status(400).json({ error: 'bad_request' });

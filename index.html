@@ -3473,19 +3473,60 @@ async function scanCompress(file){
   c.getContext('2d').drawImage(bmp,0,0,s.w,s.h);
   return c.toDataURL('image/jpeg',0.82);
 }
+/* 수첩을 옮기는 길은 둘이다 — 둘 다 열어 두고 고르게 한다.
+   ① 글로 붙여넣기: 늘 된다. 폰의 글자 복사(텍스트 확대·렌즈)로 사진에서 글자를 뽑아 붙여도 된다(AI 서비스 없이).
+   ② 사진으로 올리기: AI 서비스가 읽는다. 서버에 키가 있어야 켜진다(없으면 꺼진 것으로 보여 준다). */
+let noteMode='text', noteAiOn=null;               // noteAiOn: null 확인 전 · true · false
+function noteModeLoad(){ try{ const m=localStorage.getItem('noteMode'); if(m==='photo'||m==='text') noteMode=m; }catch(e){} }
+function setNoteMode(m){
+  noteMode=m; try{ localStorage.setItem('noteMode',m); }catch(e){}
+  const p=$('#notePhotoBox'), t=$('#noteTextHelp'); if(p) p.style.display=m==='photo'?'':'none'; if(t) t.style.display=m==='text'?'':'none';
+  $$('#noteSeg button').forEach(b=>b.classList.toggle('on', b.dataset.m===m));
+}
+function noteAiState(){                           // 켜져 있는지 서버에 물어 사진 버튼을 켜거나 끈다
+  const box=$('#noteScanBtn'), msg=$('#noteAiMsg'); if(!box) return;
+  const on = DEMO ? true : noteAiOn;
+  box.style.opacity = on===false ? '.45' : ''; box.style.pointerEvents = on===false ? 'none' : '';
+  if(msg) msg.innerHTML = on===false ? '<b style="color:var(--warn)">AI 사진 읽기가 아직 꺼져 있어요.</b> 지금은 <b>글로 붙여넣기</b>를 쓰세요(폰의 글자 복사로 사진에서 글자를 뽑을 수 있어요).' : (on===null? '' : '');
+}
+function noteAiCheck(){
+  if(DEMO || noteAiOn!==null){ noteAiState(); return; }
+  fetch('/api/scan').then(r=>r.json()).then(j=>{ noteAiOn=!!(j&&j.enabled); noteAiState(); }).catch(()=>{ noteAiOn=false; noteAiState(); });
+}
 function openNotePaste(){
+  noteModeLoad();
   modal(`<h3>📝 수첩 옮겨 적기</h3>
-    <label class="btn soft block" id="noteScanBtn" style="margin-bottom:8px;cursor:pointer"><span id="noteScanTxt">📷 사진으로 올리기</span>
-      <input type="file" accept="image/*" capture="environment" style="display:none" onchange="noteScanFile(this.files&&this.files[0]); this.value=''"></label>
-    <div class="tiny muted" style="margin:0 2px 12px">사진은 <b>AI 서비스로 보내 글자를 읽고, 읽은 뒤 바로 버려요.</b> 저장하지 않아요. 이름은 성과 끝 글자만 남고 가운데는 초성으로 가려져요.
-      읽은 결과는 아래 표로 먼저 보여 드리고, 눈으로 확인한 뒤에 넣어요. 바코드 라벨은 따로 찍어 주세요.</div>
-    <div class="tiny muted" style="margin:-4px 2px 10px">수첩에 적은 대로 한 줄에 하나씩 넣으세요.
-      순서는 바뀌어도 되고, <b>이름을 비우면 윗줄과 같은 환자</b>로 봅니다.</div>
+    <div class="seg" id="noteSeg" style="margin-bottom:12px">
+      <button type="button" data-m="text" class="${noteMode==='text'?'on':''}" onclick="setNoteMode('text')">✍️ 글로 붙여넣기</button>
+      <button type="button" data-m="photo" class="${noteMode==='photo'?'on':''}" onclick="setNoteMode('photo')">📷 사진으로 올리기</button></div>
+
+    <div id="notePhotoBox" style="display:${noteMode==='photo'?'':'none'}">
+      <label class="btn soft block" id="noteScanBtn" style="margin-bottom:8px;cursor:pointer"><span id="noteScanTxt">📷 사진 고르기 · 찍기</span>
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="noteScanFile(this.files&&this.files[0]); this.value=''"></label>
+      <div class="tiny muted" id="noteAiMsg" style="margin:0 2px 6px"></div>
+      <div class="tiny muted" style="margin:0 2px 12px">폰이면 바로 찍고, PC면 사진 파일을 골라요. 사진은 <b>AI 서비스로 보내 글자를 읽고, 읽은 뒤 바로 버려요.</b> 저장하지 않아요.
+        이름은 성과 끝 글자만 남고 가운데는 초성으로 가려져요. 읽은 결과는 아래 칸에 채워지고, 표로 먼저 보여 드려요. 바코드 라벨은 따로 찍어 주세요.</div>
+    </div>
+
+    <div id="noteTextHelp" style="display:${noteMode==='text'?'':'none'}">
+      <div class="sechead" style="margin:0 2px 8px"><span>수첩에 적은 대로 한 줄에 하나씩</span>${tipHtml(noteCopyGuideHtml())}</div>
+    </div>
+
     <textarea id="noteText" rows="7" spellcheck="false"
       style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:15px;line-height:1.7;resize:vertical"
       placeholder="박소영  보험 #46 오스템 4.0*12&#10;        일반 #21덴티움 2.8*20">${esc(noteText)}</textarea>
-    <div class="tiny muted" style="margin:8px 2px 12px">날짜를 안 적으면 오늘로 잡고, 표에서 고칠 수 있어요.</div>
+    <div class="tiny muted" style="margin:8px 2px 12px">순서는 바뀌어도 되고, <b>이름을 비우면 윗줄과 같은 환자</b>로 봅니다. 날짜를 안 적으면 오늘로 잡고, 표에서 고칠 수 있어요.</div>
     <button class="btn block" onclick="noteRead()">읽기</button>`);
+  noteAiCheck();
+}
+// 사진에서 글자를 뽑아 붙이는 법 — AI 서비스 없이 폰의 기능을 쓴다
+function noteCopyGuideHtml(){
+  return `<b>사진에서 글자를 복사해 붙이는 법 (AI 서비스 없이)</b>
+    <br><br><b>아이폰</b> — 사진 앱에서 수첩 사진을 열고 글자 부분을 <b>길게 눌러</b> 선택(텍스트 확대)한 뒤 <b>복사</b>, 여기에 붙여넣기.
+    <br><b>안드로이드</b> — 사진 앱이나 Google 렌즈에서 <b>텍스트</b>를 고른 뒤 <b>모두 복사</b>, 여기에 붙여넣기.
+    <br><b>PC</b> — 폰에서 복사한 글을 카톡 <b>나에게 보내기</b>로 보내 PC에서 복사해 붙이거나, 폰으로 옮겨 적으세요.
+    <br><br>손글씨는 폰이 틀리게 읽을 수 있어요(숫자·규격 4.0*12 는 특히). <b>읽기</b>를 누르면 나오는 표에서 눈으로 확인하고 고치세요.
+    이름은 넣어도 저장될 때 성과 끝 글자만 남고 가운데는 초성으로 가려져요.`;
 }
 function noteRead(){
   noteText=$('#noteText').value;
@@ -3508,7 +3549,7 @@ async function noteScanFile(file){
       const [idToken, image]=await Promise.all([u.getIdToken(), scanCompress(file)]);
       const r=await fetch('/api/scan',{method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({image, ws:WS(), idToken})});
       const j=await r.json().catch(()=>({}));
-      if(r.status===503){ toast('사진 읽기는 아직 켜지지 않았어요 — 수첩 글을 붙여넣어 주세요'); return; }
+      if(r.status===503){ noteAiOn=false; noteAiState(); setNoteMode('text'); toast('AI 사진 읽기는 아직 꺼져 있어요 — 글로 붙여넣기를 쓰세요'); return; }
       if(r.status===403){ toast('병원 직원으로 승인된 기기에서만 쓸 수 있어요'); return; }
       if(r.status===429){ toast('오늘 사진 한도('+(j.perDay||5)+'장)를 다 썼어요 — 글로 붙여넣어 주세요'); return; }
       if(r.status===413){ toast('사진이 너무 커요 — 다시 찍어 주세요'); return; }
@@ -3519,7 +3560,7 @@ async function noteScanFile(file){
     const ta=$('#noteText'); if(ta) ta.value=(ta.value.trim()? ta.value.trim()+String.fromCharCode(10) : '')+lines.join(String.fromCharCode(10));
     noteRead();                                             // 바로 넣지 않고 확인 표를 먼저 보여 준다
   }catch(e){ toast('사진을 읽지 못했어요 — 다시 찍거나 글로 붙여넣어 주세요'); }
-  finally{ noteScanBusy=false; const t2=$('#noteScanTxt'); if(t2) t2.textContent='📷 사진으로 올리기'; }
+  finally{ noteScanBusy=false; const t2=$('#noteScanTxt'); if(t2) t2.textContent='📷 사진 고르기 · 찍기'; }
 }
 function noteSet(i,k,v){
   if(k==='teeth') noteRows[i].teeth=String(v).split(/[,#\s]+/).filter(Boolean);
