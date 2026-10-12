@@ -2688,7 +2688,49 @@ function openPurchase(){
     ${noXlsx?`<div class="tiny" style="color:var(--warn);margin-top:10px">⚠️ 지금은 CSV만 읽을 수 있어요(엑셀 라이브러리 미로딩).</div>`:''}
     <button class="btn soft block" style="margin-top:10px" onclick="openVendors(openPurchase)">🏢 거래처 · 영업사원 연락처</button>
     <div class="divider"></div>
-    <div class="tiny muted">📷 종이 명세서는 <b>사진을 찍어 Claude 대화창에 보내주세요.</b> 올릴 수 있는 파일로 만들어 드려요.</div>`);
+    <div class="sechead" style="margin:0 2px 8px"><span>📷 종이 명세서는 사진으로</span></div>
+    <label class="btn soft block" style="cursor:pointer"><span id="billScanTxt">📷 사진 찍기 · 고르기</span>
+      <input type="file" accept="image/*" style="display:none" onchange="billScanFile(this.files[0]); this.value=''"></label>
+    <div class="tiny muted" style="margin:6px 2px 10px">사진은 <b>AI 서비스로 보내 표로 읽고, 읽은 뒤 바로 버려요.</b> 읽은 결과는 확인 화면에서 먼저 보여 드려요. 줄이 많으면 <b>나눠서</b> 찍으면 더 정확해요.
+      AI 읽기가 꺼져 있으면(수첩 화면의 <b>내 AI 키</b>와 같은 설정을 써요) 아래 <b>글로 붙여넣기</b>를 쓰세요.</div>
+    <div class="sechead" style="margin:0 2px 8px"><span>✍️ 글로 붙여넣기</span>${tipHtml(billPasteGuideHtml())}</div>
+    <textarea id="billText" rows="5" spellcheck="false" style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:14px;line-height:1.6;resize:vertical"
+      placeholder="품목명, 규격, 수량, 단가&#10;오스템 TS III, 4.0*10, 5, 120000"></textarea>
+    <button class="btn block" style="margin-top:8px" onclick="billPaste()">읽기</button>`);
+}
+// 엑셀에서 복사하면 탭으로, 손으로 치면 쉼표로 나뉜다 — 어느 쪽이든 칸으로 읽는다
+function billPaste(){
+  const t=($('#billText')||{}).value||'';
+  const rows=t.split(/\r?\n/).map(l=>l.includes('\t')? l.split('\t') : l.split(/\s*[,|]\s*/));
+  const lines=purchaseRows(rows);
+  if(!lines.length){ toast('읽을 수 있는 품목이 없어요 — 칸을 쉼표로 나눠 적어 주세요'); return; }
+  previewPurchase(lines);
+}
+function billPasteGuideHtml(){
+  return `<b>한 줄에 품목 하나, 칸은 쉼표(,)나 탭으로 나눕니다.</b>
+    <br>첫 줄에 <b>품목명, 규격, 수량, 단가, 거래처, 일자, LOT</b> 같은 열 제목을 적으면 순서가 달라도 찾아 읽고,
+    제목이 없으면 <b>품목명, 규격, 수량, 단가, 거래처, 일자, LOT</b> 순서로 읽어요.
+    <br><br>엑셀·구글 시트에서 칸을 복사해 붙이면 그대로 돼요. 종이 명세서를 폰의 글자 복사로 뽑으면 칸이 안 나뉘어 틀리기 쉬우니, 그때는 <b>사진 읽기</b>를 쓰거나 쉼표를 넣어 고쳐 주세요.
+    <br><br>읽은 뒤에는 <b>확인 화면</b>에서 품목·수량을 눈으로 보고 넘기세요. 합계·부가세 줄은 건너뜁니다.`;
+}
+let billScanBusy=false;
+async function billScanFile(file){
+  if(!file || billScanBusy) return;
+  billScanBusy=true; const txt=$('#billScanTxt'); if(txt) txt.textContent='읽는 중… (10~20초)';
+  try{
+    let rows;
+    if(DEMO){ await new Promise(r=>setTimeout(r,700));
+      rows=[['품목명','규격','수량','단가','거래처','일자','LOT'],['오스템 TS III','4.0*10','5','120000','오스템임플란트','','A12345']];
+    } else {
+      const res=await scanCall('bill', file);
+      if(!res.ok){ toast(scanErr(res)); return; }
+      rows=res.j.rows||[];
+    }
+    const lines=purchaseRows(rows);
+    if(!lines.length){ toast('읽은 품목이 없어요 — 더 가까이, 밝게 다시 찍어 보세요'); return; }
+    previewPurchase(lines);                                 // 바로 넣지 않고 확인 화면을 먼저 보여 준다
+  }catch(e){ toast('사진을 읽지 못했어요 — 다시 찍거나 글로 붙여넣어 주세요'); }
+  finally{ billScanBusy=false; const t2=$('#billScanTxt'); if(t2) t2.textContent='📷 사진 찍기 · 고르기'; }
 }
 function handlePurchase(ev){
   const f=ev.target.files[0]; if(!f) return;

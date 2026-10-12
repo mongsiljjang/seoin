@@ -59,6 +59,40 @@ const LABEL_PROMPT = [
   '글자를 읽을 수 없으면 추측하지 말고 그 자리에 ? 를 적습니다. 환자 정보는 라벨에 없지만 있어도 옮기지 않습니다.'
 ].join('\n');
 
+const BILL_PROMPT = [
+  '당신은 치과 재료 거래명세서(납품서·거래원장) 사진을 표로 옮겨 적는 도구입니다.',
+  '사진의 품목 줄을 한 줄에 하나씩, 칸을 | 로 나눠 아래 순서로만 출력하세요. 설명, 머리말, 마크다운은 쓰지 않습니다.',
+  '형식:  품목명 | 규격 | 수량 | 단가 | 거래처 | 일자 | LOT',
+  '예:  오스템 TS III | 4.0*10 | 5 | 120000 | 오스템임플란트 | 2026-10-12 | A12345',
+  '규칙:',
+  '- 거래처와 일자는 명세서 머리에 한 번만 있어도 모든 줄에 같은 값을 적습니다.',
+  '- 수량과 단가는 숫자만 적습니다(쉼표·원 표시 없이). 없는 칸은 비워 둡니다(| 는 남깁니다).',
+  '- 합계·소계·부가세 줄은 쓰지 않습니다.',
+  '- 글자를 읽을 수 없으면 추측하지 말고 그 자리에 ? 를 적습니다.',
+  '- 환자 이름·전화번호·주민번호가 사진에 있어도 옮기지 않습니다. 품목 줄이 하나도 없으면 아무것도 출력하지 않습니다.'
+].join('\n');
+
+// 명세서 읽기 결과 — | 로 나뉜 줄을 칸 배열로 바꾼다. 앱의 purchaseRows 가 읽는 머리줄을 앞에 붙인다.
+const BILL_HEAD = ['품목명', '규격', '수량', '단가', '거래처', '일자', 'LOT'];
+function parseBill(text) {
+  const rows = [BILL_HEAD];
+  String(text || '').split(/\r?\n/).forEach(raw => {
+    const line = raw.replace(/`|\*\*/g, '').trim();                              // 규격의 * (4.0*10)은 살린다
+    if (!line || line.length > 240 || !line.includes('|')) return;
+    let c = line.split('|').map(x => x.trim());
+    if (c[0] === '') c.shift();
+    if (c.length && c[c.length - 1] === '') c.pop();
+    if (!c[0] || /^[-: ]+$/.test(c[0]) || c[0] === '품목명') return;           // 표 구분선·머리줄은 버린다
+    if (/합\s*계|소\s*계|총\s*계|부가세/.test(c[0])) return;
+    while (c.length < 7) c.push('');
+    c = c.slice(0, 7).map(x => x.replace(/\d{6}\s*-\s*[1-4]\d{6}/g, '').replace(/01[016789]\s*-?\s*\d{3,4}\s*-?\s*\d{4}/g, '').trim());
+    c[2] = c[2].replace(/[^\d]/g, '');                                          // 수량은 숫자만
+    c[3] = c[3].replace(/[^\d]/g, '');
+    rows.push(c);
+  });
+  return rows.length > 1 ? rows : [];
+}
+
 // 모델이 낸 글을 수첩 줄로 정리한다 — 장식을 떼고, 이름을 다시 가리고, 개인정보처럼 보이는 숫자를 지운다
 function cleanLines(text) {
   const out = [];
@@ -156,7 +190,7 @@ async function askAI(pick, img, system, userText, env) {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': pick.key, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
-      model, max_tokens: 1500, system,
+      model, max_tokens: 3000, system,
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: img.type, data: img.data } },
         { type: 'text', text: userText }] }]
@@ -187,11 +221,11 @@ async function handle({ method, body, env }) {
     const perDay = Math.max(1, parseInt(env.SCAN_PER_DAY || '5', 10) || 5);
     if (overLimit(uidOf(b.idToken), perDay)) return { status: 429, json: { error: 'daily_limit', perDay } };
   }
-  const label = b.mode === 'label';
+  const label = b.mode === 'label', bill = b.mode === 'bill';
   let text;
   try {
-    text = await askAI(pick, img, label ? LABEL_PROMPT : SYSTEM_PROMPT,
-      label ? '이 사진에서 LOT, REF, 유효기한을 읽어 주세요.' : '이 수첩 사진을 규칙대로 옮겨 적어 주세요.', env);
+    text = await askAI(pick, img, label ? LABEL_PROMPT : bill ? BILL_PROMPT : SYSTEM_PROMPT,
+      label ? '이 사진에서 LOT, REF, 유효기한을 읽어 주세요.' : bill ? '이 거래명세서 사진을 규칙대로 옮겨 적어 주세요.' : '이 수첩 사진을 규칙대로 옮겨 적어 주세요.', env);
   } catch (e) {
     if (e && e.status) {
       if (e.status === 400 || e.status === 401 || e.status === 403) return { status: 502, json: { error: 'vendor_auth', status: e.status, provider: pick.provider } };
@@ -200,10 +234,10 @@ async function handle({ method, body, env }) {
     }
     return { status: 502, json: { error: 'vendor_unreachable' } };
   }
-  return { status: 200, json: label ? { label: parseLabel(text), provider: pick.provider } : { lines: cleanLines(text), provider: pick.provider } };
+  return { status: 200, json: label ? { label: parseLabel(text), provider: pick.provider } : bill ? { rows: parseBill(text), provider: pick.provider } : { lines: cleanLines(text), provider: pick.provider } };
 }
 
 module.exports = {
-  handle, cleanLines, parseLabel, maskName, parseDataUrl, pickProvider,
-  SYSTEM_PROMPT, LABEL_PROMPT, _resetLimit: () => hits.clear()
+  handle, cleanLines, parseLabel, parseBill, maskName, parseDataUrl, pickProvider,
+  SYSTEM_PROMPT, LABEL_PROMPT, BILL_PROMPT, _resetLimit: () => hits.clear()
 };
