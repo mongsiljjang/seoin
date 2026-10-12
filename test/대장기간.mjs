@@ -15,7 +15,7 @@ function grab(name){
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want); y?pass++:fail++;
   console.log(`${y?'✅':'❌'} ${name}${y?'':`  — ${JSON.stringify(want)} 여야 하는데 ${JSON.stringify(got)}`}`); };
-const {ledgerPeriod}=new Function(`${['abCount','ledgerPeriod'].map(grab).join('\n')}\nreturn {ledgerPeriod};`)();
+const {ledgerPeriod,casesInPeriod}=new Function(`${['abCount','ledgerPeriod','casesInPeriod'].map(grab).join('\n')}\nreturn {ledgerPeriod,casesInPeriod};`)();
 const C=[
   {d1:'2026-10-02', teeth:[{fdi:'46',ab:'A'},{fdi:'47'}]},
   {d1:'2026-10-30', teeth:[{fdi:'36',abT:'커스텀'}]},
@@ -38,4 +38,12 @@ r=ledgerPeriod(C,'all','','','',T);
 ok('전체(수술일 없는 것 제외)', [r.label,r.n,r.t], ['전체',4,5]);
 r=ledgerPeriod([], 'month','','','',T);
 ok('비어 있으면 0', [r.n,r.t,r.a], [0,0,0]);
+{
+  const L=[...C, {d0:'2026-10-05', d1:'', teeth:[{fdi:'41'}]}, {d1:'2026-09-20', d3:'2026-10-08', teeth:[{fdi:'12'}]}];
+  const lst=(mode,ym,f,t)=>casesInPeriod(L, ledgerPeriod(L,mode,ym,f,t,T)).length;
+  ok('목록: 이번 달 — 1차 10월 2건 + 진단만 10월 + 보철만 10월', lst('month','','',''), 4);
+  ok('목록: 지난달', lst('month','2026-09','',''), 2);
+  ok('목록: 전체는 걸러내지 않는다', lst('all','','',''), L.length);
+  ok('목록: 기간 지정', lst('range','','2026-10-01','2026-10-03'), 1);
+}
 console.log(`\n${pass} 통과 / ${fail} 실패`); process.exit(fail?1:0);

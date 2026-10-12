@@ -3245,6 +3245,11 @@ function ledgerPeriod(cases, mode, ym, from, to, today){
   return {from:f, to:t, label, n:mon.length,
     t:mon.reduce((s,c)=>s+(c.teeth||[]).length,0), a:mon.reduce((s,c)=>s+abCount(c),0)};
 }
+// 목록에 낼 케이스 — 진단·1차·2차·보철 날짜 중 하나라도 기간 안이면 낸다(진단만 적힌 케이스도 사라지지 않게). 집계(식립 개수)는 1차 수술일 기준이다.
+function casesInPeriod(cases, per){
+  if(!per.from && !per.to) return cases||[];
+  return (cases||[]).filter(c=>[c.d0,c.d1,c.d2,c.d3].some(d=>{ d=String(d||''); return d && (!per.from||d>=per.from) && (!per.to||d<=per.to); }));
+}
 function lcShift(n){
   const m=lcYm||todayKey().slice(0,7); const d=new Date(+m.slice(0,4), +m.slice(5)-1+n, 1);
   lcMode='month'; lcYm=d.getFullYear()+'-'+pad(d.getMonth()+1); renderLedger();
@@ -3273,9 +3278,8 @@ function renderLedger(){
     const bd=digits(c.birth);
     return bd.includes(qd) || (bd.length===8 && bd.slice(2).includes(qd));
   };
-  const list=q? all.filter(hit) : all;
-
   const per=ledgerPeriod(all, lcMode, lcYm, lcFrom, lcTo, todayKey());
+  const list=q? all.filter(hit) : casesInPeriod(all, per);     // 검색할 때는 기간과 관계없이 전체에서 찾는다
   const monT=per.t, monA=per.a;
   const wait=all.filter(c=>c.d1 && !c.d2).length;
 
@@ -3318,7 +3322,7 @@ function renderLedger(){
       ${outs.length>6?`<div class="tiny muted" style="margin-top:6px">외 ${outs.length-6}건</div>`:''}
     </div>` : '';
 
-  if(!list.length){ box.innerHTML=head+outCard+`<div class="card">${emptyBox('🦷', all.length?'찾는 케이스가 없어요':'＋케이스 버튼으로 첫 대장을 적어보세요')}</div>`; return; }
+  if(!list.length){ box.innerHTML=head+outCard+`<div class="card">${emptyBox('🦷', all.length?(q?'찾는 케이스가 없어요':'이 기간에 적힌 케이스가 없어요 — 달을 옮기거나 전체를 눌러 보세요'):'＋케이스 버튼으로 첫 대장을 적어보세요')}</div>`; return; }
 
   box.innerHTML = head + outCard + list.map(c=>{
     const t=c.teeth||[];
