@@ -2200,7 +2200,7 @@ function dropAxis(pid, which, n){
   if(axisHasVariants(p, which, n)){
     toast(`${무엇} ${specNum(n)} 에 규격이 있어요 — 그 칸들을 먼저 지워주세요`); return;
   }
-  if(!confirm(`${무엇} ${specNum(n)} 줄을 표에서 뺄까요?\n등록된 규격이 없어서 지워도 잃는 것은 없어요.`)) return;
+  // 등록된 규격이 없어 잃는 것이 없으니 묻지 않고 뺀다(규격이 걸려 있으면 위에서 이미 막았다)
   const add = which==='b'? 'axisHideB' : 'axisHideS';
   const man = which==='b'? 'axisB' : 'axisS';
   if(Array.isArray(p[man])) p[man]=p[man].filter(x=>+x!==+n);

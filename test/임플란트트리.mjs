@@ -84,5 +84,8 @@ t('선택일 때만 bare 로 그린다(회사를 고르면 머리·요약이 그
 t('등록 안 된 규격의 삭제는 두께 줄·길이 칸을 빼고, 둘 다 못 빼면 그 칸만 가린다', js.includes('function axisHideOne(') && js.includes('p.cellHide.push(k)') && js.includes("(p.cellHide||[]).includes(specNum(d)+'|'+specNum(l))"));
 t('가렸던 칸에 규격을 새로 만들면 다시 보이게 한다', js.includes("p.cellHide=p.cellHide.filter(k=>k!==specNum(dl.d)+'|'+specNum(dl.l))"));
 
+// 필요 없는 눈금은 묻지 않고 뺀다(규격이 걸려 있을 때만 먼저 지우라고 안내)
+t('두께·길이 눈금을 뺄 때 확인창을 띄우지 않는다(규격이 걸려 있으면 안내만)', (()=>{ const k=js.indexOf('function dropAxis('); const s=js.slice(k, js.indexOf('function addAxis', k)); return !s.includes('confirm(') && s.includes('먼저 지워주세요'); })());
+
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);
