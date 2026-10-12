@@ -26,7 +26,8 @@ if(!SPEC) throw new Error('index.html 에 const SPEC_AXIS 가 없다');
 const SEED = js.match(/^const SPEC_SEED = \{[\s\S]*?\n\};/m);
 if(!SEED) throw new Error('index.html 에 const SPEC_SEED 가 없다');
 
-const f = new Function(`${SPEC[0]}
+const f = new Function(`const PART_HA='힐링 어버트먼트'; ${grab('normPart')}
+${SPEC[0]}
 ${SEED[0]}
 ${['parseDL','specAxis','hasAxis','specNum','dlLabel','sameSpec','specGuess','gridAxes','axisHasVariants'].map(grab).join('\n')}
 return {parseDL,specAxis,hasAxis,specNum,dlLabel,sameSpec,specGuess,gridAxes,axisHasVariants,SPEC_SEED};`)();

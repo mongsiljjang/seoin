@@ -29,7 +29,7 @@ const ok=(name,got,want)=>{ const y=got===want; y?pass++:fail++;
 function 새판(){
   const DB={ implants:[
     {id:'p1',brand:'오스템',part:'픽스처', variants:[{id:'v1',label:'4.0×10',qty:5,uNor:0,uIns:0,uFail:0}]},
-    {id:'p2',brand:'오스템',part:'힐링캡', variants:[{id:'h1',label:'Ø4.5 GH3',qty:10,uNor:0,uIns:0,uFail:0}]},
+    {id:'p2',brand:'오스템',part:'힐링 어버트먼트', variants:[{id:'h1',label:'Ø4.5 GH3',qty:10,uNor:0,uIns:0,uFail:0}]},
     {id:'p3',brand:'오스템',part:'어버트먼트',variants:[{id:'a1',label:'Ø4.5 기성',qty:8,uNor:0,uIns:0,uFail:0}]}],
     implantLogs:[] };
   const f=new Function('DB', 판+'; return {applyCaseStock, recallStock};');
