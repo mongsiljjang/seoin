@@ -2022,8 +2022,7 @@ function renderImplant(){
   const brands=impBrandOrder(list);
   if(cur) currentBrand=String(cur.brand||'').trim();
   if(currentBrand && !brands.includes(currentBrand)) currentBrand=null;
-  if(currentBrand && !cur){ const t=impTree(list,currentBrand); if(t.length){ cur=t[0].items[0]; currentImplantId=cur.id; } }
-  if(cur) impOpen.add(currentBrand+'|'+(normPart(cur.part)||'기타'));
+  if(currentBrand && !cur){ const t=impTree(list,currentBrand); if(t.length){ cur=t[0].items[0]; currentImplantId=cur.id; impOpenFor(cur); } }
   const summary=`<div class="summary3">
     <div class="stat"><div class="n">${total}</div><div class="l">전체 수량</div></div>
     <div class="stat"><div class="n" style="color:var(--warn)">${low}</div><div class="l">부족 규격</div></div>
@@ -2031,10 +2030,16 @@ function renderImplant(){
   const chips=`<div class="chips"><button class="chip ${!currentBrand?'on':''}" onclick="selectBrand('')">선택</button>${brands.map(b=>{ const n=list.filter(p=>String(p.brand||'').trim()===b).length;
       return `<button class="chip ${b===currentBrand?'on':''}" onclick="selectBrand(${jarg(b)})">${esc(b)}${n?'':' <span class="tiny" style="opacity:.6">없음</span>'}</button>`; }).join('')}
     <button class="chip" onclick="openImplantForm('','')">＋ 회사</button></div>`;
-  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?implantCard(cur):'') : '');
+  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?'<div id="impCard">'+implantCard(cur)+'</div>':'') : '');
   refreshBell();
 }
-function selectImplant(id){ currentImplantId=id; renderImplant(); }
+// 그 제품이 들어 있는 부품 줄을 펼친다 — 고를 때만 한다(그릴 때마다 열면 접을 수가 없다)
+function impOpenFor(p){ if(p) impOpen.add(String(p.brand||'').trim()+'|'+(normPart(p.part)||'기타')); }
+function selectImplant(id){
+  currentImplantId=id; impOpenFor(implantById(id)); renderImplant();
+  // 규격 표는 트리 아래에 그려진다 — 눌렀는데 아무 일도 없는 것처럼 보이지 않게 그 자리로 데려간다
+  const el=document.getElementById('impCard'); if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
 function implantCard(p){
   const meta=[p.part||'', p.vendor?esc(p.vendor):'', p.price?won(p.price):''].filter(Boolean).join(' · ');
   const head=`<div class="spread"><div><div class="t" style="font-weight:900;font-size:16px">${esc(p.brand)} ${esc(p.line||'')}</div>
@@ -2295,7 +2300,7 @@ function saveImplant(id){
   const data={ brand, line:$('#ipLine').value.trim(), part:normPart($('#ipPart').value)||'픽스처',
     vendor:$('#ipVendor').value.trim(), price:Math.max(0,parseInt($('#ipPrice').value,10)||0) };
   if(id){ Object.assign(implantById(id), data); }
-  else { const np={id:uid(), ...data, note:'', variants:[]}; DB.implants.push(np); currentImplantId=np.id; }
+  else { const np={id:uid(), ...data, note:'', variants:[]}; DB.implants.push(np); currentImplantId=np.id; impOpenFor(np); }
   saveDB(); closeModal(); renderImplant(); toast('저장되었습니다');
   if(!id) setTimeout(()=>openVariantForm(currentImplantId),150);
 }

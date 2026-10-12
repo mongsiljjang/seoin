@@ -59,7 +59,7 @@ t('재고 창에 규격 제거 버튼이 있고 지우기 전에 잃는 숫자�
 // 맨 앞 '선택' 칸 — 처음에는 아무것도 안 펼쳐지고, 회사를 눌러야 세부가 보인다
 t("회사 줄 맨 앞에 '선택' 칸이 있다", js.includes("selectBrand('')") && js.includes('>선택</button>'));
 t('처음에는 회사를 자동으로 고르지 않는다(첫 회사 자동 선택 코드가 없다)', !js.includes('currentBrand=brands[0]'));
-t('회사를 누르면 예전처럼 그 회사의 첫 제품(과 규격 표)이 바로 잡힌다', js.includes('if(currentBrand && !cur){ const t=impTree(list,currentBrand); if(t.length){ cur=t[0].items[0]; currentImplantId=cur.id; } }'));
+t('회사를 누르면 예전처럼 그 회사의 첫 제품(과 규격 표)이 바로 잡힌다', js.includes('if(currentBrand && !cur){ const t=impTree(list,currentBrand); if(t.length){ cur=t[0].items[0]; currentImplantId=cur.id; impOpenFor(cur); } }'));
 t('회사 세부와 규격 표는 회사가 골라졌을 때만 그려진다', js.includes('(currentBrand? impTreeHtml(currentBrand'));
 t('회사를 누르면 이전에 펼친 부품 줄을 접고 제품 선택을 비워 첫 제품부터 다시 잡는다', (()=>{ const k=js.indexOf('function selectBrand(b){'); const s=js.slice(k, js.indexOf('function toggleImpGroup', k)); return s.includes('currentImplantId=null') && s.includes('impOpen.delete'); })());
 
@@ -68,6 +68,10 @@ t('코드 어디에도 실사 라는 말이 없다(심평원 실사 이야기만
 
 // 규격 추가 창에서 삭제 — 적힌 규격이 등록돼 있으면 지운다
 t('규격 추가 창에도 삭제 버튼이 있고(추가 옆), 적힌 규격으로 찾아 지운다', js.includes('delVariantByInput(') && js.includes('function delVariantByInput(pid)') && js.includes('등록된 규격이 아니에요'));
+
+// 제품을 눌렀을 때 — 규격 표 자리로 데려가고, 부품 줄은 접을 수 있다
+t('제품을 누르면 규격 표 자리(impCard)로 스크롤한다', js.includes("getElementById('impCard')") && js.includes('scrollIntoView'));
+t('부품 줄을 그릴 때마다 열어 두지 않는다(접을 수 있다) — 고를 때만 연다', !js.includes("if(cur) impOpen.add(") && js.includes('function impOpenFor(p)') && js.includes('impOpenFor(implantById(id))'));
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);
