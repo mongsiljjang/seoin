@@ -28,7 +28,7 @@ function grabConst(name){
   return m[0];
 }
 
-const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName',
+const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName','maskNameOld',
                 'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','noteSaveAll',
                 'esc','newFails','failNotice'];
 
