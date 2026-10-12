@@ -2886,6 +2886,67 @@ function insGuideHtml(){
 }
 function insGuideRow(){ return sechead('보험 임플란트 청구 안내', insGuideHtml()); }
 
+/* ---- 보험 임플란트 단계 점검 ---------------------------------------------
+   앞뒤가 안 맞는 기록을 알리는 점검표다. 청구 판정이 아니다 — 근거는 docs/INSURANCE_STEPS.md 5장.
+   앱의 칸과 청구 단계: d0 진단·치료계획일 = 1단계 · d1 1차 수술일 = 2단계(고정체 식립) · d3 보철 장착일 = 3단계.
+   d2(2차 수술)는 청구 단계가 아니다. 단계 사이 청구 기한은 못 찾아서 '며칠 지났다'만 알리고 기한 판정은 하지 않는다. */
+const INS_PROS_WAIT_DAYS=90;      // 이 날수가 지나면 보철 기록이 없다고 알린다 — 법이 정한 기한이 아니라 알림 기준일 뿐이다
+function insDayN(s){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s||'')); return m? Date.UTC(+m[1],+m[2]-1,+m[3])/86400000 : null; }
+function insFdiOk(n){ return /^(1[1-8]|2[1-8]|3[1-8]|4[1-8])$/.test(String(n)); }
+// 보험 케이스 하나의 점검 결과. 일반 케이스는 공단 등록이 없어 점검하지 않는다
+function insChecks(c, cases, today){
+  const out=[]; if(!c || c.insur!=='보험') return out;
+  const add=(code,lv,text)=>out.push({code,lv,text});
+  const D={d0:c.d0||'',d1:c.d1||'',d2:c.d2||'',d3:c.d3||''};
+  const N={d0:insDayN(D.d0),d1:insDayN(D.d1),d2:insDayN(D.d2),d3:insDayN(D.d3)};
+  const label={d0:'진단일',d1:'1차 수술일',d2:'2차 수술일',d3:'보철 장착일'};
+  if(D.d1 && !D.d0) add('no1','note','청구 1단계(진단·치료계획일)가 비어 있어요');
+  if(D.d3 && !D.d1) add('no2','warn','보철 장착일은 있는데 1차 수술(청구 2단계) 기록이 없어요');
+  [['d0','d1'],['d1','d2'],['d1','d3'],['d2','d3'],['d0','d3']].forEach(([a,b])=>{
+    if(N[a]!=null && N[b]!=null && N[b]<N[a]) add('order','warn',label[b]+' '+D[b]+' 이 '+label[a]+' '+D[a]+' 보다 앞이에요');
+  });
+  if(N.d0!=null && N.d0===N.d1) add('same','note','진단일과 1차 수술일이 같은 날이에요 — 단계는 순서대로 끝낸 뒤 청구하는 것이 원칙이라 확인해 보세요');
+  if(N.d1!=null && N.d1===N.d3) add('same','note','1차 수술일과 보철 장착일이 같은 날이에요 — 단계는 순서대로 끝낸 뒤 청구하는 것이 원칙이라 확인해 보세요');
+  const T=insDayN(today);
+  if(N.d1!=null && N.d3==null && T!=null && T-N.d1>=INS_PROS_WAIT_DAYS)
+    add('nopros','note','1차 수술 후 '+(T-N.d1)+'일이 지났는데 보철 장착일이 없어요');
+  const teeth=c.teeth||[];
+  const bad=teeth.filter(t=>!insFdiOk(t.fdi)).map(t=>'#'+t.fdi);
+  if(!teeth.length) add('fdi','warn','치식(심은 치아)이 비어 있어요 — 치식번호가 빠지면 지급불능이 돼요');
+  else if(bad.length) add('fdi','warn','치식번호가 11~48 범위를 벗어났어요: '+bad.join(' ')+' — 치식번호가 틀리면 지급불능이 돼요');
+  // 같은 환자·같은 치아가 보험 케이스에 두 번 — 뒤에 적은 쪽에 알린다
+  (cases||[]).filter(o=>o!==c && o.id!==c.id && o.insur==='보험' && o.chart===c.chart).forEach(o=>{
+    const later=(c.d1||c.createdAt||'')>=(o.d1||o.createdAt||'');
+    if(!later) return;
+    (c.teeth||[]).forEach(t=>{
+      const ot=(o.teeth||[]).find(x=>String(x.fdi)===String(t.fdi)); if(!ot) return;
+      if(ot.fail) add('redo','note','#'+t.fdi+' 은 앞 케이스에서 페일이었어요 — 재식립은 1회만 인정되고 시술중지·재등록이 먼저예요');
+      else add('dup','warn','#'+t.fdi+' 이 보험 케이스 두 건에 있어요 — 같은 단계가 두 번 들어간 건 아닌지 확인하세요');
+    });
+  });
+  if(D.d3 && teeth.some(t=>t.fail)) add('fail3','note','보철 장착일(3단계) 뒤에 페일이 적혀 있어요 — 3단계를 청구한 뒤에는 시술중지 등록이 안 돼요');
+  return out;
+}
+function insCheckAll(cases, today){
+  const w=x=>x.items.filter(i=>i.lv==='warn').length;   // 확인할 것이 있는 케이스를 위로
+  return (cases||[]).map(c=>({c, items:insChecks(c,cases,today)})).filter(x=>x.items.length).sort((a,b)=>w(b)-w(a));
+}
+function insCheckBox(cases, today){
+  const ins=(cases||[]).filter(c=>c.insur==='보험'); if(!ins.length) return '';
+  const all=insCheckAll(cases,today);
+  const nWarn=all.reduce((s,x)=>s+x.items.filter(i=>i.lv==='warn').length,0);
+  if(!all.length) return `<div class="tiny" style="margin:0 2px 10px;color:var(--ok);font-weight:800">✓ 보험 케이스 ${ins.length}건 · 단계 점검에 걸린 것이 없어요</div>`;
+  const rows=all.slice(0,8).map(x=>`<div class="trow" style="gap:8px;align-items:flex-start;cursor:pointer" onclick="openCaseForm('${x.c.id}')">
+      <div class="grow" style="min-width:0"><b>${esc(x.c.chart)}</b>
+        ${x.items.map(i=>`<div class="tiny" style="margin-top:2px;color:var(--${i.lv==='warn'?'warn':'sub'})">${i.lv==='warn'?'⚠️':'ℹ️'} ${esc(i.text)}</div>`).join('')}</div>
+      <span class="chev">›</span></div>`).join('');
+  return `<div class="card" style="padding:12px 14px;margin-bottom:10px">
+      <div class="spread" style="margin-bottom:6px"><b style="font-size:14.5px">🔎 보험 단계 점검</b>
+        <span class="tiny" style="color:var(--${nWarn?'warn':'sub'});font-weight:800">${all.length}건${nWarn?' · 확인 '+nWarn:''}</span></div>
+      <div class="tiny muted" style="margin-bottom:6px">앞뒤가 안 맞는 기록을 알리는 점검표예요. 청구 판정이 아니고, 누르면 그 케이스가 열려요.</div>
+      ${rows}${all.length>8?`<div class="tiny muted" style="margin-top:6px">외 ${all.length-8}건</div>`:''}</div>`;
+}
+
 /* ---- 보험 페일 → 시술중지 안내 -----------------------------------------
    보험 케이스에 페일이 새로 적히면 공단 시술중지 등록을 물어본다.
    근거는 docs/INSURANCE_RULES.md 3장. 재시술 급여가 인정되는 길은
@@ -3022,6 +3083,7 @@ function renderLedger(){
       </div>
     </div>
     ${insGuideRow()}
+    ${insCheckBox(DB.implantCases, todayKey())}
     <div class="summary3">
       <div class="stat"><div class="n">${monT}</div><div class="l">이번 달 식립</div></div>
       <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">이번 달 지대주</div></div>
@@ -3061,9 +3123,9 @@ function renderLedger(){
       <div class="grow" style="min-width:0">
         <div class="nm">${esc(c.chart)}${c.pname?` <span class="muted" style="font-weight:700">${esc(c.pname)}</span>`:''}
           <span class="pill ${c.insur==='보험'?'pend':'info'}" style="margin-left:4px">${esc(c.insur||'일반')}</span>
-          ${fails?`<span class="pill danger">페일 ${fails}</span>`:''}</div>
+          ${fails?`<span class="pill danger">페일 ${fails}</span>`:''}${insChecks(c,DB.implantCases,todayKey()).some(i=>i.lv==='warn')?`<span class="pill warn" title="보험 단계 점검">점검</span>`:''}</div>
         <div class="tiny muted" style="margin-top:2px">${c.birth?esc(c.birth)+' · ':''}${esc(teeth)}</div>
-        <div class="tiny" style="margin-top:2px;color:${st}">${c.d0?`진단 ${c.d0} · `:''}1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}${c.recallAt?` · 회수 ${c.recallAt}${c.recallLost?` (분실 ${c.recallLost})`:''}`:''}</div>
+        <div class="tiny" style="margin-top:2px;color:${st}">${c.d0?`진단 ${c.d0} · `:''}1차 ${c.d1||'—'} · 2차 ${c.d2||'대기'}${c.d3?` · 보철 ${c.d3}`:''}${c.recallAt?` · 회수 ${c.recallAt}${c.recallLost?` (분실 ${c.recallLost})`:''}`:''}</div>
       </div>
       <div class="qty">${t.length}<u>개</u></div>
       <span class="chev">›</span>
@@ -3413,6 +3475,7 @@ function openCaseForm(id){
     </div>
     <label class="field"><span>진단·치료계획일 — 청구 1단계 (선택)</span><input id="lcD0" type="date" value="${c?esc(c.d0||''):''}"></label>
     <label class="field"><span>2차 수술일 (선택)</span><input id="lcD2" type="date" value="${c?esc(c.d2||''):''}"></label>
+    <label class="field"><span>보철 장착일 — 청구 3단계 (선택)</span><input id="lcD3" type="date" value="${c?esc(c.d3||''):''}"></label>
     ${insGuideRow()}
 
     <div class="divider"></div>
@@ -3452,7 +3515,7 @@ function saveCase(id){
   if(!chart){ toast('차트번호를 입력하세요'); return; }
   if(!lcSel.length){ toast('심은 치아를 골라주세요'); return; }
   const data={ chart, pname:maskName($('#lcName').value),   // 이름 원본은 저장하지 않는다
-    birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d0:$('#lcD0').value, d1:$('#lcD1').value, d2:$('#lcD2').value,
+    birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d0:$('#lcD0').value, d1:$('#lcD1').value, d2:$('#lcD2').value, d3:$('#lcD3').value,
     memo:$('#lcMemo').value.trim(),
     teeth:lcSel.map(n=>({fdi:n, ...(lcTeeth[n]||{})})), updatedAt:now() };
   const old=id?caseById(id):null;
