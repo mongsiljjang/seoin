@@ -1092,7 +1092,7 @@ const tms=v=>+new Date(v);
 function num1(n){ return n>=10? Math.round(n) : Math.round(n*10)/10; }
 function mdy(ts){ const d=new Date(ts); return `${d.getMonth()+1}/${d.getDate()}`; }
 
-// 하루 평균 사용량 — 실사가 2회 이상이면 실사로, 아니면 최근 60일 출고 기록으로.
+// 하루 평균 사용량 — 재고 확인이 2회 이상이면 그걸로, 아니면 최근 60일 출고 기록으로.
 function usageStats(it){
   const cs=it.counts||[]; let used=0, days=0;
   for(let k=1;k<cs.length;k++){
@@ -1138,7 +1138,7 @@ function fcLine(it){
     + (f.src==='out'?' <span class="muted">(출고 기록 기준)</span>':'') + `</div>`;
 }
 
-// 재고 세기(실사) — 남은 개수만 받아 그 사이 사용량을 역산한다.
+// 재고 세기(재고 확인) — 남은 개수만 받아 그 사이 사용량을 역산한다.
 function recordCount(it, actual, memo){
   const before=it.qty, prev=(it.counts||[]).slice(-1)[0];
   let used=null;
@@ -1229,7 +1229,7 @@ function countOne(id){
     <label class="field"><span>지금 남은 개수 (${esc(it.unit)})</span>
       <input id="cnt1" type="number" inputmode="numeric" min="0" value="${it.qty}"
         style="font-size:22px;text-align:center;font-weight:800"></label>
-    <label class="field"><span>메모 (선택)</span><input id="cnt1Memo" placeholder="예: 월말 실사"></label>
+    <label class="field"><span>메모 (선택)</span><input id="cnt1Memo" placeholder="예: 월말 확인"></label>
     <button class="btn block" onclick="saveCountOne('${id}')">반영하기</button>`);
 }
 function saveCountOne(id){
@@ -1830,7 +1830,7 @@ function exIn(v){ return +v.exIn||0; }                                // 받은 
 function failOpen(v){ return Math.max(0,(+v.uFail||0)-exReq(v)); }    // 아직 신청 안 한 페일
 function failWait(v){ return Math.max(0,exReq(v)-exIn(v)); }          // 신청했는데 안 온 것
 function vOpen(v){ return +v.opening||0; }                            // 0번 칸 — 이월재고
-function vAdj(v){ return +v.adj||0; }                                  // 실사 보정 누적(±) · 화면에 안 낸다
+function vAdj(v){ return +v.adj||0; }                                  // 재고 확인 보정 누적(±) · 화면에 안 낸다
 function vBook(v){ return vOpen(v)+(+v.inTot||0)+exIn(v)+vAdj(v)-vUse(v); }
 function pOpen(p){ return (p.variants||[]).reduce((s,v)=>s+vOpen(v),0); }
 function pAdj(p){ return (p.variants||[]).reduce((s,v)=>s+vAdj(v),0); }
@@ -1844,7 +1844,7 @@ function pAdj(p){ return (p.variants||[]).reduce((s,v)=>s+vAdj(v),0); }
    갈 곳 없는 재고가 아무 데도 안 잡혀 '매입 50 · 사용 0 인데 현재고 65'
    같은 일이 생겼다.
 
-   **보정** 은 실사에서 맞춘 몫이다. 값은 남기되 **요약 화면에는 내지 않는다.**
+   **보정** 은 재고 확인에서 맞춘 몫이다. 값은 남기되 **요약 화면에는 내지 않는다.**
    재고 앱이 화면에 '손으로 몇 개 고쳤음'을 띄우면, 그건 병원에 도움이 되는
    정보가 아니라 남에게 보여줄 때 불리해지는 문서가 된다. 필요한 사람은
    기록(implantLogs)에서 본다.
@@ -1980,13 +1980,11 @@ function impTree(list, brand){
 function impAddGuideHtml(){
   return `<b>회사 추가</b> — <b>＋ 회사</b> 를 누르고 회사 이름·부품 종류(픽스처·어버트먼트·힐링 어버트먼트 등)·제품 라인을 적어 추가하세요. 이어서 규격을 넣는 창이 열려요.
     <br><br><b>같은 회사에 힐링·어버트먼트 더하기</b> — 회사 이름을 <b>똑같이</b> 적으면 한 회사 아래로 묶여요. 오스템과 오스템임플란트처럼 다르게 쓰면 따로 생깁니다. 부품 줄 오른쪽 ＋ 를 누르면 회사 이름과 부품이 미리 채워져요.
-    <br><br><b>기본 회사</b> 오스템·메가젠·네오·디오는 제품이 없어도 맨 앞에 늘 보여요. 그 밖의 회사는 제품을 하나 추가하면 나타나고, 그 회사 제품을 모두 지우면 사라집니다.`;
+    <br><br><b>선택</b> 칸이 눌려 있을 때는 아무것도 펼쳐지지 않아요. 회사를 누르면 부품 줄이 나오고, 부품 줄을 누르면 제품이, 제품을 누르면 규격 표가 나옵니다.<br><br><b>기본 회사</b> 오스템·메가젠·네오·디오는 제품이 없어도 맨 앞에 늘 보여요. 그 밖의 회사는 제품을 하나 추가하면 나타나고, 그 회사 제품을 모두 지우면 사라집니다.`;
 }
 function selectBrand(b){
-  currentBrand=b;
-  const t=impTree(DB.implants,b);
-  currentImplantId=t.length? t[0].items[0].id : null;
-  if(t.length) impOpen.add(b+'|'+t[0].part);
+  currentBrand=b||null; currentImplantId=null;                 // 비우면 '선택' — 아무것도 안 보인다
+  if(b) [...impOpen].forEach(k=>{ if(k.startsWith(b+'|')) impOpen.delete(k); });   // 회사를 누를 때마다 접힌 채로 연다
   renderImplant();
 }
 function toggleImpGroup(b,part){ const k=b+'|'+part; if(impOpen.has(k)) impOpen.delete(k); else impOpen.add(k); renderImplant(); }
@@ -2017,22 +2015,22 @@ function renderImplant(){
   list.forEach(p=>p.variants.forEach(v=>{ total+=(+v.qty||0); if(v.qty===0)zero++; else if(v.qty<=(+v.minQty||0))low++; }));
   const head=`<div class="spread" style="margin:2px 2px 10px"><h2 class="sec" style="margin:0">🦷 임플란트</h2>
     <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div>`;
-  // 어느 제품을 보고 있는지에서 회사를 거꾸로 잡는다(알림·다른 화면에서 들어올 때도 맞게)
+  // 처음에는 '선택' 이 눌려 있고 아무것도 펼쳐 있지 않다. 회사를 눌러야 세부가 보이고, 제품을 눌러야 규격 표가 나온다.
+  // 다른 화면에서 제품을 지정해 들어오면 그 제품의 회사로 맞춘다.
   let cur=currentImplantId? implantById(currentImplantId):null;
   if(!cur) currentImplantId=null;
   const brands=impBrandOrder(list);
   if(cur) currentBrand=String(cur.brand||'').trim();
-  if(!currentBrand || !brands.includes(currentBrand)) currentBrand=brands[0];
-  if(!cur){ const t=impTree(list,currentBrand); if(t.length){ cur=t[0].items[0]; currentImplantId=cur.id; } }
+  if(currentBrand && !brands.includes(currentBrand)) currentBrand=null;
   if(cur) impOpen.add(currentBrand+'|'+(normPart(cur.part)||'기타'));
   const summary=`<div class="summary3">
     <div class="stat"><div class="n">${total}</div><div class="l">전체 수량</div></div>
     <div class="stat"><div class="n" style="color:var(--warn)">${low}</div><div class="l">부족 규격</div></div>
     <div class="stat"><div class="n" style="color:var(--danger)">${zero}</div><div class="l">품절 규격</div></div></div>`;
-  const chips=`<div class="chips">${brands.map(b=>{ const n=list.filter(p=>String(p.brand||'').trim()===b).length;
+  const chips=`<div class="chips"><button class="chip ${!currentBrand?'on':''}" onclick="selectBrand('')">선택</button>${brands.map(b=>{ const n=list.filter(p=>String(p.brand||'').trim()===b).length;
       return `<button class="chip ${b===currentBrand?'on':''}" onclick="selectBrand(${jarg(b)})">${esc(b)}${n?'':' <span class="tiny" style="opacity:.6">없음</span>'}</button>`; }).join('')}
     <button class="chip" onclick="openImplantForm('','')">＋ 회사</button></div>`;
-  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+impTreeHtml(currentBrand, cur&&cur.id)+(cur?implantCard(cur):'');
+  box.innerHTML = head+summary+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?implantCard(cur):'') : '');
   refreshBell();
 }
 function selectImplant(id){ currentImplantId=id; renderImplant(); }
@@ -2050,11 +2048,11 @@ function implantCard(p){
       ${pOpen(p)?`<div><div class="tiny muted">이월재고</div><div style="font-weight:900;font-size:17px">${pOpen(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">&nbsp;</div><div class="tiny muted" style="line-height:1.5">전월 이월 · 양도양수</div></div>`:''}
       <div><div class="tiny muted">현재고(장부)</div><div style="font-weight:900;font-size:17px;color:var(--brand)">${pQty(p)}<span class="tiny muted"> 개</span></div></div>
-      <div><div class="tiny muted">실재고(실사)</div><div style="font-weight:900;font-size:17px">${counted?pPhys(p):'—'}<span class="tiny muted">${counted?' 개':''}</span></div></div>
+      <div><div class="tiny muted">실재고(직접 센 것)</div><div style="font-weight:900;font-size:17px">${counted?pPhys(p):'—'}<span class="tiny muted">${counted?' 개':''}</span></div></div>
     </div>
     <div class="spread" style="margin-top:9px">
       <div class="row wrap" style="gap:5px"><span class="pill info">일반 ${p.variants.reduce((s,v)=>s+(+v.uNor||0),0)}</span><span class="pill pend">보험 ${p.variants.reduce((s,v)=>s+(+v.uIns||0),0)}</span><span class="pill danger">페일 ${p.variants.reduce((s,v)=>s+(+v.uFail||0),0)}</span></div>
-      ${counted?(diff===0?'<span class="pill ok">오차 없음</span>':`<span class="pill ${diff<0?'danger':'warn'}">오차 ${diff>0?'+':''}${diff}</span>`):'<span class="tiny muted">실사 전</span>'}
+      ${counted?(diff===0?'<span class="pill ok">오차 없음</span>':`<span class="pill ${diff<0?'danger':'warn'}">오차 ${diff>0?'+':''}${diff}</span>`):'<span class="tiny muted">확인 전</span>'}
     </div>
     <div class="tiny muted" style="margin-top:8px">최근 30일 사용 <b>${ru.total}개</b> (일반 ${ru.normal}·보험 ${ru.insurance}·페일 ${ru.fail})</div>
   </div>` : '';
@@ -2065,7 +2063,7 @@ function implantCard(p){
   const bulk = hasAxis(p.part) ? `<button class="btn soft sm" onclick="openBulkVariants('${p.id}')">규격 일괄추가</button>` : '';
   // ＋ 옆에 － 가 없으면 뺄 줄을 모른다. 지우는 길은 ⋯ 안에 있었는데 아무도 못 찾았다.
   const del = p.variants.length ? `<button class="btn soft sm" onclick="openVariantRemove('${p.id}')">－ 규격 빼기</button>` : '';
-  const stk = p.variants.length ? `<button class="btn soft sm grow" onclick="openStocktake('${p.id}')">📋 재고 실사</button>` : '';
+  const stk = p.variants.length ? `<button class="btn soft sm grow" onclick="openStocktake('${p.id}')">📋 재고 확인</button>` : '';
   // 바꿀 페일이 생겼을 때만 문을 낸다 — 늘 떠 있으면 눈에 안 들어온다
   const fx = (pFailOpen(p)||pFailWait(p)) ? `<button class="btn soft sm grow" onclick="openFailExchange()">🔄 페일 교환${pFailOpen(p)?` <b>${pFailOpen(p)}</b>`:''}</button>` : '';
   return `<div class="card">${head}${recon}<div class="divider"></div>${body}
@@ -2074,7 +2072,7 @@ function implantCard(p){
 }
 function openStocktake(pid){
   const p=implantById(pid);
-  modal(`<h3>📋 재고 실사 · ${esc(p.brand)} ${esc(p.line||'')}</h3>
+  modal(`<h3>📋 재고 확인 · ${esc(p.brand)} ${esc(p.line||'')}</h3>
     <div class="tiny muted" style="margin-bottom:12px">규격별 <b>실제 개수</b>를 세어 넣으세요. 저장하면 장부(현재고)와 비교해 오차를 보여주고, 원하면 장부를 실재고로 한 번에 맞출 수 있어요.</div>
     <div style="max-height:46vh;overflow:auto">
     ${p.variants.map(v=>`<div class="spread" style="padding:8px 2px;border-bottom:1px solid var(--line)">
@@ -2091,10 +2089,10 @@ function saveStocktake(pid,reconcile){
   p.variants.forEach(v=>{ const el=$('#stk_'+v.id); if(!el) return;
     const val=parseInt(el.value,10); if(isNaN(val)||val<0) return;
     v.phys=val; v.physAt=todayKey(); changed++;
-    if(reconcile && val!==v.qty){ const before=v.qty; implantLog(pid,v.id,'adjust',null,val-before,before,val,'실사 보정(일괄)'); bumpAdj(v,val-before); v.qty=val; adjusted++; }
+    if(reconcile && val!==v.qty){ const before=v.qty; implantLog(pid,v.id,'adjust',null,val-before,before,val,'재고 확인 보정(일괄)'); bumpAdj(v,val-before); v.qty=val; adjusted++; }
   });
   saveDB(); closeModal(); renderImplant();
-  toast(reconcile?`실사 저장 · ${adjusted}개 규격 보정`:`실재고 ${changed}개 규격 저장`);
+  toast(reconcile?`재고 확인 저장 · ${adjusted}개 규격 보정`:`실재고 ${changed}개 규격 저장`);
 }
 function matrixHtml(p,parsed){
   const fx=parsed.filter(x=>x.dl), others=parsed.filter(x=>!x.dl);
@@ -2340,7 +2338,7 @@ function openVariantForm(pid, editVid, preset){
     <div class="tiny muted" style="margin:-6px 2px 12px">앱을 쓰기 전부터 선반에 있던 물건이면 <b>이월재고</b>예요. 매입에 섞이면 산 개수가 부풀어요.</div>`}
     <label class="field"><span>LOT / 제조번호 (선택)</span><input id="vLot" value="${v?esc(v.lot||''):''}"></label>
     <div class="row"><button class="btn block" onclick="saveVariant('${pid}','${v?v.id:''}')">${v?'저장':'추가'}</button>
-      ${v?`<button class="btn danger" onclick="delVariant('${pid}','${v.id}')">삭제</button>`:''}</div>`);
+      <button class="btn danger" onclick="${v?`delVariant('${pid}','${v.id}')`:`delVariantByInput('${pid}')`}">삭제</button></div>`);
 }
 function saveVariant(pid,vid){
   const p=implantById(pid);
@@ -2393,6 +2391,15 @@ function openVariantRemove(pid){
       <button class="btn danger xs" onclick="delVariant('${p.id}','${v.id}')">빼기</button>
     </div>`).join('')}</div>`);
 }
+// 규격 추가 창에서 쓴다 — 창에 적힌 규격이 이미 등록돼 있으면 그것을 지운다(지우기 전에 잃는 숫자를 물어본다)
+function delVariantByInput(pid){
+  const p=implantById(pid); if(!p) return;
+  const label = hasAxis(p.part)? dlLabel(($('#vB')||{}).value, ($('#vS')||{}).value) : ((($('#vLabel')||{}).value)||'').trim();
+  if(!label){ toast('지울 규격을 위 칸에 적어 주세요'); return; }
+  const v=(p.variants||[]).find(x=>sameSpec(x.label,label));
+  if(!v){ toast(label+' 은 등록된 규격이 아니에요'); return; }
+  delVariant(pid, v.id);
+}
 function delVariant(pid,vid){
   const p=implantById(pid); const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return;
   if(variantTouched(v)){
@@ -2410,7 +2417,7 @@ function delVariant(pid,vid){
 function openVariant(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid); if(!v) return;
   const diff=vDiff(v);
-  const diffRow = v.phys!=null && v.phys!=='' ? `<div class="spread" style="margin-top:6px"><span class="tiny muted">실재고(실사) ${v.physAt?'· '+v.physAt:''}</span>
+  const diffRow = v.phys!=null && v.phys!=='' ? `<div class="spread" style="margin-top:6px"><span class="tiny muted">실재고(직접 센 것) ${v.physAt?'· '+v.physAt:''}</span>
       <span style="font-weight:800">${parseInt(v.phys,10)}개 ${diff===0?'<span class="pill ok">일치</span>':`<span class="pill ${diff<0?'danger':'warn'}">오차 ${diff>0?'+':''}${diff}</span>`}</span></div>` : '';
   modal(`<h3>${esc(p.brand)} ${esc(v.label)}</h3>
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:12px 14px">
@@ -2455,7 +2462,7 @@ function reconcileVariant(pid,vid){
   const target=parseInt(v.phys,10); if(isNaN(target)){ toast('먼저 실재고를 입력하세요'); return; }
   const before=v.qty; const d=target-before;
   if(!confirm(`장부 현재고 ${before}개 → 실재고 ${target}개로 맞출까요?\n(오차 ${d>0?'+':''}${d}개는 보정 기록으로 남아요)`)) return;
-  v.qty=target; bumpAdj(v,d); implantLog(pid,vid,'adjust',null,d,before,target,'실사 보정');
+  v.qty=target; bumpAdj(v,d); implantLog(pid,vid,'adjust',null,d,before,target,'재고 확인 보정');
   saveDB(); closeModal(); renderImplant(); toast(`보정 완료 · 현재고 ${target}개`);
 }
 let ivCat='normal';
@@ -2463,7 +2470,7 @@ function adjustVariant(pid,vid,type){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid); ivCat='normal';
   const catRow = type==='out' ? `<label class="field"><span>사용 구분 *</span>
     <div class="chips" id="ivCat">${USE_CATS.map(c=>`<button type="button" class="chip ${c.k==='normal'?'on':''}" data-c="${c.k}" onclick="setIvCat('${c.k}')">${c.ko}</button>`).join('')}</div></label>
-    <div class="tiny muted" style="margin:-6px 2px 10px">페일(실패)도 <b>사용</b>으로 차감돼요. 보험 사용은 실사 대비 따로 집계됩니다.</div>` : '';
+    <div class="tiny muted" style="margin:-6px 2px 10px">페일(실패)도 <b>사용</b>으로 차감돼요. 보험 사용은 센 개수와 대조하도록 따로 집계됩니다.</div>` : '';
   modal(`<h3>${type==='in'?'📥 입고(매입)':'📤 사용'} · ${esc(p.brand)} ${esc(v.label)}</h3>
     <div class="tiny muted" style="margin-bottom:12px">현재고 <b>${v.qty}개</b></div>
     <label class="field"><span>수량</span><input id="ivAmt" type="number" inputmode="numeric" value="1" style="font-size:22px;text-align:center;font-weight:800"></label>
