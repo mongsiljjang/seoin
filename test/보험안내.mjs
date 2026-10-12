@@ -40,5 +40,13 @@ t('저장할 때 d0 으로 담긴다', js.includes("d0:$('#lcD0').value"));
 t('목록 줄에 진단일이 보인다', js.includes('진단 ${c.d0} · '));
 t('옛 케이스(d0 없음)는 칸이 비어 있어도 목록이 깨지지 않는다', js.includes('${c.d0?'));
 
+// 케이스 입력 안내 — 꼭 적을 것
+const ig = new Function(`${grab('insInputGuideHtml')}; return insInputGuideHtml();`)();
+const itext = ig.replace(/<[^>]+>/g,' ').replace(/s+/g,' ');
+t('입력 안내에 꼭 적을 네 가지(차트번호·구분·1차 수술일·심은 치아)가 있다', ['차트번호','구분(보험/일반)','1차 수술일','심은 치아'].every(s=>itext.includes(s)));
+t('입력 안내에 보험 단계 날짜 순서(청구 1→2→3단계)와 점검 연결이 있다', itext.includes('청구 1단계') && itext.includes('청구 2단계') && itext.includes('청구 3단계') && itext.includes('보험 단계 점검'));
+t('입력 안내에 재고(픽스처 규격)·환자 구분(같은 차트번호)이 있다', itext.includes('픽스처 규격') && itext.includes('같은 차트번호') && itext.includes('성과 초성'));
+t('케이스 폼에 입력 안내가 걸려 있고 1차 수술일이 필수다', js.includes('${insInputRow()}') && js.includes('1차 수술일 *') && js.includes("toast('1차 수술일을 입력하세요')"));
+
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);

@@ -2950,6 +2950,17 @@ function insGuideHtml(){
 }
 function insGuideRow(){ return sechead('보험 임플란트 청구 안내', insGuideHtml()); }
 
+/* ---- 케이스 입력 안내 — 꼭 적을 것 (마우스를 올리면 뜬다) ----------------
+   점검(insChecks)과 재고 차감(caseTally)이 실제로 쓰는 칸만 적는다. 칸이 바뀌면 여기도 같이 고친다. */
+function insInputGuideHtml(){
+  return `<b>꼭 적기 (*)</b> — 차트번호 · 구분(보험/일반) · 1차 수술일 · 심은 치아. 이 넷이 있어야 환자·날짜·부위가 구분되고 재고가 맞게 빠져요.
+    <br><br><b>보험이면 날짜를 단계 순서대로</b> — 진단·치료계획일(청구 1단계) → 1차 수술일(청구 2단계) → 보철 장착일(청구 3단계). 날짜가 빠지거나 순서가 뒤바뀌면 대장 위 <b>🔎 보험 단계 점검</b> 에 떠요. 보철은 붙인 날 바로 적으세요(임시 부착도 돼요).
+    <br><br><b>재고를 맞추려면</b> — 치아마다 <b>픽스처 규격</b>을 적으세요. 비워 두면 재고가 안 빠지고, 재료 목록에 없는 이름이면 "재고에 없는 규격"이라 못 빼요. 지대주·힐링도 적으면 같이 빠지고, 실패한 치아는 페일에 체크하세요.
+    <br><br><b>환자 구분</b> — 이름은 적어도 성과 초성만 저장돼요(김ㅁㅅ). 같은 환자는 <b>늘 같은 차트번호</b>로 적어야 같은 치아 중복·재식립을 찾아내요. 동명이인은 생년월일(선택)로 가립니다.
+    <br><br><b>날짜는 그날 바로</b> — 나중에 몰아 적으면 빠지거나 순서가 뒤바뀌기 쉬워요.`;
+}
+function insInputRow(){ return sechead('입력할 때 꼭 적을 것', insInputGuideHtml()); }
+
 /* ---- 보험 임플란트 단계 점검 ---------------------------------------------
    앞뒤가 안 맞는 기록을 알리는 점검표다. 청구 판정이 아니다 — 근거는 docs/INSURANCE_STEPS.md 5장.
    앱의 칸과 청구 단계: d0 진단·치료계획일 = 1단계 · d1 1차 수술일 = 2단계(고정체 식립) · d3 보철 장착일 = 3단계.
@@ -3520,6 +3531,7 @@ function openCaseForm(id){
   if(c){ (c.teeth||[]).forEach(t=>{ lcSel.push(t.fdi); lcTeeth[t.fdi]={fx:t.fx,lot:t.lot,heal:t.heal,abT:t.abT,ab:t.ab,fail:t.fail}; }); lcSel.sort(fdiSort); }
   const chart=n=>`<div class="teeth">${n.map(x=>`<button type="button" data-n="${x}" class="${lcSel.includes(x)?'on':''}" onclick="lcToggle(${x})">${x}</button>`).join('')}</div>`;
   modal(`<h3>${c?'대장 수정':'새 케이스'}</h3>
+    ${insInputRow()}
     <datalist id="fxList">${lcOpts('픽스처').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <datalist id="hlList">${lcOpts('힐링').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
     <datalist id="abList">${lcOpts('어버트').map(x=>`<option value="${esc(x)}">`).join('')}</datalist>
@@ -3535,7 +3547,7 @@ function openCaseForm(id){
       <label class="field"><span>구분</span><select id="lcIns">
         <option ${c&&c.insur==='보험'?'selected':''}>보험</option>
         <option ${!c||c.insur!=='보험'?'selected':''}>일반</option></select></label>
-      <label class="field"><span>1차 수술일</span><input id="lcD1" type="date" value="${c?esc(c.d1||''):todayKey()}"></label>
+      <label class="field"><span>1차 수술일 *</span><input id="lcD1" type="date" value="${c?esc(c.d1||''):todayKey()}"></label>
     </div>
     <label class="field"><span>진단·치료계획일 — 청구 1단계 (선택)</span><input id="lcD0" type="date" value="${c?esc(c.d0||''):''}"></label>
     <label class="field"><span>2차 수술일 (선택)</span><input id="lcD2" type="date" value="${c?esc(c.d2||''):''}"></label>
@@ -3578,6 +3590,7 @@ function saveCase(id){
   const chart=$('#lcChart').value.trim();
   if(!chart){ toast('차트번호를 입력하세요'); return; }
   if(!lcSel.length){ toast('심은 치아를 골라주세요'); return; }
+  if(!$('#lcD1').value){ toast('1차 수술일을 입력하세요'); return; }
   const data={ chart, pname:maskName($('#lcName').value),   // 이름 원본은 저장하지 않는다
     birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d0:$('#lcD0').value, d1:$('#lcD1').value, d2:$('#lcD2').value, d3:$('#lcD3').value,
     memo:$('#lcMemo').value.trim(),
