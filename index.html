@@ -1797,11 +1797,11 @@ function kakaoText(vendor, entries){
   const 몸=[...g.entries()].map(([head,lines])=>(head?head+'\n':'')+lines.join('\n')).join('\n\n');
   return `[${병원} 주문]${vendor?` ${vendor}`:''}\n\n${몸}\n\n부탁드립니다!`;
 }
-/* 임플란트 재고 대사(입고·사용·현재고·실재고·오차) */
+/* 임플란트 재고 대사(입고·사용·현재고·남은 재고·오차) */
 const USE_CATS=[{k:'normal',ko:'일반',cls:'info'},{k:'insurance',ko:'보험',cls:'pend'},{k:'fail',ko:'페일',cls:'danger'}];
 function catKo(k){ const c=USE_CATS.find(x=>x.k===k); return c?c.ko:'일반'; }
 function vUse(v){ return (+v.uNor||0)+(+v.uIns||0)+(+v.uFail||0); }
-function vDiff(v){ return (v.phys==null||v.phys==='')? null : (parseInt(v.phys,10)-(+v.qty||0)); }  // 실재고-현재고
+function vDiff(v){ return (v.phys==null||v.phys==='')? null : (parseInt(v.phys,10)-(+v.qty||0)); }  // 남은 재고-현재고
 function pIn(p){ return p.variants.reduce((s,v)=>s+(+v.inTot||0),0); }
 function pQty(p){ return p.variants.reduce((s,v)=>s+(+v.qty||0),0); }
 function pUse(p){ return p.variants.reduce((s,v)=>s+vUse(v),0); }
@@ -2046,7 +2046,7 @@ function implantCard(p){
   const head=`<div class="spread"><div><div class="t" style="font-weight:900;font-size:16px">${esc(p.brand)} ${esc(p.line||'')}</div>
     <div class="d tiny muted">${meta}</div></div>
     <button class="btn soft xs" onclick="openImplantForm('${p.id}')">✏️ 제품</button></div>`;
-  // 재고 대사 요약: 매입 · 사용 · 현재고 · 실재고 · 오차
+  // 재고 대사 요약: 매입 · 사용 · 현재고 · 남은 재고 · 오차
   const diff=pDiff(p), counted=pHasCount(p), ru=recentUse(p.id,30);
   const recon = p.variants.length ? `<div class="card" style="box-shadow:none;background:#f6f8fb;border:0;padding:12px;margin:10px 0 4px">
     <div class="two" style="gap:8px">
@@ -2055,7 +2055,7 @@ function implantCard(p){
       ${pOpen(p)?`<div><div class="tiny muted">이월재고</div><div style="font-weight:900;font-size:17px">${pOpen(p)}<span class="tiny muted"> 개</span></div></div>
       <div><div class="tiny muted">&nbsp;</div><div class="tiny muted" style="line-height:1.5">전월 이월 · 양도양수</div></div>`:''}
       <div><div class="tiny muted">현재고(장부)</div><div style="font-weight:900;font-size:17px;color:var(--brand)">${pQty(p)}<span class="tiny muted"> 개</span></div></div>
-      <div><div class="tiny muted">실재고(직접 센 것)</div><div style="font-weight:900;font-size:17px">${counted?pPhys(p):'—'}<span class="tiny muted">${counted?' 개':''}</span></div></div>
+      <div><div class="tiny muted">남은 재고</div><div style="font-weight:900;font-size:17px">${counted?pPhys(p):'—'}<span class="tiny muted">${counted?' 개':''}</span></div></div>
     </div>
     <div class="spread" style="margin-top:9px">
       <div class="row wrap" style="gap:5px"><span class="pill info">일반 ${p.variants.reduce((s,v)=>s+(+v.uNor||0),0)}</span><span class="pill pend">보험 ${p.variants.reduce((s,v)=>s+(+v.uIns||0),0)}</span><span class="pill danger">페일 ${p.variants.reduce((s,v)=>s+(+v.uFail||0),0)}</span></div>
@@ -2080,16 +2080,16 @@ function implantCard(p){
 function openStocktake(pid){
   const p=implantById(pid);
   modal(`<h3>📋 재고 확인 · ${esc(p.brand)} ${esc(p.line||'')}</h3>
-    <div class="tiny muted" style="margin-bottom:12px">규격별 <b>실제 개수</b>를 세어 넣으세요. 저장하면 장부(현재고)와 비교해 오차를 보여주고, 원하면 장부를 실재고로 한 번에 맞출 수 있어요.</div>
+    <div class="tiny muted" style="margin-bottom:12px">규격별 <b>실제 개수</b>를 세어 넣으세요. 저장하면 장부(현재고)와 비교해 오차를 보여주고, 원하면 장부를 남은 재고로 한 번에 맞출 수 있어요.</div>
     <div style="max-height:46vh;overflow:auto">
     ${p.variants.map(v=>`<div class="spread" style="padding:8px 2px;border-bottom:1px solid var(--line)">
       <div><div style="font-weight:800;font-size:14px">${esc(v.label)}</div><div class="tiny muted">장부 ${v.qty}개</div></div>
       <input id="stk_${v.id}" type="number" inputmode="numeric" value="${v.phys!=null&&v.phys!==''?parseInt(v.phys,10):v.qty}" style="width:88px;text-align:center;font-weight:800"></div>`).join('')}
     </div>
     <div class="row" style="margin-top:14px">
-      <button class="btn grow" onclick="saveStocktake('${pid}',false)">실재고만 저장</button>
+      <button class="btn grow" onclick="saveStocktake('${pid}',false)">남은 재고만 저장</button>
       <button class="btn warn grow" onclick="saveStocktake('${pid}',true)">저장 + 장부 보정</button></div>
-    <div class="tiny muted" style="margin-top:8px">‘장부 보정’은 각 규격의 현재고를 실재고와 같게 맞추고, 차이는 보정 기록으로 남겨요.</div>`);
+    <div class="tiny muted" style="margin-top:8px">‘장부 보정’은 각 규격의 현재고를 남은 재고와 같게 맞추고, 차이는 보정 기록으로 남겨요.</div>`);
 }
 function saveStocktake(pid,reconcile){
   const p=implantById(pid); let changed=0, adjusted=0;
@@ -2099,14 +2099,14 @@ function saveStocktake(pid,reconcile){
     if(reconcile && val!==v.qty){ const before=v.qty; implantLog(pid,v.id,'adjust',null,val-before,before,val,'재고 확인 보정(일괄)'); bumpAdj(v,val-before); v.qty=val; adjusted++; }
   });
   saveDB(); closeModal(); renderImplant();
-  toast(reconcile?`재고 확인 저장 · ${adjusted}개 규격 보정`:`실재고 ${changed}개 규격 저장`);
+  toast(reconcile?`재고 확인 저장 · ${adjusted}개 규격 보정`:`남은 재고 ${changed}개 규격 저장`);
 }
 function matrixHtml(p,parsed){
   const fx=parsed.filter(x=>x.dl), others=parsed.filter(x=>!x.dl);
   const ax=specAxis(p.part), g=gridAxes(p);
   const dias=g.bs, lens=g.ss;
   const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
-  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 실재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 실재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
+  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 남은 재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 남은 재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
   t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th title="눌러서 빼기" onclick="dropAxis('${p.id}','s',${l})" style="cursor:pointer">${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
   dias.forEach(d=>{ t+=`<tr><td class="rowh" title="눌러서 빼기" onclick="dropAxis('${p.id}','b',${d})" style="cursor:pointer">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
     if(!c) return `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
@@ -2424,7 +2424,7 @@ function delVariant(pid,vid){
 function openVariant(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid); if(!v) return;
   const diff=vDiff(v);
-  const diffRow = v.phys!=null && v.phys!=='' ? `<div class="spread" style="margin-top:6px"><span class="tiny muted">실재고(직접 센 것) ${v.physAt?'· '+v.physAt:''}</span>
+  const diffRow = v.phys!=null && v.phys!=='' ? `<div class="spread" style="margin-top:6px"><span class="tiny muted">남은 재고 ${v.physAt?'· '+v.physAt:''}</span>
       <span style="font-weight:800">${parseInt(v.phys,10)}개 ${diff===0?'<span class="pill ok">일치</span>':`<span class="pill ${diff<0?'danger':'warn'}">오차 ${diff>0?'+':''}${diff}</span>`}</span></div>` : '';
   modal(`<h3>${esc(p.brand)} ${esc(v.label)}</h3>
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:12px 14px">
@@ -2441,8 +2441,8 @@ function openVariant(pid,vid){
     </div>
     <div class="row" style="margin:6px 0 8px"><button class="btn ok grow" onclick="adjustVariant('${pid}','${vid}','in')">＋ 입고</button>
       <button class="btn warn grow" onclick="adjustVariant('${pid}','${vid}','out')">－ 사용</button></div>
-    <div class="row" style="margin-bottom:8px"><button class="btn soft grow" onclick="setPhysical('${pid}','${vid}')">📋 실재고 입력</button>
-      ${diff!=null&&diff!==0?`<button class="btn warn grow" onclick="reconcileVariant('${pid}','${vid}')">현재고를 실재고로 맞추기</button>`:''}</div>
+    <div class="row" style="margin-bottom:8px"><button class="btn soft grow" onclick="setPhysical('${pid}','${vid}')">📋 남은 재고 입력</button>
+      ${diff!=null&&diff!==0?`<button class="btn warn grow" onclick="reconcileVariant('${pid}','${vid}')">현재고를 남은 재고로 맞추기</button>`:''}</div>
     <button class="btn soft block" style="margin-bottom:8px${reqFor('imp',pid+'|'+vid)?';color:var(--warn)':''}"
       onclick="openOrderReq('imp','${pid}|${vid}',${jarg(p.brand+' '+(p.line||'')+' '+v.label)},${jarg(p.vendor||'')},()=>openVariant('${pid}','${vid}'))">
       🛒 ${reqFor('imp',pid+'|'+vid)?`주문 필요 체크됨 · ${reqFor('imp',pid+'|'+vid).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
@@ -2451,24 +2451,24 @@ function openVariant(pid,vid){
 }
 function setPhysical(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
-  modal(`<h3>📋 실재고 입력 · ${esc(p.brand)} ${esc(v.label)}</h3>
+  modal(`<h3>📋 남은 재고 입력 · ${esc(p.brand)} ${esc(v.label)}</h3>
     <div class="tiny muted" style="margin-bottom:12px">실제로 <b>세어본 개수</b>를 넣으면 장부(현재고 ${v.qty}개)와 비교해 오차를 보여줘요.</div>
-    <label class="field"><span>실재고(실물 개수)</span><input id="physAmt" type="number" inputmode="numeric" value="${v.phys!=null&&v.phys!==''?parseInt(v.phys,10):v.qty}" style="font-size:22px;text-align:center;font-weight:800"></label>
-    <button class="btn block" onclick="savePhysical('${pid}','${vid}')">실재고 저장</button>`);
+    <label class="field"><span>남은 재고(세어 본 개수)</span><input id="physAmt" type="number" inputmode="numeric" value="${v.phys!=null&&v.phys!==''?parseInt(v.phys,10):v.qty}" style="font-size:22px;text-align:center;font-weight:800"></label>
+    <button class="btn block" onclick="savePhysical('${pid}','${vid}')">남은 재고 저장</button>`);
 }
 function savePhysical(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
   const val=parseInt($('#physAmt').value,10); if(isNaN(val)||val<0){ toast('개수를 입력하세요'); return; }
   v.phys=val; v.physAt=todayKey(); saveDB(); closeModal(); renderImplant();
   const d=val-(+v.qty||0);
-  toast(d===0?'실재고 일치 ✅':`실재고 ${val}개 · 장부와 ${d>0?'+':''}${d} 오차`);
+  toast(d===0?'남은 재고 일치 ✅':`남은 재고 ${val}개 · 장부와 ${d>0?'+':''}${d} 오차`);
   setTimeout(()=>openVariant(pid,vid),150);
 }
 function reconcileVariant(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
-  const target=parseInt(v.phys,10); if(isNaN(target)){ toast('먼저 실재고를 입력하세요'); return; }
+  const target=parseInt(v.phys,10); if(isNaN(target)){ toast('먼저 남은 재고를 입력하세요'); return; }
   const before=v.qty; const d=target-before;
-  if(!confirm(`장부 현재고 ${before}개 → 실재고 ${target}개로 맞출까요?\n(오차 ${d>0?'+':''}${d}개는 보정 기록으로 남아요)`)) return;
+  if(!confirm(`장부 현재고 ${before}개 → 남은 재고 ${target}개로 맞출까요?\n(오차 ${d>0?'+':''}${d}개는 보정 기록으로 남아요)`)) return;
   v.qty=target; bumpAdj(v,d); implantLog(pid,vid,'adjust',null,d,before,target,'재고 확인 보정');
   saveDB(); closeModal(); renderImplant(); toast(`보정 완료 · 현재고 ${target}개`);
 }

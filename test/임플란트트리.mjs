@@ -73,5 +73,8 @@ t('규격 추가 창에도 삭제 버튼이 있고(추가 옆), 적힌 규격으
 t('제품을 누르면 규격 표 자리(impCard)로 스크롤한다', js.includes("getElementById('impCard')") && js.includes('scrollIntoView'));
 t('부품 줄을 그릴 때마다 열어 두지 않는다(접을 수 있다) — 고를 때만 연다', !js.includes("if(cur) impOpen.add(") && js.includes('function impOpenFor(p)') && js.includes('impOpenFor(implantById(id))'));
 
+// 화면 글에서 실재고 대신 남은 재고
+t('코드 어디에도 실재고 라는 말이 없다(남은 재고로 바꿈)', !js.includes('실재고') && js.includes('남은 재고'));
+
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);
