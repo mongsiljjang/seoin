@@ -424,7 +424,7 @@
         <button data-f="order" onclick="setInvFilter('order')">주문임박</button>
         <button data-f="low" onclick="setInvFilter('low')">부족</button>
       </div>
-      <div class="search" id="invSearchWrap"><span class="ic">🔎</span><input id="invSearch" placeholder="품목·분류 검색" oninput="renderInv()"></div>
+      <div class="search" id="invSearchWrap"><span class="ic">🔎</span><input id="invSearch" name="invq" placeholder="품목·분류 검색" oninput="renderInv()" autocomplete="off"></div>
       <div id="invList"></div>
     </div>
     <div id="invImplant" style="display:none"></div>
@@ -3269,7 +3269,7 @@ function renderLedger(){
       <div class="stat"><div class="n" style="color:var(--brand)">${monA}</div><div class="l">이번 달 지대주</div></div>
       <div class="stat"><div class="n" style="color:var(--warn)">${(DB.implantCases||[]).filter(isOut).reduce((s,c)=>s+healOut(c),0)}</div><div class="l">나가 있는 힐링</div></div>
     </div>
-    <div class="search"><span class="ic">🔎</span><input id="lcSearch" placeholder="차트번호·이름·생년월일 검색"
+    <div class="search"><span class="ic">🔎</span><input id="lcSearch" name="lcq" autocomplete="off" placeholder="차트번호·이름·생년월일 검색"
       value="${esc(lcQ)}" oninput="lcQ=this.value; renderLedger(); const e=$('#lcSearch'); if(e){e.focus();e.setSelectionRange(e.value.length,e.value.length);}"></div>`;
 
   const outs=outCases();
