@@ -81,11 +81,17 @@ t('implantCard 에 bare 가 있어 머리·재고 요약·구분선을 건너뛴
 t('선택일 때만 bare 로 그린다(회사를 고르면 머리·요약이 그대로 나온다)', js.includes('cardBox(list[0], true)') && js.includes('(cur?cardBox(cur):')) ;
 
 // 규격 추가 창의 삭제 — 경고 대신 표에서 빼고, 가린 칸은 규격을 만들면 다시 보인다
-t('등록 안 된 규격의 삭제는 두께 줄·길이 칸을 빼고, 둘 다 못 빼면 그 칸만 가린다', js.includes('function axisHideOne(') && js.includes('p.cellHide.push(k)') && js.includes("(p.cellHide||[]).includes(specNum(d)+'|'+specNum(l))"));
+t('등록 안 된 규격의 삭제는 그 칸 하나만 가린다(두께 줄·길이 칸 전체를 지우지 않는다)', js.includes('function cellHideAdd(') && !js.includes('function axisHideOne(') && js.includes("(p.cellHide||[]).includes(specNum(d)+'|'+specNum(l))"));
+t('등록된 규격을 지우면 그 칸도 가려져 ＋ 로 되살아나지 않는다', js.includes('if(dl) cellHideAdd(p, dl.d, dl.l);'));
+t('줄(또는 칸)의 모든 칸이 가려지고 규격도 없을 때만 그 줄을 그리지 않는다', js.includes('const dias=g.bs.filter(d=>!g.ss.every(l=>!at(d,l) && hid(d,l)));') && js.includes('const lens=g.ss.filter(l=>!g.bs.every(d=>!at(d,l) && hid(d,l)));'));
 t('가렸던 칸에 규격을 새로 만들면 다시 보이게 한다', js.includes("p.cellHide=p.cellHide.filter(k=>k!==specNum(dl.d)+'|'+specNum(dl.l))"));
 
 // 필요 없는 눈금은 묻지 않고 뺀다(규격이 걸려 있을 때만 먼저 지우라고 안내)
 t('두께·길이 눈금을 뺄 때 확인창을 띄우지 않는다(규격이 걸려 있으면 안내만)', (()=>{ const k=js.indexOf('function dropAxis('); const s=js.slice(k, js.indexOf('function addAxis', k)); return !s.includes('confirm(') && s.includes('먼저 지워주세요'); })());
+
+// 하단 교육 탭(관리자만)
+t('하단 탭에 관리자용 교육 탭이 있다', js.length>0 && html.includes('id="tabEdu"') && html.includes('class="admin-only" id="tabEdu"') && html.includes('openEduFromHome()"><span class="i">🎓</span>'));
+t('교육 탭은 직원 탭의 교육 화면을 보고 있을 때만 눌려 보이고 숫자를 붙인다', js.includes('function eduTabSync()') && js.includes("currentTab==='staff' && hrView==='edu'") && js.includes('eduProblemCount()') && js.includes('  eduTabSync();') && js.includes('function hrTab(v){ hrView=v; renderStaff(); eduTabSync(); }'));
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
 process.exit(fail?1:0);

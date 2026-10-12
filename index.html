@@ -475,6 +475,7 @@
   <button data-t="att" onclick="go('att')"><span class="i">🕒</span><span class="x">출퇴근</span></button>
   <button data-t="leave" onclick="go('leave')"><span class="i">🌴</span><span class="x">연월차</span></button>
   <button data-t="staff" onclick="go('staff')"><span class="i">👥</span><span class="x">직원</span></button>
+  <button class="admin-only" id="tabEdu" onclick="openEduFromHome()"><span class="i">🎓</span><span class="x">교육</span></button>
 </nav>
 
 <div id="gate"><div class="gatewrap" id="gateBody"></div></div>
@@ -771,6 +772,7 @@ function go(tab){
   $('#page-'+tab).classList.add('active');
   $$('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===tab));
   (RENDER[tab]||(()=>{}))();
+  eduTabSync();
   window.scrollTo(0,0);
 }
 function rerenderCurrent(){ (RENDER[currentTab]||renderHome)(); }
@@ -2105,8 +2107,11 @@ function saveStocktake(pid,reconcile){
 function matrixHtml(p,parsed){
   const fx=parsed.filter(x=>x.dl), others=parsed.filter(x=>!x.dl);
   const ax=specAxis(p.part), g=gridAxes(p);
-  const dias=g.bs, lens=g.ss;
   const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
+  const hid=(d,l)=>(p.cellHide||[]).includes(specNum(d)+'|'+specNum(l));
+  // 칸을 하나씩 가린다. 한 줄(또는 한 칸 세로줄)의 모든 칸이 가려지고 규격도 없으면 그 줄은 비어 있으니 그리지 않는다.
+  const dias=g.bs.filter(d=>!g.ss.every(l=>!at(d,l) && hid(d,l)));
+  const lens=g.ss.filter(l=>!g.bs.every(d=>!at(d,l) && hid(d,l)));
   let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 남은 재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 남은 재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
   t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th title="눌러서 빼기" onclick="dropAxis('${p.id}','s',${l})" style="cursor:pointer">${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
   dias.forEach(d=>{ t+=`<tr><td class="rowh" title="눌러서 빼기" onclick="dropAxis('${p.id}','b',${d})" style="cursor:pointer">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
@@ -2400,14 +2405,12 @@ function openVariantRemove(pid){
       <button class="btn danger xs" onclick="delVariant('${p.id}','${v.id}')">빼기</button>
     </div>`).join('')}</div>`);
 }
-// 규격 추가 창의 삭제 — 경고 없이 지워진다.
-//  · 등록된 규격이면 그 규격을 지운다(숫자가 쌓인 규격은 잃는 것을 한 번 물어본다)
-//  · 아직 등록 안 한 칸이면 그 두께 줄·길이 칸을 표에서 뺀다. 둘 다 다른 규격이 걸려 있어 못 빼면 그 칸 하나만 가린다.
-function axisHideOne(p, which, n){
-  const hide = which==='b'? 'axisHideB' : 'axisHideS', man = which==='b'? 'axisB' : 'axisS';
-  if(Array.isArray(p[man])) p[man]=p[man].filter(x=>+x!==+n);
-  if(!Array.isArray(p[hide])) p[hide]=[];
-  if(!p[hide].includes(+n)) p[hide].push(+n);
+// 규격 추가 창의 삭제 — 경고 없이 그 규격(칸) 하나만 뺀다. 두께 줄·길이 칸 전체를 지우는 것은 머리글 숫자를 눌러서 따로 한다.
+//  · 등록된 규격이면 지운다(숫자가 쌓인 규격은 잃는 것을 한 번 물어본다)
+//  · 등록 안 된 칸이면 표에서 그 칸만 가린다
+function cellHideAdd(p, d, l){
+  if(!Array.isArray(p.cellHide)) p.cellHide=[];
+  const k=specNum(d)+'|'+specNum(l); if(!p.cellHide.includes(k)) p.cellHide.push(k);
 }
 function delVariantByInput(pid){
   const p=implantById(pid); if(!p) return;
@@ -2420,13 +2423,9 @@ function delVariantByInput(pid){
   const b=parseFloat(($('#vB')||{}).value), s=parseFloat(($('#vS')||{}).value);
   if(!isFinite(b)||!isFinite(s)){ toast('지울 두께와 길이를 위 칸에 적어 주세요'); return; }
   const label=dlLabel(b,s), v=(p.variants||[]).find(x=>sameSpec(x.label,label));
-  if(v){ delVariant(pid, v.id); return; }
-  const hideB=!axisHasVariants(p,'b',b), hideS=!axisHasVariants(p,'s',s);
-  if(hideB) axisHideOne(p,'b',b);
-  if(hideS) axisHideOne(p,'s',s);
-  if(!hideB && !hideS){ if(!Array.isArray(p.cellHide)) p.cellHide=[]; const k=specNum(b)+'|'+specNum(s); if(!p.cellHide.includes(k)) p.cellHide.push(k); }
-  saveDB(); closeModal(); renderImplant();
-  toast(hideB&&hideS? label+' 을 표에서 뺐어요' : hideB? '두께 '+specNum(b)+' 줄을 표에서 뺐어요' : hideS? '길이 '+specNum(s)+' 칸을 표에서 뺐어요' : label+' 칸을 표에서 가렸어요');
+  if(v){ delVariant(pid, v.id); return; }                 // 지우면 그 칸도 같이 가려진다(아래 delVariant)
+  cellHideAdd(p,b,s);
+  saveDB(); closeModal(); renderImplant(); toast(label+' 칸을 표에서 뺐어요');
 }
 function delVariant(pid,vid){
   const p=implantById(pid); const v=(p.variants||[]).find(x=>x.id===vid); if(!v) return;
@@ -2440,6 +2439,7 @@ function delVariant(pid,vid){
     if(!confirm(`${v.label} 에는 ${잃는것} 기록이 있어요.\n지우면 이 숫자들이 대사에서 빠집니다. 그래도 지울까요?`)) return;
   }
   p.variants=p.variants.filter(x=>x.id!==vid);
+  { const dl=hasAxis(p.part)? parseDL(v.label) : null; if(dl) cellHideAdd(p, dl.d, dl.l); }   // 지운 칸이 ＋ 로 되살아나지 않게 가린다
   saveDB(); closeModal(); renderImplant(); toast(`${v.label} 을 지웠어요`);
 }
 function openVariant(pid,vid){
@@ -5885,6 +5885,15 @@ function hrEduView(){
     <div class="tiny muted" style="margin:10px 2px">근거 조문과 확인하지 못한 것은 저장소의 <b>docs/EDUCATION_RULES.md</b> 에 적혀 있어요. 중요한 결정은 노무사나 관할 기관에 확인하세요.</div>`;
 }
 function openEduFromHome(){ hrView='edu'; go('staff'); }
+// 하단 '교육' 탭 — 직원 탭의 교육 화면을 보고 있을 때만 눌려 보이고(직원 탭은 꺼진다), 챙길 교육이 있으면 숫자를 붙인다. 관리자에게만 보인다.
+function eduTabSync(){
+  const b=document.getElementById('tabEdu'); if(!b) return;
+  const on = currentTab==='staff' && hrView==='edu';
+  b.classList.toggle('on', on);
+  const s=$$('#tabs button').find(x=>x.dataset.t==='staff'); if(s) s.classList.toggle('on', currentTab==='staff' && !on);
+  const n = (typeof isHR==='function' && isHR())? eduProblemCount() : 0;
+  const x=b.querySelector('.x'); if(x) x.innerHTML = '교육' + (n? ' <b style="color:var(--warn)">'+n+'</b>' : '');
+}
 function eduToggle(id,on){
   if(!isHR()) return; eduInit(); DB.edu.items[id]=Object.assign(DB.edu.items[id]||{},{on:!!on}); saveDB(); renderStaff();
 }
@@ -6471,7 +6480,7 @@ function printDoc(title, body){
 
 /* ---- 직원 탭 — 관리자는 노무, 직원은 자기 1페이지 ---------------------- */
 let hrView='check';
-function hrTab(v){ hrView=v; renderStaff(); }
+function hrTab(v){ hrView=v; renderStaff(); eduTabSync(); }
 function renderStaff(){
   const wrap=$('#staffWrap'); if(!wrap) return;
   if(!isHR()){ wrap.innerHTML=myPageHtml(); return; }
