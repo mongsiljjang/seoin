@@ -3433,13 +3433,15 @@ function noteParse(text){
       .replace(/(\d+(?:\.\d+)?\s*[x×X*]\s*\d+(?:\.\d+)?)/g, ' $1 ')
       .split(/\s+/).filter(Boolean);
 
-    const r={date:'', name:'', chart:'', insur:'일반', fail:false, teeth:[],
+    const r={date:'', name:'', chart:'', birth:'', step:0, insur:'일반', fail:false, teeth:[],
              brand:'', spec:'', heal:'', stage:0, raw:line};
     const rest=[]; let specAt=-1;
     toks.forEach((t,i)=>{
       if(t[0]==='#'){ t.slice(1).split(/[,#]+/).filter(Boolean).forEach(n=>r.teeth.push(n)); return; }
       const sp=noteSpec(t); if(sp){ r.spec=sp; specAt=i; return; }
       const dt=noteDate(t); if(dt){ r.date=dt; return; }
+      if(/^(\d{6}|\d{8})$/.test(t)){ r.birth=t; return; }        // 생년월일 480302 · 19480302 — 숫자만 붙여 쓴 것
+      if(/^[123]단계$/.test(t)){ r.step=+t[0]; r.insur='보험'; return; }   // 보험 단계: 1 진단 · 2 고정체 식립(=1차 수술) · 3 보철
       if(t==='보험'){ r.insur='보험'; return; }
       if(t==='일반'||t==='비급여'){ r.insur='일반'; return; }
       if(t==='페일'||t==='실패'){ r.fail=true; return; }
@@ -3487,10 +3489,22 @@ function noteLink(r){
   return hit.length===1 ? hit[0] : (hit.length ? 'many' : null);
 }
 
+// 줄(또는 묶음)의 환자와 같은 보험 케이스 중 치아가 하나라도 겹치는 것 하나. 여러 건이면 고르지 않는다.
+// 생년월일이 양쪽에 있으면 같아야 하고, 한쪽에 없으면 가린 이름으로만 본다.
+function notePre(r, extra){
+  const nm=maskName(r.name), old=maskNameOld(r.name), d=x=>String(x||'').replace(/[^0-9]/g,'');
+  const hit=(DB.implantCases||[]).filter(c=> c.insur==='보험' && extra(c) &&
+    (r.chart && c.chart ? String(c.chart).trim()===String(r.chart).trim() : ((c.pname||'')===nm || (c.pname||'')===old)) &&
+    !(r.birth && c.birth && d(r.birth).slice(-6)!==d(c.birth).slice(-6)) &&
+    (r.teeth||[]).some(f=>(c.teeth||[]).some(t=>String(t.fdi)===String(f.fdi!=null?f.fdi:f))));
+  return hit.length===1 ? hit[0] : null;
+}
+
 // 저장하기 전에 무엇이 안 맞는지 알아야 고칠 수 있다.
 function noteFx(r){ const v=noteVar(r.brand, r.spec); return v? `${v.p.brand} ${v.v.label}` : (r.brand? r.brand+' ' : '')+r.spec; }
 function noteBad(r){
   if(!r.teeth.length) return '치아번호가 없어요';
+  if(r.step===1 || r.step===3) return '';                  // 진단·보철 줄은 날짜만 남기고 재고는 안 건드린다
   if(r.stage===2){
     const link=noteLink(r);
     if(link==='many') return '붙일 케이스가 여러 건이에요 — 대장에서 직접 고르세요';
@@ -3744,6 +3758,11 @@ function noteReview(){
       </div>
       <div class="row wrap" style="gap:5px">
         <input value="${esc(r.chart)}" placeholder="차트번호 (없어도 됨)" onchange="noteSet(${i},'chart',this.value)" style="flex:1;min-width:110px">
+        <input value="${esc(r.birth||'')}" placeholder="생년월일" inputmode="numeric" onchange="noteSet(${i},'birth',this.value)" style="flex:0 0 96px">
+        <select onchange="noteSet(${i},'step',+this.value)" style="flex:0 0 92px" title="보험 단계 — 1 진단 · 2 고정체 식립(1차 수술) · 3 보철">
+          <option value="0" ${!r.step?'selected':''}>단계 없음</option>
+          <option value="1" ${r.step===1?'selected':''}>1단계 진단</option>
+          <option value="3" ${r.step===3?'selected':''}>3단계 보철</option></select>
         <input value="${esc(r.teeth.join(','))}" placeholder="치식" onchange="noteSet(${i},'teeth',this.value)" style="flex:0 0 88px">
         ${r.stage===2
           ? `<input value="${esc(r.heal)}" list="hlList" placeholder="힐링 (나중에 골라도 됨)" onchange="noteSet(${i},'heal',this.value)" style="flex:0 0 196px">`
@@ -3773,16 +3792,36 @@ function noteSaveAll(){
   // 1차부터 적는다. 같은 붙여넣기 안에 1차와 2차가 함께 있으면
   // 2차가 붙을 케이스가 먼저 있어야 한다.
   const g=new Map();
-  noteRows.filter(r=>r.stage!==2).forEach(r=>{
+  noteRows.filter(r=>r.stage!==2 && r.step!==1 && r.step!==3).forEach(r=>{
     if(!r.teeth.length || !r.spec) return;
     const date=r.date||todayKey();
-    const key=[r.name, r.insur, date, r.chart].join('|');
-    if(!g.has(key)) g.set(key, {name:r.name, insur:r.insur, date, chart:r.chart, teeth:[]});
+    const key=[r.name, r.insur, date, r.chart, r.birth].join('|');
+    if(!g.has(key)) g.set(key, {name:r.name, insur:r.insur, date, chart:r.chart, birth:r.birth||'', teeth:[]});
     const fx=noteFx(r);
     r.teeth.forEach(fdi=>g.get(key).teeth.push({fdi, fx, fail:!!r.fail}));
   });
+  // 진단(1단계)·보철(3단계) 줄은 재고를 안 쓴다 — 같은 환자 보험 케이스에 날짜만 남긴다. 케이스가 아직 없으면 날짜만 든 케이스를 만들고,
+  // 나중에 같은 환자의 2단계(1차 수술) 줄이 오면 그 케이스를 이어받는다.
+  noteRows.filter(r=>r.step===1 || r.step===3).forEach(r=>{
+    if(!r.teeth.length) return;
+    const k=r.step===1?'d0':'d3', date=r.date||todayKey();
+    const c=notePre(r, c=>true);
+    if(c){ if(!c[k]) c[k]=date; if(!c.birth && r.birth) c.birth=r.birth; c.updatedAt=now(); upd++; return; }
+    DB.implantCases.push({id:uid(), createdAt:now(), chart:r.chart, pname:maskName(r.name), birth:r.birth||'', insur:'보험',
+      d0:r.step===1?date:'', d1:'', d2:'', d3:r.step===3?date:'', memo:'수첩',
+      teeth:r.teeth.map(fdi=>({fdi})), updatedAt:now()}); made++;
+  });
   g.forEach(v=>{
-    const data={ chart:v.chart, pname:maskName(v.name), birth:'', insur:v.insur,
+    const pre = v.insur==='보험' ? notePre(v, c=>!c.d1) : null;      // 진단만 적혀 있던 보험 케이스가 있으면 새로 만들지 않고 이어받는다
+    if(pre){
+      const before=(pre.teeth||[]).map(t=>Object.assign({}, t));
+      v.teeth.forEach(t=>{ const ex=(pre.teeth||[]).find(x=>String(x.fdi)===String(t.fdi)); if(ex) Object.assign(ex, t); else pre.teeth.push(t); });
+      pre.d1=v.date; if(!pre.birth && v.birth) pre.birth=v.birth; pre.updatedAt=now();
+      newFails(before, pre.insur, pre.teeth, pre.insur).forEach(n=>nf.push(n));
+      const r2=applyCaseStock(before, pre.insur, pre.teeth, pre.insur, `수첩 ${pre.chart||v.name||''}`.trim());
+      out+=r2.out; miss+=r2.miss; upd++; return;
+    }
+    const data={ chart:v.chart, pname:maskName(v.name), birth:v.birth||'', insur:v.insur,
       d1:v.date, d2:'', memo:'수첩', teeth:v.teeth, updatedAt:now() };
     newFails([], '', data.teeth, data.insur).forEach(n=>nf.push(n));
     const rr=applyCaseStock([], '', data.teeth, data.insur, `수첩 ${v.chart||v.name||''}`.trim());

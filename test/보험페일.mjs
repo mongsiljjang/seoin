@@ -29,7 +29,7 @@ function grabConst(name){
 }
 
 const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName','maskNameOld',
-                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','noteSaveAll',
+                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','notePre','noteSaveAll',
                 'esc','newFails','failNotice'];
 
 let pass=0, fail=0;

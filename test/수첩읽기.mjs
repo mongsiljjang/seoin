@@ -19,7 +19,7 @@ function grab(name){
   throw new Error(name+' 의 끝을 못 찾았다');
 }
 const 떼올것 = ['parseDL','findVar','caseTally','applyCaseStock','implantLog','chosung','maskName','maskNameOld',
-                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','noteSaveAll',
+                'noteSpec','noteDate','noteVar','noteParse','noteFx','noteBad','noteLink','notePre','noteSaveAll',
                 'esc','newFails','failNotice'];
 
 let pass=0, fail=0;
@@ -186,6 +186,39 @@ console.log('\n── 옛 모양으로 저장된 케이스에도 2차수술 줄�
   DB.implantCases[0].pname='박ㅅㅇ';                 // 이름 가리는 방식을 바꾸기 전에 저장된 모양
   run('박소영 #46 2차수술 Ø4.5 GH3');
   ok('옛 이름 모양 케이스에 2차가 붙는다(새로 안 생긴다)', [DB.implantCases.length, !!DB.implantCases[0].d2], [1, true]);
+}
+
+console.log('\n── 생년월일 · 보험 단계 ──');
+{
+  const {DB,noteParse,noteBad,run} = 새판();
+  const r = noteParse('8/21 박소영 480302 보험 #46 오스템 4.0*12');
+  ok('생년월일을 읽는다', r[0].birth, '480302');
+  ok('생년월일이 이름에 안 섞인다', r[0].name, '박소영');
+  ok('날짜는 그대로', r[0].date.slice(5), '08-21');
+  ok('8자리 생년월일', noteParse('박소영 19480302 #46 오스템 4.0*12')[0].birth, '19480302');
+  const d=noteParse('8/1 박소영 480302 1단계 #46')[0];
+  ok('1단계는 보험으로 본다', [d.step,d.insur], [1,'보험']);
+  ok('1단계 줄은 규격 없이도 통과', noteBad(d), '');
+  run('8/21 박소영 480302 보험 #46 오스템 4.0*12');
+  ok('생년월일이 케이스에 저장된다', DB.implantCases[0].birth, '480302');
+}
+{
+  const {DB,run} = 새판();
+  run('8/1 박소영 480302 1단계 #46');
+  ok('1단계만으로 날짜만 든 케이스가 생긴다', [DB.implantCases.length, DB.implantCases[0].d0.slice(5), DB.implantCases[0].d1], [1,'08-01','']);
+  ok('재고는 안 빠진다', DB.implants[0].variants[0].qty, 5);
+  run('8/21 박소영 480302 2단계 보험 #46 오스템 4.0*12');
+  ok('2단계(1차 수술)가 그 케이스를 이어받는다', [DB.implantCases.length, DB.implantCases[0].d1.slice(5), DB.implantCases[0].d0.slice(5)], [1,'08-21','08-01']);
+  ok('이때 재고가 빠진다', DB.implants[0].variants[0].qty, 4);
+  run('12/1 박소영 480302 3단계 #46');
+  ok('3단계는 같은 케이스에 보철일만 남긴다', [DB.implantCases.length, DB.implantCases[0].d3.slice(5)], [1,'12-01']);
+  ok('3단계로는 재고가 안 줄어든다', DB.implants[0].variants[0].qty, 4);
+}
+{
+  const {DB,run} = 새판();
+  run('8/1 박소영 480302 1단계 #46');
+  run('8/21 박소영 990101 보험 #46 오스템 4.0*12');
+  ok('생년월일이 다르면 다른 환자(새 케이스)', DB.implantCases.length, 2);
 }
 
 console.log(`\n${pass} 통과 / ${fail} 실패`);
