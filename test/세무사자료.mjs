@@ -15,7 +15,7 @@ function grab(name){
   }
   throw new Error(name+' 의 끝을 못 찾았다');
 }
-const names=['restDayIdx','isWeeklyRest','hospHolidays','holidayNameOf','isRestDay','hoursBetween','nightHours','dailyHoursOf','dayWork','isEmployer','payBasisRows'];
+const names=['pad','todayKey','restDayIdx','isWeeklyRest','hospHolidays','holidayNameOf','isRestDay','hoursBetween','nightHours','dailyHoursOf','dayWork','isEmployer','staffCount','isSmallBiz','payWeeks','payBasisRows'];
 const m = new Function('ctx', `let DB=ctx; ${names.map(grab).join('\n')} return {${names.join(',')}};`);
 const L=(mo,d,h,mi)=>new Date(2026,mo-1,d,h,mi).toISOString();
 
@@ -54,17 +54,25 @@ t('그 달에 퇴사한 사람은 들어간다', body.some(r=>r[0]==='이조무'
 t('지난달 퇴사자는 빠진다', !body.some(r=>r[0]==='박퇴사'));
 t('근무일 4 (다른 달 제외)', col(A,'근무일')===4);
 t('총 근무시간 32', col(A,'총 근무시간')===32);
-t('연장 4 (2+1+1, 휴일 제외)', col(A,'연장')===4);
-t('야간 1 (22~23시)', col(A,'야간')===1);
-t('휴일 근무 4 (일요일)', col(A,'휴일 근무')===4);
-t('계약 월 시간', col(A,'계약 월 시간')===209);
-t('연차 2일 (지난달 1일 제외)', col(A,'연차(일)')===2);
-t('반차 0.5일', col(A,'반차(일)')===0.5);
-t('시간연차 2시간', col(A,'시간연차(시간)')===2);
-t('대기 중인 병가는 안 센다', col(A,'병가(일)')===0);
 t('입사일', col(A,'입사일')==='2024-03-02');
+t('쉰 날 2.75 (연차 2 + 반차 0.5 + 시간연차 0.25, 대기·지난달 제외)', col(A,'쉰 날(일)')===2.75);
+t('간단 버전: 부서·계약 월 시간 칸 없음', !head.includes('부서') && !head.includes('계약 월 시간'));
+t('5인 미만이면 연장·야간·휴일 칸 없음', !head.includes('연장') && !head.includes('야간') && !head.includes('휴일 근무'));
+const wk=head.filter(h=>/ 주$/.test(h));
+t('11월은 주 6칸 (10/26 주 ~ 11/30 주)', wk.length===6 && wk[0]==='10/26~11/1 주' && wk[5]==='11/30~12/6 주');
+t('달 걸친 첫 주는 10/30 근무까지 합친다 (9시간)', col(A,'10/26~11/1 주')===9);
+t('11/2~11/8 주 32시간', col(A,'11/2~11/8 주')===32);
+t('빈 주는 0', col(A,'11/9~11/15 주')===0);
 t('금액(급여·세금) 열은 없다', !head.some(h=>/급여|세|보험|원\)|금액/.test(h)));
 t('세무사 자료 버튼이 출퇴근 화면에 있다', /onclick="exportPayBasis\(\)"/.test(html));
+
+DB.hosp.headcount=6;
+const big=f.payBasisRows('2026-11'), bh=big[0], B=big.slice(1).find(r=>r[0]==='김위생'), bc=n=>B[bh.indexOf(n)];
+t('5인 이상이면 연장·야간·휴일 칸이 생긴다', ['연장','야간','휴일 근무'].every(h=>bh.includes(h)));
+t('연장 4 (2+1+1, 휴일 제외)', bc('연장')===4);
+t('야간 1 (22~23시)', bc('야간')===1);
+t('휴일 근무 4 (일요일)', bc('휴일 근무')===4);
+t('2월(1일이 일요일)도 주가 빠지지 않는다', f.payWeeks('2026-02')[0].from==='2026-01-26' && f.payWeeks('2026-02').at(-1).to>='2026-02-28');
 
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
 if(fail) process.exit(1);
