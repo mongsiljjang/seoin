@@ -1316,10 +1316,71 @@ function doAdjust(id,type){
   it.qty = type==='in'? it.qty+amt : Math.max(0, it.qty-amt);
   it.updatedAt=now();
   DB.invLogs.unshift({id:uid(), itemId:id, type, amount:amt, qtyBefore:before, qtyAfter:it.qty,
-    memo:($('#qMemo').value||'').trim(), at:now()});
+    memo:($('#qMemo').value||'').trim(), at:now(), by:(currentUser()||{}).id||''});
   saveDB(); closeModal(); renderInv();
   toast(`${it.name} ${type==='in'?'입고':'출고'} ${amt}${it.unit} 완료`);
   if(it.qty<=it.minQty) setTimeout(()=>toast(`⚠️ ${it.name} 재고 부족 (${it.qty}${it.unit})`),1400);
+}
+
+/* ---- 잘못 넣은 입고·출고 고치기 ------------------------------------------
+   2026-11-07 통화: "수정 자체가 안 되고, 숫자가 안 맞는 거야." 한 번 넣은 입고·출고를
+   되돌릴 길이 없어서, 잘못 넣으면 세기로 덮거나 그냥 두었다.
+   이제 그 기록의 수량을 고치면 재고가 그 차이만큼 같이 움직이고, 뒤에 쌓인 기록의
+   전·후 숫자도 같이 밀린다. 아예 잘못 넣은 기록은 0 으로 고친다.
+   - 최고관리자·인사담당자는 언제든, 직원은 자기가 오늘 넣은 기록만 고친다.
+   - 그 기록 뒤에 재고 세기·보정이 있으면 고치지 않는다 — 세기가 이미 실물로 맞췄다.
+   - 고친 전·후는 기록 안(edits)에만 남긴다. 화면 요약에는 내지 않는다(AGENTS.md "화면에 내지 않는 것").
+   일반 재료(invLogs: qtyBefore·qtyAfter)와 임플란트(implantLogs: before·after)가 같은 계산을 쓴다. */
+function logFixCan(l, u, today){
+  if(!l || (l.type!=='in' && l.type!=='out') || !u) return false;
+  if(u.role===ROLE_OWNER || u.role===ROLE_HR) return true;
+  return !!l.by && l.by===u.id && todayKey(new Date(l.at))===today;
+}
+function logBA(l){ return l.qtyBefore!=null || l.qtyAfter!=null ? ['qtyBefore','qtyAfter'] : ['before','after']; }
+// list: 같은 품목(규격)의 기록. l: 고칠 기록. n: 맞는 수량. qty: 지금 재고.
+// 돌려주는 것: {ok, why} 또는 {ok:true, d(재고가 움직일 몫), after(고친 뒤 재고)}
+function logFixPlan(list, l, n, qty){
+  n=Math.round(+n); if(!(n>=0)) return {ok:false, why:'수량을 0 이상으로 넣어 주세요'};
+  const t=tms(l.at);
+  if(list.some(x=>x!==l && (x.type==='count'||x.type==='adjust') && tms(x.at)>t))
+    return {ok:false, why:'이 기록 뒤에 재고를 세어 맞췄어요. 지금 수량은 세기로 고쳐 주세요'};
+  const [kb,ka]=logBA(l), sign=l.type==='in'?1:-1;
+  const was=(+l[ka])-(+l[kb]);                       // 실제로 움직인 몫 — 출고는 0 밑으로 못 내려가 잘렸을 수 있다
+  const d=sign*n - (isNaN(was)? sign*(+l.amount||0) : was);
+  const after=(+qty||0)+d;
+  if(after<0) return {ok:false, why:`그러면 재고가 ${after}가 돼요. 수량을 다시 확인해 주세요`};
+  return {ok:true, d, after};
+}
+function logFixApply(list, l, n, d, by){
+  const t=tms(l.at), [kb,ka]=logBA(l);
+  if(d) list.forEach(x=>{ if(x!==l && tms(x.at)>t){ const [b,a]=logBA(x); x[b]=(+x[b]||0)+d; x[a]=(+x[a]||0)+d; } });
+  if(!Array.isArray(l.edits)) l.edits=[];
+  l.edits.push({at:now(), by:by||'', from:l.amount, to:n});
+  l.amount=n; l[ka]=(+l[ka]||0)+d;
+}
+function openLogFix(lid){
+  const l=DB.invLogs.find(x=>x.id===lid); if(!l) return; const it=itemById(l.itemId); if(!it) return;
+  if(!logFixCan(l,currentUser(),todayKey())){ toast('이 기록은 관리자만 고칠 수 있어요'); return; }
+  const when=new Date(l.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  modal(`<h3>✏️ ${l.type==='in'?'입고':'출고'} 기록 고치기 · ${esc(it.name)}</h3>
+    <div class="tiny muted" style="margin-bottom:12px">${esc(when)}에 넣은 <b>${l.amount}${esc(it.unit)}</b> · 지금 재고 <b>${it.qty}${esc(it.unit)}</b></div>
+    <label class="field"><span>맞는 수량 (${esc(it.unit)})</span>
+      <input id="lfAmt" type="number" inputmode="numeric" min="0" value="${l.amount}" style="font-size:22px;text-align:center;font-weight:800"></label>
+    <div class="tiny muted" style="margin:-4px 2px 12px">고치면 재고도 그 차이만큼 같이 바뀌어요. 아예 잘못 넣은 기록이면 <b>0</b>으로 고치세요.</div>
+    <div class="row" style="gap:8px"><button class="btn block" onclick="saveLogFix('${lid}')">고치기</button>
+      <button class="btn ghost block" onclick="openItemDetail('${it.id}')">돌아가기</button></div>`);
+}
+function saveLogFix(lid){
+  const l=DB.invLogs.find(x=>x.id===lid); if(!l) return; const it=itemById(l.itemId); if(!it) return;
+  if(!logFixCan(l,currentUser(),todayKey())){ toast('이 기록은 관리자만 고칠 수 있어요'); return; }
+  const n=parseInt($('#lfAmt').value,10);
+  if(n===l.amount){ openItemDetail(it.id); return; }
+  const list=DB.invLogs.filter(x=>x.itemId===it.id);
+  const p=logFixPlan(list,l,n,it.qty); if(!p.ok){ toast(p.why); return; }
+  logFixApply(list,l,n,p.d,(currentUser()||{}).id);
+  it.qty=p.after; it.updatedAt=now();
+  saveDB(); renderInv(); openItemDetail(it.id);
+  toast(`${it.name} 기록을 ${n}${it.unit}로 고쳤어요 · 재고 ${it.qty}${it.unit}`);
 }
 function quickInvDialog(){
   if(!DB.inventory.length){ go('inv'); openInvForm(); return; }
@@ -1373,12 +1434,14 @@ function delItem(id){
 function openItemDetail(id){
   const it=itemById(id); if(!it) return;
   const logs=DB.invLogs.filter(l=>l.itemId===id).slice(0,30);
+  const me=currentUser(), today=todayKey();
   const logHtml = logs.length? logs.map(l=>`
     <div class="item">
       <div class="avatar" style="background:${l.type==='in'?'var(--ok-soft)':l.type==='count'?'var(--brand-soft)':'var(--warn-soft)'};color:${l.type==='in'?'var(--ok)':l.type==='count'?'var(--brand)':'var(--warn)'}">${l.type==='in'?'📥':l.type==='count'?'📋':'📤'}</div>
       <div class="grow"><div class="t" style="font-size:14px">${l.type==='in'?`입고 ${l.amount}${esc(it.unit)}`:l.type==='out'?`출고 ${l.amount}${esc(it.unit)}`:l.type==='count'?`재고 세기 → ${l.qtyAfter}${esc(it.unit)}`:`조정 ${l.amount}${esc(it.unit)}`}</div>
         <div class="d">${esc(l.memo||'')||'메모 없음'} · ${new Date(l.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div></div>
       <div class="tiny muted">→ ${l.qtyAfter}${esc(it.unit)}</div>
+      ${logFixCan(l,me,today)?`<button class="btn soft xs" onclick="openLogFix('${l.id}')" title="잘못 넣은 수량 고치기">✏️</button>`:''}
     </div>`).join('') : emptyBox('🗒️','입출고 내역이 없어요');
   modal(`
     <h3>${esc(it.name)}</h3>
@@ -1945,7 +2008,8 @@ function doReceiveFail(pid, vid){
   toast(did?`${did}개 들어왔어요 · 재고에 넣었어요`:'들어온 게 없어요');
 }
 function implantLog(pid,vid,type,cat,amount,before,after,memo){
-  DB.implantLogs.unshift({id:uid(),pid,vid,type,cat:cat||null,amount,before,after,memo:memo||'',at:now()});
+  const by=(typeof currentUser==='function' && currentUser() || {}).id || '';
+  DB.implantLogs.unshift({id:uid(),pid,vid,type,cat:cat||null,amount,before,after,memo:memo||'',at:now(),by});
   if(DB.implantLogs.length>1200) DB.implantLogs=DB.implantLogs.slice(0,1200);
 }
 function recentUse(pid,days){
@@ -2468,7 +2532,60 @@ function openVariant(pid,vid){
       onclick="openOrderReq('imp','${pid}|${vid}',${jarg(p.brand+' '+(p.line||'')+' '+v.label)},${jarg(p.vendor||'')},()=>openVariant('${pid}','${vid}'))">
       🛒 ${reqFor('imp',pid+'|'+vid)?`주문 필요 체크됨 · ${reqFor('imp',pid+'|'+vid).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
     <div class="row"><button class="btn soft grow" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>
-      <button class="btn soft" style="color:var(--danger)" onclick="delVariant('${pid}','${vid}')">🗑 규격 제거</button></div>`);
+      <button class="btn soft" style="color:var(--danger)" onclick="delVariant('${pid}','${vid}')">🗑 규격 제거</button></div>
+    ${ivLogsHtml(pid,vid)}`);
+}
+/* 규격 하나의 최근 입고·사용 — 잘못 넣은 것을 여기서 고친다(logFixPlan 과 같은 계산).
+   케이스·명세서·페일 교환에서 들어온 기록(메모가 붙은 것)은 그 화면이 같이 맞물려 있어서
+   여기서는 고치지 않는다. 손으로 넣은 입고·사용만 고친다. 보정 기록은 화면에 내지 않는다. */
+function ivFixable(l){ return (l.type==='in'||l.type==='out') && !l.memo; }
+function ivLogsHtml(pid,vid){
+  const logs=(DB.implantLogs||[]).filter(l=>l.pid===pid && l.vid===vid && (l.type==='in'||l.type==='out')).slice(0,10);
+  if(!logs.length) return '';
+  const me=currentUser(), today=todayKey();
+  return `<h2 class="sec" style="margin-top:14px">최근 입고·사용</h2>
+    ${logs.map(l=>`<div class="item">
+      <div class="grow"><div class="t" style="font-size:14px">${l.type==='in'?`입고 ${l.amount}개`:`${esc(catKo(l.cat))} 사용 ${l.amount}개`}</div>
+        <div class="d">${esc(l.memo||'')||'직접 입력'} · ${new Date(l.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div></div>
+      <div class="tiny muted">→ ${l.after}개</div>
+      ${ivFixable(l)&&logFixCan(l,me,today)?`<button class="btn soft xs" onclick="openIvFix('${l.id}')" title="잘못 넣은 수량·구분 고치기">✏️</button>`:''}
+    </div>`).join('')}
+    <div class="tiny muted" style="margin:6px 2px 0">케이스·거래명세서에서 들어온 기록은 그 화면에서 고쳐요.</div>`;
+}
+let ivFixCat='normal';
+function openIvFix(lid){
+  const l=(DB.implantLogs||[]).find(x=>x.id===lid); if(!l) return;
+  const p=implantById(l.pid), v=p&&p.variants.find(x=>x.id===l.vid); if(!v) return;
+  if(!ivFixable(l) || !logFixCan(l,currentUser(),todayKey())){ toast('이 기록은 관리자만 고칠 수 있어요'); return; }
+  ivFixCat=l.cat||'normal';
+  modal(`<h3>✏️ ${l.type==='in'?'입고':'사용'} 기록 고치기 · ${esc(p.brand)} ${esc(v.label)}</h3>
+    <div class="tiny muted" style="margin-bottom:12px">넣은 기록 <b>${l.type==='in'?'입고':esc(catKo(l.cat))+' 사용'} ${l.amount}개</b> · 지금 현재고 <b>${v.qty}개</b></div>
+    <label class="field"><span>맞는 수량</span>
+      <input id="ifAmt" type="number" inputmode="numeric" min="0" value="${l.amount}" style="font-size:22px;text-align:center;font-weight:800"></label>
+    ${l.type==='out'?`<label class="field"><span>사용 구분</span>
+      <div class="chips" id="ifCat">${USE_CATS.map(c=>`<button type="button" class="chip ${c.k===ivFixCat?'on':''}" data-c="${c.k}" onclick="ivFixCat='${c.k}';$$('#ifCat button').forEach(b=>b.classList.toggle('on',b.dataset.c==='${c.k}'))">${c.ko}</button>`).join('')}</div></label>`:''}
+    <div class="tiny muted" style="margin:-4px 2px 12px">고치면 현재고${l.type==='out'?'와 일반·보험·페일 개수':'와 누적 매입'}도 같이 바뀌어요. 아예 잘못 넣은 기록이면 <b>0</b>으로 고치세요.</div>
+    <div class="row" style="gap:8px"><button class="btn block" onclick="saveIvFix('${lid}')">고치기</button>
+      <button class="btn ghost block" onclick="openVariant('${l.pid}','${l.vid}')">돌아가기</button></div>`);
+}
+const IV_CNT={normal:'uNor', insurance:'uIns', fail:'uFail'};
+function saveIvFix(lid){
+  const l=(DB.implantLogs||[]).find(x=>x.id===lid); if(!l) return;
+  const p=implantById(l.pid), v=p&&p.variants.find(x=>x.id===l.vid); if(!v) return;
+  if(!ivFixable(l) || !logFixCan(l,currentUser(),todayKey())){ toast('이 기록은 관리자만 고칠 수 있어요'); return; }
+  const n=parseInt($('#ifAmt').value,10), oldN=+l.amount||0;
+  const oldCat=l.cat||'normal', newCat=l.type==='out'? (ivFixCat||'normal') : oldCat;
+  if(n===oldN && newCat===oldCat){ openVariant(l.pid,l.vid); return; }
+  const list=DB.implantLogs.filter(x=>x.pid===l.pid && x.vid===l.vid);
+  const plan=logFixPlan(list,l,n,v.qty); if(!plan.ok){ toast(plan.why); return; }
+  // 누적 칸은 넣은 수량 그대로 쌓였다(doVariantAdjust) — 같은 수량으로 빼고 다시 얹는다.
+  if(l.type==='in') v.inTot=Math.max(0,(+v.inTot||0)-oldN+n);
+  else { const a=IV_CNT[oldCat], b=IV_CNT[newCat];
+    v[a]=Math.max(0,(+v[a]||0)-oldN); v[b]=(+v[b]||0)+n; l.cat=newCat; }
+  logFixApply(list,l,n,plan.d,(currentUser()||{}).id);
+  v.qty=plan.after;
+  saveDB(); renderImplant(); openVariant(l.pid,l.vid);
+  toast(`${v.label} 기록을 고쳤어요 · 현재고 ${v.qty}개`);
 }
 function setPhysical(pid,vid){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
@@ -6061,7 +6178,7 @@ function eduCatalog(){
       keep:'', links:[],
       applies:c=> c.kind!=='hospital' ? ['no','100병상 이상 병원만 해당해요.'] : c.beds>=100 ? ['yes','100병상 이상이라 해당해요.'] : c.beds>0 ? ['no','100병상 미만이라 해당 없어요.'] : ['maybe','병상 수를 넣으면 알려 드려요. 100병상 이상 병원만 해당해요.']},
     {id:'fire', g:'edu', name:'소방훈련·교육 (근무자)', cite:'화재예방법 시행규칙 제36조', cycle:12, who:'근무자', scope:'staff',
-      keep:'훈련·교육 기록부 2년', links:[L('한국소방안전원','https://www.kfsi.or.kr')],
+      keep:'훈련·교육 기록부 2년', topics:'소화 훈련(소화기 사용) · 통보 훈련(119 신고) · 피난 훈련(대피 경로, 환자 대피 유도)', links:[L('한국소방안전원','https://www.kfsi.or.kr')],
       applies:c=>['maybe','소방안전관리자를 선임해야 하는 건물만 해당해요. 입원실이 없고 600㎡ 미만인 치과의원 건물은 대상이 아닌 것으로 읽혀요.']},
 
     {id:'dentist', g:'person', name:'치과의사 보수교육', cite:'의료법 제30조', cycle:12, who:'치과의사 본인', scope:'person',
@@ -6104,6 +6221,7 @@ function eduInit(){
   if(DB.edu.kind!=='hospital') DB.edu.kind='clinic';
   if(!DB.edu.items || typeof DB.edu.items!=='object') DB.edu.items={};
   if(!Array.isArray(DB.edu.recs)) DB.edu.recs=[];
+  if(!DB.edu.plans || typeof DB.edu.plans!=='object') DB.edu.plans={};
 }
 function eduCtx(){ eduInit(); return {kind:DB.edu.kind, n:staffCount(), beds:+DB.edu.beds||0}; }
 function eduState(it){
@@ -6188,6 +6306,7 @@ function hrEduView(){
       </div>
       <div class="row" style="gap:6px;margin-top:9px;flex-wrap:wrap">
         <button class="btn soft xs" onclick="openEduRec('${it.id}')">＋ 이수 기록</button>
+        <button class="btn soft xs" onclick="openEduPlan('${it.id}')">📝 계획서${DB.edu.plans[it.id]?' ✓':''}</button>
         ${it.links.map(l=>`<a class="btn soft xs" style="text-decoration:none" href="${esc(l.u)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(l.t)}</a>`).join('')}
         <button class="btn soft xs" onclick="openEduItemSet('${it.id}')">⚙︎</button>
       </div></div>`;
@@ -6368,6 +6487,69 @@ function eduConfAll(rid){
 }
 
 // 자체교육 일지 — 인쇄하거나 PDF 로 저장해서 서명받아 보관·팩스한다
+/* ---- 교육 계획서 — 2026-11-07 통화: "소방 교육 계획서 업로드 및 수정", "보건소 등에 보낼 수 있게" ----
+   교육마다 계획서 한 장을 앱 안에서 쓰고 고친다(파일 올리기 대신 — 앱에 파일 보관 자리가 없다).
+   인쇄 화면에서 PDF 로 저장하면 보건소·소방서에 그대로 낸다. 내용 칸은 그 교육의 법정 항목(topics)으로 채워 둔다.
+   이수 기록(recs)과는 다르다: 계획서는 "하겠다", 이수 기록은 "했다". */
+function eduPlanOf(id){ eduInit(); return DB.edu.plans[id]||null; }
+function openEduPlan(id){
+  const it=eduCatalog().find(x=>x.id===id); if(!it) return;
+  if(!isHR()){ toast('계획서는 최고관리자와 인사담당자가 써요'); return; }
+  const p=eduPlanOf(id)||{}, v=k=>esc(p[k]||'');
+  modal(`<h3>📝 ${esc(it.name)} — 계획서</h3>
+    <div class="tiny muted" style="margin-bottom:10px">${esc(it.cite)}${it.keep?' · 보관 '+esc(it.keep):''}</div>
+    <div class="two">
+      <label class="field"><span>교육 예정일</span><input id="epDate" type="date" value="${v('date')}"></label>
+      <label class="field"><span>시간</span><input id="epTime" value="${v('time')}" placeholder="예: 13:00~14:00 (1시간)"></label>
+    </div>
+    <label class="field"><span>장소</span><input id="epPlace" value="${v('place')}" placeholder="예: 2층 상담실"></label>
+    <label class="field"><span>강사·기관</span><input id="epTeacher" value="${v('teacher')}" placeholder="예: 실장 / 한국소방안전원 온라인"></label>
+    <label class="field"><span>대상</span><input id="epTarget" value="${p.target!=null?v('target'):esc(it.who)}"></label>
+    <label class="field"><span>교육 내용</span><textarea id="epContent" rows="4">${p.content!=null?v('content'):esc(it.topics||'')}</textarea></label>
+    <label class="field"><span>방법</span><select id="epMethod">${EDU_METHODS.map(m=>`<option ${p.method===m?'selected':''}>${esc(m)}</option>`).join('')}</select></label>
+    <label class="field"><span>메모 (선택)</span><input id="epMemo" value="${v('memo')}" placeholder="예: 소화기 위치 안내 포함"></label>
+    ${p.at?`<div class="tiny muted" style="margin-bottom:8px">마지막 수정 ${esc(new Date(p.at).toLocaleString('ko-KR'))}</div>`:''}
+    <div class="row" style="gap:8px;margin-top:6px"><button class="btn block" onclick="saveEduPlan('${id}')">저장</button>
+      ${p.at?`<button class="btn soft block" onclick="printEduPlan('${id}')">🖨 인쇄·PDF</button>`:''}
+      <button class="btn ghost block" onclick="closeModal()">닫기</button></div>
+    ${p.at?`<button class="btn ghost block" style="margin-top:8px;color:var(--danger)" onclick="delEduPlan('${id}')">계획서 지우기</button>`:''}`);
+}
+function saveEduPlan(id){
+  if(!isHR()) return; eduInit();
+  const g=s=>($(s).value||'').trim();
+  DB.edu.plans[id]={date:g('#epDate'), time:g('#epTime'), place:g('#epPlace'), teacher:g('#epTeacher'),
+    target:g('#epTarget'), content:g('#epContent'), method:$('#epMethod').value, memo:g('#epMemo'),
+    at:now(), by:(currentUser()||{}).id||''};
+  saveDB(); renderStaff(); toast('계획서를 저장했어요'); openEduPlan(id);
+}
+function delEduPlan(id){
+  if(!isHR()) return; if(!confirm('이 계획서를 지울까요?')) return;
+  eduInit(); delete DB.edu.plans[id]; saveDB(); closeModal(); renderStaff(); toast('지웠어요');
+}
+function printEduPlan(id){
+  const it=eduCatalog().find(x=>x.id===id), p=eduPlanOf(id); if(!it||!p) return;
+  if(IN_APP_BROWSER && !confirm('지금 다른 앱(카톡 등) 안의 창이라 인쇄가 안 될 수 있어요. 크롬이나 사파리에서 이 앱을 연 뒤 다시 눌러 주세요. 그래도 시도할까요?')) return;
+  const row=(k,val,h)=>`<tr><th>${k}</th><td${h?` style="height:${h}px;vertical-align:top"`:''}>${esc(val||'')}&nbsp;</td></tr>`;
+  const html=`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>교육 계획서</title>
+    <style>body{margin:28px;color:#111;word-break:keep-all}
+    h1{font-size:20px;margin:0 0 14px}table{border-collapse:collapse;width:100%;margin:10px 0}
+    td,th{border:1px solid #444;padding:8px 10px;font-size:14px;text-align:left;white-space:pre-wrap}th{background:#eee;width:110px}
+    .small{font-size:12px;color:#444;margin-top:10px}</style></head><body>
+    <h1>${esc(it.name)} 계획서</h1>
+    <table>${row('병원',DB.hospName)}${row('교육 예정일',(p.date||'')+(p.time?' · '+p.time:''))}${row('장소',p.place)}
+      ${row('강사·기관',p.teacher)}${row('대상',p.target)}${row('방법',p.method)}${row('교육 내용',p.content,110)}
+      ${row('메모',p.memo)}${row('근거',it.cite)}</table>
+    <div class="small">${it.keep?'보관: '+esc(it.keep)+' · ':''}작성일 ${esc(todayKey())} · 작성자 서명: ____________________</div></body></html>`;
+  const f=document.createElement('iframe');
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.appendChild(f);
+  const d=f.contentWindow.document; d.open(); d.write(html); d.close();
+  setTimeout(()=>{
+    try{ f.contentWindow.focus(); f.contentWindow.print(); }
+    catch(e){ toast('이 브라우저에서는 인쇄가 안 돼요. 크롬이나 사파리에서 열어 주세요'); }
+    setTimeout(()=>f.remove(), 120000);
+  }, 300);
+}
 function printEduLog(rid){
   const r=DB.edu.recs.find(x=>x.id===rid); if(!r) return;
   const it=eduCatalog().find(x=>x.id===r.itemId); if(!it) return;
