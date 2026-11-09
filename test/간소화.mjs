@@ -46,5 +46,13 @@ const es=grab('eduSwitch');
 t('해당되는 교육을 끌 땐 한 번 묻는다', es.includes("eduState(it).st==='yes'") && es.includes('confirm('));
 t('꺼 둔 교육도 다시 켤 자리가 남는다', js.includes("const maybeOff=off.filter(it=>eduState(it).st!=='no')"));
 
+// 불편 신고
+const { fbDevice, fbText } = new Function(`${grab('fbDevice')}\n${grab('fbText')}\nreturn {fbDevice, fbText};`)();
+t('불편 신고: 기기 종류를 알아본다', fbDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)')==='아이폰' && fbDevice('Mozilla/5.0 (Linux; Android 14)')==='안드로이드' && fbDevice('Mozilla/5.0 (Windows NT 10.0)')==='윈도우 PC');
+t('불편 신고: 개발자에게 넘길 글이 한 줄씩 나온다', fbText([{at:'2026-11-09T01:00:00Z',screen:'재고 · 임플란트',device:'아이폰',name:'김',text:'안 닫혀요'}])==='1. [2026-11-09 · 재고 · 임플란트 · 아이폰 · 김] 안 닫혀요');
+t('불편 신고는 공용 문서에 담겨 직원도 쓸 수 있다', /const B_SHARED = \[[^\]]*'feedback'/.test(js));
+t('불편 신고 버튼이 직원 설정·관리자 설정 둘 다에 있다', grab('openStaffMenu').includes('openFeedback()') && grab('openMenu').includes('openFeedbackList()'));
+t('불편 신고 칸에 환자 정보 쓰지 말라는 안내', grab('openFeedback').includes('환자 이름·연락처는 적지 마세요'));
+
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
 if(fail) process.exit(1);

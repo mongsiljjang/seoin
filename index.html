@@ -567,6 +567,8 @@ function ensureSchema(){ if(!DB) return; if(!Array.isArray(DB.members)) DB.membe
   if(!Array.isArray(DB.contracts)) DB.contracts=[];
   if(!Array.isArray(DB.payslips)) DB.payslips=[];
   if(!Array.isArray(DB.resignations)) DB.resignations=[];
+  if(!Array.isArray(DB.signs)) DB.signs=[];          // 손서명 — 직원별 문서(people)에 담긴다
+  if(!Array.isArray(DB.feedback)) DB.feedback=[];    // 불편 신고 — 직원이 쓰고 관리자가 모아 개발자에게 넘긴다
   if(!Array.isArray(DB.hrLogs)) DB.hrLogs=[];
   eduInit();                                         // 의무교육 — 기준(의원/병원)과 이수 기록
   if(!Array.isArray(DB.duties)) DB.duties=[];        // 담당 분야 — 병원이 직접 만든다
@@ -5159,6 +5161,60 @@ function saveContract(sid){
     saveDB(); closeModal(); renderStaff(); toast(old?'고쳤어요 · 직원 확인을 다시 받아주세요':'저장했어요 · 직원 확인을 받아주세요');
   });
 }
+/* ---- 손서명 — 2026-11-09 사용자: "법정 의무교육, 사직서, 근로계약서를 서명으로" (꼬박 앱 참고) ----
+   세 곳(교육 참석 · 근로계약서 동의 · 사직서 제출)이 같은 서명 칸 하나를 쓴다. PIN 으로 본인을 확인하고 손가락으로 서명한다.
+   서명은 공용 문서가 아니라 직원별 문서(people/{직원})의 signs 에 담는다 — 공용 문서 1MB 한도를 먹지 않고,
+   읽을 수 있는 사람도 계약서·급여와 같다(본인 + 관리자). 그림 파일 대신 선의 좌표만 남겨 한 번에 1~2KB 다.
+   전자문서도 종이와 같은 효력이 있다(전자문서법 제4조). 근로계약서는 직원이 언제든 열어 보고 출력할 수 있어야 한다. */
+const SIGN_W=300, SIGN_H=120;
+function signEncode(strokes, w, h){
+  const sx=SIGN_W/(w||SIGN_W), sy=SIGN_H/(h||SIGN_H);
+  return (strokes||[]).filter(st=>st && st.length).map(st=>{
+    let last=''; const out=[];
+    st.forEach(([x,y])=>{ const q=Math.round(Math.max(0,Math.min(SIGN_W,x*sx)))+'.'+Math.round(Math.max(0,Math.min(SIGN_H,y*sy)));
+      if(q!==last){ out.push(q); last=q; } });
+    return out.join(' ');
+  }).filter(Boolean).join('|');
+}
+function signPoints(enc){ return String(enc||'').split('|').reduce((n,st)=>n+(st? st.split(' ').length:0),0); }
+function signSvg(enc, h){
+  const d=String(enc||'').split('|').filter(Boolean).map(st=>{
+    const pts=st.split(' ').map(q=>q.split('.').map(Number)).filter(p=>p.length===2 && p.every(Number.isFinite));
+    if(!pts.length) return '';
+    return 'M'+pts[0][0]+' '+pts[0][1]+(pts.length===1?' l0.1 0':pts.slice(1).map(p=>' L'+p[0]+' '+p[1]).join(''));
+  }).join(' ');
+  const hh=+h||40, ww=Math.round(hh*SIGN_W/SIGN_H);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIGN_W} ${SIGN_H}" width="${ww}" height="${hh}" style="vertical-align:middle"><path d="${d}" fill="none" stroke="#111" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+function signOf(sid, key){ return (DB.signs||[]).find(x=>x && x.staffId===sid && x.key===key) || null; }
+function signPut(sid, key, enc){
+  if(!Array.isArray(DB.signs)) DB.signs=[];
+  DB.signs=DB.signs.filter(x=>!(x && x.staffId===sid && x.key===key));
+  DB.signs.push({id:uid(), staffId:sid, key, d:enc, at:now()});
+}
+function signDrop(sid, key){ DB.signs=(DB.signs||[]).filter(x=>!(x && x.staffId===sid && x.key===key)); }
+function signPadHtml(id){
+  return `<div class="field" style="margin-bottom:12px"><div class="spread" style="margin-bottom:5px">
+      <span class="tiny muted" style="font-weight:700">여기에 손가락으로 서명</span>
+      <button type="button" class="btn soft xs" onclick="signClear('${id}')">지우기</button></div>
+    <canvas id="${id}" style="width:100%;height:130px;border:1.5px dashed var(--line);border-radius:12px;background:#fff;touch-action:none;display:block"></canvas></div>`;
+}
+function signPadInit(id){
+  const c=document.getElementById(id); if(!c) return;
+  const r=c.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+  c.width=Math.round(r.width*dpr); c.height=Math.round(r.height*dpr);
+  const g=c.getContext('2d'); g.scale(dpr,dpr); g.lineWidth=2.5; g.lineCap='round'; g.lineJoin='round'; g.strokeStyle='#111';
+  c._strokes=[]; c._w=r.width; c._h=r.height; let cur=null;
+  const pt=e=>{ const b=c.getBoundingClientRect(); return [e.clientX-b.left, e.clientY-b.top]; };
+  c.onpointerdown=e=>{ e.preventDefault(); c.setPointerCapture&&c.setPointerCapture(e.pointerId); cur=[pt(e)]; c._strokes.push(cur); g.beginPath(); g.moveTo(...cur[0]); };
+  c.onpointermove=e=>{ if(!cur) return; e.preventDefault(); const p=pt(e); cur.push(p); g.lineTo(...p); g.stroke(); };
+  c.onpointerup=c.onpointercancel=()=>{ cur=null; };
+}
+function signClear(id){ const c=document.getElementById(id); if(!c) return; c.getContext('2d').clearRect(0,0,c.width,c.height); c._strokes=[]; }
+// 점 몇 개는 서명으로 치지 않는다 — 실수로 한 번 닿은 것을 막는다
+function signRead(id){ const c=document.getElementById(id); if(!c||!c._strokes) return '';
+  const enc=signEncode(c._strokes, c._w, c._h); return signPoints(enc)>=8? enc : ''; }
+
 // 대면 확인 — 직원이 화면을 읽고 자기 PIN 을 눌러 확인한다
 function openContractAgree(sid){
   withPayKey(async key=>{
@@ -5171,8 +5227,10 @@ function openContractAgree(sid){
       </div>
       <label class="field"><span>${esc(s.name)} 님 PIN</span>
         <input id="ctPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+      ${signPadHtml('ctSign')}
       <button class="btn block" onclick="doContractAgree('${sid}')">읽었고 동의합니다</button>`,
       ()=>openContract(sid));
+    signPadInit('ctSign');
   });
 }
 function contractRows(d){
@@ -5192,7 +5250,9 @@ function doContractAgree(sid){
   const s=staffById(sid), c=contractOf(sid); if(!s||!c) return;
   const pin=($('#ctPin').value||'').trim();
   if(String(s.pin||'')!==pin){ toast('PIN이 맞지 않아요'); return; }
+  const sg=signRead('ctSign'); if(!sg){ toast('아래 칸에 서명해 주세요'); return; }
   c.agreedAt=now(); c.agreedBy=s.id;
+  c.signKey='contract:'+c.agreedAt; signPut(s.id, c.signKey, sg);
   hrLog('계약서', `${s.name} 근로계약서 확인(동의)`);
   saveDB(); closeModal(); renderStaff(); toast('확인 기록을 남겼어요 · 인쇄해서 한 장 드리세요');
 }
@@ -5220,7 +5280,7 @@ function printContract(sid){
       <div class="sign">
         <div>작성일 ${todayKey()}</div>
         <div>사업주 ${esc(DB.hospName||'')} (서명)</div>
-        <div>근로자 ${esc(s.name)} (서명)</div>
+        <div>근로자 ${esc(s.name)} ${c.signKey&&signOf(s.id,c.signKey)? signSvg(signOf(s.id,c.signKey).d, 44) : '(서명)'}</div>
       </div>
       <p class="foot">앱 확인 기록: ${c.agreedAt? fmtDateFull(String(c.agreedAt).slice(0,10))+' '+fmtTime(c.agreedAt)+' 본인 확인' : '미확인'}</p>`);
   });
@@ -5829,17 +5889,22 @@ function openResignForm(){
     <label class="field"><span>사직 사유 (안 적어도 돼요)</span><textarea id="rgWhy" rows="4" placeholder="개인 사정"></textarea></label>
     <div class="tiny muted" style="margin:-4px 2px 12px">⚠️ 적은 내용은 <b>최고관리자와 인사담당자에게 보입니다.</b> 앱 구조상 완전히 가려지지는 않으니 꼭 필요한 말만 적어주세요.</div>
     <div id="rgEffect" class="tiny muted" style="margin:0 2px 12px"></div>
+    ${signPadHtml('rgSign')}
     <button class="btn block" onclick="submitResign()">사직서 제출</button>`);
+  signPadInit('rgSign');
   const upd=()=>{ const e=$('#rgEffect'); if(e) e.innerHTML=`병원이 사직서를 안 받아줘도 <b>${fmtDateFull(resignEffect(todayKey()))}</b>이 되면 퇴직 효력이 생깁니다(월급으로 받는 경우).<br><span class="lawcite">근거 · 민법 제660조제3항</span>`; };
   upd();
 }
 function submitResign(){
   const u=currentUser(); if(!u) return;
   const lastDay=$('#rgLast').value||todayKey(), reason=($('#rgWhy').value||'').trim();
+  const sg=signRead('rgSign'); if(!sg){ toast('아래 칸에 서명해 주세요'); return; }
   if(!confirm('사직서를 제출할까요?\n제출한 시각이 기록으로 남습니다.')) return;
   if(!Array.isArray(DB.resignations)) DB.resignations=[];
-  DB.resignations.unshift({id:uid(), staffId:u.id, submittedAt:now(), submitDay:todayKey(),
-    lastDay, reason, status:'제출', handledAt:null, handledBy:null});
+  const rid=uid();
+  DB.resignations.unshift({id:rid, staffId:u.id, submittedAt:now(), submitDay:todayKey(),
+    lastDay, reason, status:'제출', handledAt:null, handledBy:null, signKey:'resign:'+rid});
+  signPut(u.id, 'resign:'+rid, sg);
   saveDB(); closeModal(); renderStaff(); toast('사직서를 제출했어요');
 }
 function openResignView(id){
@@ -5856,6 +5921,7 @@ function openResignView(id){
       ${(isHR()||mine)&&r.reason?`<div style="margin-top:8px"><div class="tiny muted">사유</div><div class="tiny" style="white-space:pre-wrap;margin-top:3px">${esc(r.reason)}</div></div>`:''}
     </div>
     <div class="tiny muted" style="margin:-6px 2px 12px">병원이 사직서를 안 받아줘도 효력일이 되면 퇴직 효력이 생깁니다(월급으로 받는 경우).<br><span class="lawcite">근거 · 민법 제660조제3항</span></div>
+    ${r.signKey&&signOf(r.staffId,r.signKey)?`<div class="spread" style="margin:-6px 2px 12px"><span class="tiny muted">본인 서명</span>${signSvg(signOf(r.staffId,r.signKey).d,40)}</div>`:''}
     ${r.onBehalf?`<div class="tiny muted" style="margin:-6px 2px 12px">${esc(r.byName||'')}가 대신 등록했어요.</div>`:''}
     ${isHR()&&r.status==='제출'?`<button class="btn block" onclick="handleResign('${r.id}')">수리하고 퇴사 처리</button>
       <div class="tiny muted" style="margin-top:8px">누르면 재직 상태가 <b>퇴사</b>로 바뀌어 로그인이 막힙니다. 남은 ${leaveWord()} ${s?annualRemain(s).remain:0}일을 먼저 정산하세요.</div>`:''}
@@ -5881,6 +5947,7 @@ function cancelResign(id){
   if(!r||!me||me.id!==r.staffId) return;
   if(!confirm('사직서를 철회할까요?')) return;
   DB.resignations=DB.resignations.filter(x=>x.id!==id);
+  if(r.signKey) signDrop(r.staffId, r.signKey);
   saveDB(); closeModal(); renderStaff(); toast('철회했어요');
 }
 function hrResignView(){
@@ -6576,12 +6643,12 @@ function openEduConfirm(rid){
   const left=(r.staffIds||[]).filter(sid=>!eduConfOf(r,sid)).length;
   modal(`<h3>✓ 참석 확인</h3>
     <div class="tiny muted" style="margin-bottom:10px">${esc(it.name)} · ${esc(fmtDateFull(r.date))}<br>
-      참석자가 <b>자기 PIN</b> 을 넣거나, 담당자가 현장에서 대신 확인해요. 확인한 방법과 시각이 기록으로 남아요.</div>
+      참석자가 <b>PIN + 손서명</b>을 하거나, 담당자가 현장에서 대신 확인해요. 서명은 교육 일지에 같이 찍혀요.</div>
     ${(r.staffIds||[]).map(sid=>{ const c=eduConfOf(r,sid);
       return `<div class="item" style="align-items:center;gap:6px">
         <div class="grow"><div style="font-weight:700">${esc(staffLabel(sid))}</div>
-          <div class="tiny ${c?'':'muted'}" style="${c?'color:var(--ok)':''}">${c?esc(eduConfText(c)):'아직 확인 전'}</div></div>
-        ${c?'':`<button class="btn soft xs" onclick="eduConfPin('${rid}','${sid}')">PIN</button>
+          <div class="tiny ${c?'':'muted'}" style="${c?'color:var(--ok)':''}">${c?esc(eduConfText(c)):'아직 확인 전'}</div>${signOf(sid,'edu:'+rid)?signSvg(signOf(sid,'edu:'+rid).d,28):''}</div>
+        ${c?'':`<button class="btn soft xs" onclick="eduConfPin('${rid}','${sid}')">✍️ 서명</button>
                 <button class="btn soft xs" onclick="eduConfMgr('${rid}','${sid}')">담당자 확인</button>`}</div>`; }).join('')}
     ${left>1?`<button class="btn ghost block" style="margin-top:10px" onclick="eduConfAll('${rid}')">남은 ${left}명을 담당자가 모두 확인</button>`:''}
     <button class="btn soft block" style="margin-top:8px" onclick="openEduRec('${r.itemId}')">‹ 기록으로</button>`);
@@ -6592,13 +6659,17 @@ function eduConfPin(rid,sid){
     <div class="hint">참석한 본인이 <b>자기 PIN</b> 을 넣어 주세요. 확인한 시각이 기록으로 남아요.</div>
     <label class="field"><span>${esc(s.name)} 님 PIN</span>
       <input id="ecPin" class="pinbox" inputmode="numeric" maxlength="8" type="password" placeholder="••••"></label>
+    ${signPadHtml('ecSign')}
     <button class="btn block" onclick="doEduConfPin('${rid}','${sid}')">참석했습니다</button>`, ()=>openEduConfirm(rid));
+  signPadInit('ecSign');
 }
 function doEduConfPin(rid,sid){
   if(!isHR()){ toast('최고관리자와 인사담당자만 기록할 수 있어요'); return; }
   const r=DB.edu.recs.find(x=>x.id===rid), s=staffById(sid); if(!r||!s) return;
   if(String(s.pin||'')!==($('#ecPin').value||'').trim()){ toast('PIN이 맞지 않아요'); return; }
+  const sg=signRead('ecSign'); if(!sg){ toast('아래 칸에 서명해 주세요'); return; }
   r.conf=r.conf||{}; r.conf[sid]=eduConfMake('pin', s);
+  signPut(sid, 'edu:'+rid, sg);
   hrLog('교육', `${s.name} 교육 참석 본인 확인`);
   saveDB(); openEduConfirm(rid); renderStaff();
 }
@@ -6689,7 +6760,8 @@ function printEduPlan(id){
 function printEduLog(rid){
   const r=DB.edu.recs.find(x=>x.id===rid); if(!r) return;
   const it=eduCatalog().find(x=>x.id===r.itemId); if(!it) return;
-  const rows=(r.staffIds||[]).map((sid,i)=>`<tr><td>${i+1}</td><td>${esc(staffLabel(sid))}</td><td>${esc(eduConfText(eduConfOf(r,sid)))}</td></tr>`).join('');
+  const rows=(r.staffIds||[]).map((sid,i)=>{ const sg=signOf(sid,'edu:'+r.id);
+    return `<tr><td>${i+1}</td><td>${esc(staffLabel(sid))}</td><td>${sg? signSvg(sg.d, 34)+' ':''}<span style="font-size:11px">${esc(eduConfText(eduConfOf(r,sid)))}</span></td></tr>`; }).join('');
   // 새 창은 폰에서 막히는 일이 많다. 숨은 틀(iframe) 안에 일지를 그리고 그 틀을 인쇄한다.
   // 인쇄 화면에서 PDF 로 저장하거나, 와이파이 복합기를 골라 바로 출력하거나, 복합기 팩스로 보낸다.
   if(IN_APP_BROWSER && !confirm('지금 다른 앱(카톡 등) 안의 창이라 인쇄가 안 될 수 있어요. 크롬이나 사파리에서 이 앱을 연 뒤 다시 눌러 주세요. 그래도 시도할까요?')) return;
@@ -7287,6 +7359,65 @@ function myPageHtml(){
 /* ========================================================================
    설정 / 백업
    ======================================================================== */
+/* ---- 불편 신고 — 2026-11-09 사용자: "개발자가 유저의 불편사항을 바로 수정하고 설치되게" ----
+   앱은 웹앱이라 고치면 다음에 열 때 모든 기기(컴퓨터·폰)에 자동으로 반영된다. 빠진 것은 '무엇이 불편한지'를 모으는 길.
+   직원이 한 줄 쓰면 어느 화면·어떤 기기에서 썼는지가 같이 남는다. 관리자가 목록을 복사해 개발자에게 넘긴다.
+   환자 정보는 쓰지 말라고 안내한다(공용 문서에 담기므로). */
+function fbDevice(ua){ ua=String(ua||'');
+  return /iPhone|iPad|iPod/.test(ua)?'아이폰' : /Android/.test(ua)?'안드로이드' : /Windows/.test(ua)?'윈도우 PC' : /Macintosh/.test(ua)?'맥' : '기타'; }
+function fbScreen(){
+  const T={home:'홈',inv:'재고',att:'출퇴근',leave:'연월차',staff:'직원',edu:'교육'};
+  const t=typeof currentTab!=='undefined'? currentTab:'';
+  const sub = t==='inv' && typeof invMode!=='undefined'? ({implant:' · 임플란트',ledger:' · 대장'}[invMode]||' · 일반 재고')
+            : t==='staff' && typeof hrView!=='undefined' && hrView? ' · '+hrView : '';
+  return (T[t]||t||'')+sub;
+}
+function fbOpenCount(){ return (DB.feedback||[]).filter(x=>!x.done).length; }
+function fbText(list){
+  return list.map((x,i)=>`${i+1}. [${String(x.at||'').slice(0,10)} · ${x.screen||''} · ${x.device||''}${x.name?' · '+x.name:''}] ${x.text}`).join('\n');
+}
+function openFeedback(){
+  const scr=fbScreen();
+  modal(`<h3>🙋 불편 신고</h3>
+    <div class="hint">불편하거나 이상한 점을 한 줄로 적어 주세요. 고치면 다음에 앱을 열 때 자동으로 반영돼요.</div>
+    <textarea id="fbText" rows="4" placeholder="예: 임플란트 사용 누르면 화면이 안 닫혀요"></textarea>
+    <div class="tiny muted" style="margin:6px 2px 12px">같이 저장되는 것: 화면(${esc(scr||'-')}) · 기기(${esc(fbDevice(navigator.userAgent))}) · 시각. <b>환자 이름·연락처는 적지 마세요.</b></div>
+    <button class="btn block" onclick="saveFeedback()">보내기</button>`);
+  setTimeout(()=>{ const t=$('#fbText'); if(t) t.focus(); },200);
+}
+function saveFeedback(){
+  const text=($('#fbText').value||'').trim().slice(0,500); if(!text){ toast('내용을 적어 주세요'); return; }
+  const u=currentUser();
+  if(!Array.isArray(DB.feedback)) DB.feedback=[];
+  DB.feedback.unshift({id:uid(), at:now(), by:u?u.id:'', name:u?u.name:'', text, screen:fbScreen(), device:fbDevice(navigator.userAgent), done:false});
+  if(DB.feedback.length>200) DB.feedback=DB.feedback.slice(0,200);
+  saveDB(); closeModal(); toast('보냈어요 · 고마워요');
+}
+function openFeedbackList(){
+  if(!isAdmin()) return openFeedback();
+  const list=(DB.feedback||[]), open=list.filter(x=>!x.done);
+  modal(`<h3>🙋 불편 신고 ${open.length?`<span class="tiny" style="color:var(--warn)">${open.length}건</span>`:''}</h3>
+    <div class="tiny muted" style="margin-bottom:10px">직원들이 보낸 불편 사항이에요. <b>📋 복사</b>를 눌러 개발자에게 그대로 붙여 보내면 돼요.</div>
+    <div class="row" style="gap:8px;margin-bottom:10px"><button class="btn soft grow" onclick="copyFeedback()">📋 안 고친 것 복사</button>
+      <button class="btn soft grow" onclick="openFeedback()">＋ 새로 쓰기</button></div>
+    ${list.length? list.slice(0,40).map(x=>`<div class="item" style="align-items:flex-start;${x.done?'opacity:.5':''}">
+      <div class="grow"><div style="font-weight:700;white-space:pre-wrap">${esc(x.text)}</div>
+        <div class="tiny muted">${esc(String(x.at||'').slice(0,10))} · ${esc(x.screen||'')} · ${esc(x.device||'')}${x.name?' · '+esc(x.name):''}</div></div>
+      <button class="btn soft xs" onclick="toggleFeedback('${x.id}')">${x.done?'되돌리기':'✓ 해결'}</button></div>`).join('')
+      : emptyBox('🙋','아직 신고가 없어요')}`, openMenu);
+}
+function toggleFeedback(id){
+  if(!isAdmin()) return;
+  const x=(DB.feedback||[]).find(f=>f.id===id); if(!x) return;
+  x.done=!x.done; saveDB(); openFeedbackList();
+}
+function copyFeedback(){
+  const open=(DB.feedback||[]).filter(x=>!x.done);
+  if(!open.length){ toast('안 고친 신고가 없어요'); return; }
+  const t=`${DB.hospName||'병원'} 불편 신고 ${open.length}건\n`+fbText(open.slice().reverse());
+  (navigator.clipboard? navigator.clipboard.writeText(t) : Promise.reject())
+    .then(()=>toast('복사했어요 · 개발자에게 붙여 보내세요'), ()=>{ prompt('아래 내용을 복사하세요', t); });
+}
 function openStaffMenu(){
   const u=currentUser();
   modal(`<h3>⚙️ 설정</h3>
@@ -7294,6 +7425,7 @@ function openStaffMenu(){
       <div class="row" style="gap:8px"><span class="pill info">👤 직원</span>
       <span class="tiny">${u?esc(u.name)+' 님':'직원'} · 재고·출퇴근·연월차 신청 사용</span></div></div>
     <button class="btn soft block" onclick="changeMyPin()">🔒 내 PIN 변경</button>
+    <button class="btn soft block" style="margin-top:8px" onclick="openFeedback()">🙋 불편 신고</button>
     <button class="btn soft block" style="margin-top:8px" onclick="logout()">로그아웃</button>
     <div class="tiny muted" style="margin:10px 2px 0">연월차 관리·설정·직원 관리는 최고관리자와 인사담당자만 볼 수 있어요.</div>
     <div class="tiny muted" style="text-align:center;margin-top:16px">병원 관리 앱 · v1</div>`);
@@ -7327,6 +7459,7 @@ function openMenu(){
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:10px 12px;margin-bottom:10px">
       <span class="tiny"><b>👑 관리자</b>로 로그인 · ${esc(currentUser()?currentUser().name:'')} 님</span></div>
     ${syncCard}
+    <button class="btn soft block" style="margin-top:10px" onclick="openFeedbackList()">🙋 불편 신고${fbOpenCount()?` <b style="color:var(--warn)">${fbOpenCount()}건</b>`:''}</button>
     <div class="sechead"><span>🏥 병원(앱) 이름</span></div>
     <div class="setrow">
       <input id="setName" value="${esc(DB.hospName||'')}" style="flex:3 1 150px; margin:0">
@@ -7626,8 +7759,8 @@ let legacyDoc=null;            // 옛 단일 문서 — 옮기고 나면 읽기�
 
 const B_SHARED = ['version','hospName','inventory','invLogs','purchases','attendance','leaves',
   'implants','implantLogs','implantCases','masters','notices','duties','vendors','orderReqs','hosp',
-  'docTypes','docForms','geo','members','prefs','payLock','lastBackupAt'];
-const B_PERSON = ['contracts','payslips','resignations','docReqs'];
+  'docTypes','docForms','geo','members','prefs','payLock','lastBackupAt','feedback'];
+const B_PERSON = ['contracts','payslips','resignations','docReqs','signs'];   // signs — 손서명(직원별 문서에 따로 담는다)
 
 function cloudConfigured(){
   const c=window.FIREBASE_CONFIG;
