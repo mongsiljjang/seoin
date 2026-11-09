@@ -74,7 +74,7 @@ AI 세션은 저마다 `claude/…-xxxxxx` 라는 **새 이름**을 받고 거�
 node test/수첩읽기.mjs      node test/단계별수술.mjs      node test/보험페일.mjs
 node test/페일교환.mjs      node test/규격읽기.mjs        node test/장부맞춤.mjs
 node test/주문체크.mjs      node test/전화칸.mjs          node test/용어집.mjs
-node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs      node test/DB접촉면.mjs      node test/입력빠짐.mjs      node test/대장기간.mjs      node test/명세서사진.mjs      node test/기록고치기.mjs      node test/직원한달.mjs      node test/세무사자료.mjs
+node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs      node test/DB접촉면.mjs      node test/입력빠짐.mjs      node test/대장기간.mjs      node test/명세서사진.mjs      node test/기록고치기.mjs      node test/직원한달.mjs      node test/세무사자료.mjs      node test/간소화.mjs
 ```
 
 보안규칙 시험은 에뮬레이터가 필요하다 — `test/README.md` 참고
@@ -123,7 +123,7 @@ node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험
 node test/수첩읽기.mjs   node test/단계별수술.mjs   node test/보험페일.mjs
 node test/페일교환.mjs   node test/규격읽기.mjs     node test/장부맞춤.mjs
 node test/주문체크.mjs   node test/전화칸.mjs       node test/용어집.mjs
-node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs      node test/DB접촉면.mjs      node test/입력빠짐.mjs      node test/대장기간.mjs      node test/명세서사진.mjs      node test/기록고치기.mjs      node test/직원한달.mjs      node test/세무사자료.mjs
+node test/의무교육.mjs      node test/급여열쇠.mjs      node test/보험안내.mjs      node test/보험단계점검.mjs      node test/임플란트트리.mjs      node test/사진판독.mjs      node test/DB접촉면.mjs      node test/입력빠짐.mjs      node test/대장기간.mjs      node test/명세서사진.mjs      node test/기록고치기.mjs      node test/직원한달.mjs      node test/세무사자료.mjs      node test/간소화.mjs
 ```
 
 - 화면을 고쳤으면 **`deslop-ko`** 도 돌린다. 기준선은 **3개 항목 4곳** —

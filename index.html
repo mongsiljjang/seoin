@@ -91,6 +91,15 @@
 
   /* Inputs */
   label.field{display:block; margin-bottom:10px}
+  details.more > summary::-webkit-details-marker{display:none}
+  /* 폰 설정 화면 같은 켜고 끄는 스위치 — 2026-11-09 사용자: "버튼을 누르면 켜고 끄고로, 핸드폰처럼" */
+  input.sw{appearance:none;-webkit-appearance:none;width:50px;height:30px;padding:0;margin:0;flex:none;border:0;border-radius:999px;
+    background:#cfd8dc;position:relative;cursor:pointer;transition:background .2s}
+  input.sw::after{content:'';position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .2s}
+  input.sw:checked{background:var(--ok)}
+  input.sw:checked::after{left:23px}
+  input.sw:focus{outline:none}
   label.field > span{display:block; font-size:12.5px; color:var(--sub); font-weight:700; margin-bottom:5px}
   input,select,textarea{
     width:100%; font-size:16px; padding:12px; border:1.5px solid var(--line);
@@ -1296,16 +1305,24 @@ function renderInv(){
   refreshBell();
 }
 
+/* 수량 칸 — 2026-11-09 "클릭 수 오차": 숫자 버튼(1·2·5·10)이 더하기가 아니라 그 숫자로 바꾸는 버튼이라
+   1을 세 번 누르면 3이 아니라 1이 들어갔다. 이제 [－] [＋] 와 '+5' 처럼 더하는 버튼만 둔다. */
+function qtyStepHtml(id, adds){
+  return `<div class="row" style="gap:8px;align-items:stretch">
+      <button type="button" class="btn soft" style="font-size:22px;min-width:58px" onclick="qtyStep('${id}',-1)">－</button>
+      <input id="${id}" type="number" inputmode="numeric" min="1" value="1" style="flex:1;width:auto;min-width:0;font-size:24px;text-align:center;font-weight:800">
+      <button type="button" class="btn soft" style="font-size:22px;min-width:58px" onclick="qtyStep('${id}',1)">＋</button></div>
+    <div class="row wrap" style="gap:6px;margin:8px 0 12px">${(adds||[]).map(n=>`<button type="button" class="btn xs soft" onclick="qtyStep('${id}',${n})">+${n}</button>`).join('')}</div>`;
+}
+function qtyNext(cur, d){ const n=(parseInt(cur,10)||0)+d; return Math.max(1,n); }
+function qtyStep(id, d){ const el=document.getElementById(id); if(el) el.value=qtyNext(el.value, d); }
 function quickAdjust(id, type){
   const it = itemById(id); if(!it) return;
   modal(`
     <h3>${type==='in'?'📥 입고':'📤 출고'} · ${esc(it.name)}</h3>
     <div class="tiny muted" style="margin-bottom:12px">현재 재고 <b>${it.qty}${esc(it.unit)}</b></div>
-    <label class="field"><span>수량 (${esc(it.unit)})</span>
-      <input id="qAmt" type="number" inputmode="numeric" min="1" value="1" style="font-size:22px;text-align:center;font-weight:800"></label>
-    <div class="row wrap" style="margin-bottom:12px">
-      ${[1,5,10,50,100].map(n=>`<button class="btn xs soft" onclick="qAmt.value=${n}">${n}</button>`).join('')}
-    </div>
+    <label class="field" style="margin-bottom:0"><span>수량 (${esc(it.unit)})</span></label>
+    ${qtyStepHtml('qAmt',[10,50])}
     <label class="field"><span>메모 (선택)</span><input id="qMemo" placeholder="예: 납품 / 처치 사용"></label>
     <button class="btn ${type==='in'?'ok':'warn'} block" onclick="doAdjust('${id}','${type}')">
       ${type==='in'?'입고 처리':'출고 처리'}</button>`);
@@ -2081,7 +2098,7 @@ function renderImplant(){
   let total=0, low=0, zero=0;
   list.forEach(p=>p.variants.forEach(v=>{ total+=(+v.qty||0); if(v.qty===0)zero++; else if(v.qty<=(+v.minQty||0))low++; }));
   const head=`<div class="spread" style="margin:2px 2px 10px"><h2 class="sec" style="margin:0">🦷 임플란트</h2>
-    <button class="btn sm" onclick="openImplantForm()">＋ 제품</button></div>`;
+    <button class="btn sm admin-only" onclick="openImplantForm()">＋ 제품</button></div>`;
   // 처음에는 '선택' 이 눌려 있어 트리와 제품 머리·재고 요약 없이 첫 제품의 규격 표만 보인다. 회사를 누르면 예전 그대로 그 회사의 트리와 첫 제품 규격 표가 보인다.
   // 다른 화면에서 제품을 지정해 들어오면 그 제품의 회사로 맞춘다.
   let cur=currentImplantId? implantById(currentImplantId):null;
@@ -2090,15 +2107,16 @@ function renderImplant(){
   if(cur) currentBrand=String(cur.brand||'').trim();
   if(currentBrand && !brands.includes(currentBrand)) currentBrand=null;
   if(currentBrand && !cur){ const t=impTree(list,currentBrand); if(t.length){ cur=t[0].items[0]; currentImplantId=cur.id; impOpenFor(cur); } }
-  const summary=`<div class="summary3">
+  const summary=`<div class="summary3 admin-only">
     <div class="stat"><div class="n">${total}</div><div class="l">전체 수량</div></div>
     <div class="stat"><div class="n" style="color:var(--warn)">${low}</div><div class="l">부족 규격</div></div>
     <div class="stat"><div class="n" style="color:var(--danger)">${zero}</div><div class="l">품절 규격</div></div></div>`;
   const cardBox=(p,bare)=>'<div id="impCard">'+implantCard(p,bare)+'</div>';   // '선택' 일 때는 트리도, 제품 머리·재고 요약도 없이 첫 제품의 규격 표만 보인다
   const chips=`<div class="chips"><button class="chip ${!currentBrand?'on':''}" onclick="selectBrand('')">선택</button>${brands.map(b=>{ const n=list.filter(p=>String(p.brand||'').trim()===b).length;
       return `<button class="chip ${b===currentBrand?'on':''}" onclick="selectBrand(${jarg(b)})">${esc(b)}${n?'':' <span class="tiny" style="opacity:.6">없음</span>'}</button>`; }).join('')}
-    <button class="chip" onclick="openImplantForm('','')">＋ 회사</button></div>`;
-  box.innerHTML = head+summary+gapBox(DB.implants, DB.implantCases, todayKey())+sechead('임플란트 회사', impAddGuideHtml())+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0], true) : ''));
+    <button class="chip admin-only" onclick="openImplantForm('','')">＋ 회사</button></div>`;
+  // 직원 화면은 표만 — 요약·점검 상자·추가 안내는 관리자에게만(2026-11-09 "최대한 미니멀하게")
+  box.innerHTML = head+summary+`<div class="admin-only">${gapBox(DB.implants, DB.implantCases, todayKey())}${sechead('임플란트 회사', impAddGuideHtml())}</div>`+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0], true) : ''));
   refreshBell();
 }
 // 그 제품이 들어 있는 부품 줄을 펼친다 — 고를 때만 한다(그릴 때마다 열면 접을 수가 없다)
@@ -2142,7 +2160,7 @@ function implantCard(p, bare){
   // 바꿀 페일이 생겼을 때만 문을 낸다 — 늘 떠 있으면 눈에 안 들어온다
   const fx = (pFailOpen(p)||pFailWait(p)) ? `<button class="btn soft sm grow" onclick="openFailExchange()">🔄 페일 교환${pFailOpen(p)?` <b>${pFailOpen(p)}</b>`:''}</button>` : '';
   return `<div class="card">${bare? '' : head+recon+'<div class="divider"></div>'}${body}
-    <div class="btnrow" style="margin-top:12px"><button class="btn sm grow" onclick="openVariantForm('${p.id}')">＋ 규격 추가</button>${del}${bulk}</div>
+    <div class="btnrow admin-only" style="margin-top:12px"><button class="btn sm grow" onclick="openVariantForm('${p.id}')">＋ 규격 추가</button>${del}${bulk}</div>
     ${stk||fx?`<div class="btnrow" style="margin-top:8px">${stk}${fx}</div>`:''}</div>`;
 }
 function openStocktake(pid){
@@ -2175,17 +2193,21 @@ function matrixHtml(p,parsed){
   const at=(d,l)=>fx.find(x=>x.dl.d===d&&x.dl.l===l);
   const hid=(d,l)=>(p.cellHide||[]).includes(specNum(d)+'|'+specNum(l));
   // 칸을 하나씩 가린다. 한 줄(또는 한 칸 세로줄)의 모든 칸이 가려지고 규격도 없으면 그 줄은 비어 있으니 그리지 않는다.
-  const dias=g.bs.filter(d=>!g.ss.every(l=>!at(d,l) && hid(d,l)));
-  const lens=g.ss.filter(l=>!g.bs.every(d=>!at(d,l) && hid(d,l)));
-  let t=`<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 남은 재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 남은 재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
-  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>`<th title="눌러서 빼기" onclick="dropAxis('${p.id}','s',${l})" style="cursor:pointer">${specNum(l)}</th>`).join('')}<th><button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button></th></tr>`;
-  dias.forEach(d=>{ t+=`<tr><td class="rowh" title="눌러서 빼기" onclick="dropAxis('${p.id}','b',${d})" style="cursor:pointer">Ø${specNum(d)}</td>`+lens.map(l=>{ const c=at(d,l);
-    if(!c) return (p.cellHide||[]).includes(specNum(d)+'|'+specNum(l)) ? '<td></td>' : `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
+  const adm=isAdmin();
+  // 직원에게는 규격이 하나라도 있는 줄·칸만 보인다 — 빈 줄이 없어지면 폰에서 옆으로 밀 일도 줄어든다
+  const dias=g.bs.filter(d=>adm? !g.ss.every(l=>!at(d,l) && hid(d,l)) : g.ss.some(l=>at(d,l)));
+  const lens=g.ss.filter(l=>adm? !g.bs.every(d=>!at(d,l) && hid(d,l)) : g.bs.some(d=>at(d,l)));
+  let t= !adm ? `<div class="hint" style="margin-bottom:10px">숫자 칸을 누르면 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b>을 넣어요. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`
+    : `<div class="hint" style="margin-bottom:10px">📥 <b>빈 칸을 누르면</b> 그 규격이 만들어지고, <b>숫자가 있는 칸</b>은 <b style="color:var(--ok)">＋입고</b> · <b style="color:var(--warn)">－사용</b> · 남은 재고를 기록해요. 칸 모서리 <b style="color:var(--warn)">●</b> 는 남은 재고 오차. <span class="muted">(가로 = ${ax.s} mm, 세로 = ${ax.b} Ø)</span></div>`;
+  t+=`<div style="overflow-x:auto"><table class="mtx"><tr><th></th>${lens.map(l=>adm?`<th title="눌러서 빼기" onclick="dropAxis('${p.id}','s',${l})" style="cursor:pointer">${specNum(l)}</th>`:`<th>${specNum(l)}</th>`).join('')}<th>${adm?`<button type="button" class="chip" onclick="addAxis('${p.id}','s')" title="${ax.s} 더하기">＋</button>`:''}</th></tr>`;
+  dias.forEach(d=>{ t+=(adm?`<tr><td class="rowh" title="눌러서 빼기" onclick="dropAxis('${p.id}','b',${d})" style="cursor:pointer">Ø${specNum(d)}</td>`:`<tr><td class="rowh">Ø${specNum(d)}</td>`)+lens.map(l=>{ const c=at(d,l);
+    // 직원은 빈 칸을 눌러도 규격이 생기지 않는다 — 잘못 눌러 없던 규격이 생기는 일을 막는다
+    if(!c) return (!adm || (p.cellHide||[]).includes(specNum(d)+'|'+specNum(l))) ? '<td></td>' : `<td><div class="cell empty" onclick="openVariantForm('${p.id}','','${d}×${l}')">＋</div></td>`;
     const df=vDiff(c.v);
     const dot = df!=null&&df!==0?`<span style="position:absolute;top:3px;right:4px;width:8px;height:8px;border-radius:50%;background:${df<0?'var(--danger)':'var(--warn)'}"></span>`:'';
     return `<td><div class="cell ${vState(c.v)}" style="position:relative" onclick="openVariant('${p.id}','${c.v.id}')">${dot}${c.v.qty}<span class="u">개</span></div></td>`;
   }).join('')+`<td></td></tr>`; });
-  t+=`<tr><td class="rowh"><button type="button" class="chip" onclick="addAxis('${p.id}','b')" title="${ax.b} 더하기">＋</button></td><td colspan="${lens.length+1}" class="tiny muted" style="text-align:left;padding-left:8px">＋로 눈금을 더하고, ${ax.b}·${ax.s} 숫자를 누르면 그 줄을 뺍니다</td></tr>`;
+  if(adm) t+=`<tr><td class="rowh"><button type="button" class="chip" onclick="addAxis('${p.id}','b')" title="${ax.b} 더하기">＋</button></td><td colspan="${lens.length+1}" class="tiny muted" style="text-align:left;padding-left:8px">＋로 눈금을 더하고, ${ax.b}·${ax.s} 숫자를 누르면 그 줄을 뺍니다</td></tr>`;
   t+=`</table></div><div class="legend2"><span><i class="ok"></i>충분</span><span><i class="low"></i>부족</span><span><i class="zero"></i>품절</span></div>`;
   if(others.length) t+=`<div class="tiny muted" style="margin:12px 2px 4px">기타 규격</div>`+variantRows(p,others.map(x=>x.v));
   return t;
@@ -2516,25 +2538,27 @@ function openVariant(pid,vid){
     <div class="card" style="box-shadow:none;background:var(--brand-soft);border:0;padding:12px 14px">
       <div class="spread"><div><div class="big" style="color:var(--brand)">${v.qty}개</div>
         <div class="tiny muted">현재고(장부) · ${esc(p.part||'')} · 최소 ${v.minQty||0}${v.lot?' · LOT '+esc(v.lot):''}</div></div></div>
-      <div class="divider" style="margin:10px 0"></div>
+      <div class="admin-only"><div class="divider" style="margin:10px 0"></div>
       <div class="two" style="gap:8px">
         <div><div class="tiny muted">누적 매입(입고)</div><div style="font-weight:800">${+v.inTot||0}개${exIn(v)?` <span class="tiny" style="color:var(--ok)">+교환 ${exIn(v)}</span>`:''}${vOpen(v)?` <span class="tiny muted">· 이월 ${vOpen(v)}</span>`:''}</div></div>
         <div><div class="tiny muted">누적 사용</div><div style="font-weight:800">${vUse(v)}개</div></div>
       </div>
       <div class="row wrap" style="gap:6px;margin-top:8px">
-        <span class="pill info">일반 ${+v.uNor||0}</span><span class="pill pend">보험 ${+v.uIns||0}</span><span class="pill danger">페일 ${+v.uFail||0}</span></div>
+        <span class="pill info">일반 ${+v.uNor||0}</span><span class="pill pend">보험 ${+v.uIns||0}</span><span class="pill danger">페일 ${+v.uFail||0}</span></div></div>
       ${diffRow}
     </div>
-    <div class="row" style="margin:6px 0 8px"><button class="btn ok grow" onclick="adjustVariant('${pid}','${vid}','in')">＋ 입고</button>
-      <button class="btn warn grow" onclick="adjustVariant('${pid}','${vid}','out')">－ 사용</button></div>
+    <!-- 2026-11-09 사용자: "복잡하면 직원들이 못 쓴다" — 처음엔 입고·사용 두 개만. 나머지는 더보기 안에 -->
+    <div class="row" style="margin:10px 0 10px"><button class="btn ok grow" style="padding:16px;font-size:17px" onclick="adjustVariant('${pid}','${vid}','in')">＋ 입고</button>
+      <button class="btn warn grow" style="padding:16px;font-size:17px" onclick="adjustVariant('${pid}','${vid}','out')">－ 사용</button></div>
+    <details class="more"${diff!=null&&diff!==0?' open':''}><summary class="btn soft block" style="list-style:none;text-align:center">⋯ 더보기</summary><div style="margin-top:8px">
     <div class="row" style="margin-bottom:8px"><button class="btn soft grow" onclick="setPhysical('${pid}','${vid}')">📋 남은 재고 입력</button>
-      ${diff!=null&&diff!==0?`<button class="btn warn grow" onclick="reconcileVariant('${pid}','${vid}')">현재고를 남은 재고로 맞추기</button>`:''}</div>
+      ${diff!=null&&diff!==0?`<button class="btn warn grow admin-only" onclick="reconcileVariant('${pid}','${vid}')">현재고를 남은 재고로 맞추기</button>`:''}</div>
     <button class="btn soft block" style="margin-bottom:8px${reqFor('imp',pid+'|'+vid)?';color:var(--warn)':''}"
       onclick="openOrderReq('imp','${pid}|${vid}',${jarg(p.brand+' '+(p.line||'')+' '+v.label)},${jarg(p.vendor||'')},()=>openVariant('${pid}','${vid}'))">
       🛒 ${reqFor('imp',pid+'|'+vid)?`주문 필요 체크됨 · ${reqFor('imp',pid+'|'+vid).reqs.length}명`:'주문해야겠네 — 실장님께 알리기'}</button>
-    <div class="row"><button class="btn soft grow" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>
+    <div class="row admin-only"><button class="btn soft grow" onclick="openVariantForm('${pid}','${vid}')">규격 / LOT 편집</button>
       <button class="btn soft" style="color:var(--danger)" onclick="delVariant('${pid}','${vid}')">🗑 규격 제거</button></div>
-    ${ivLogsHtml(pid,vid)}`);
+    ${ivLogsHtml(pid,vid)}</div></details>`);
 }
 /* 규격 하나의 최근 입고·사용 — 잘못 넣은 것을 여기서 고친다(logFixPlan 과 같은 계산).
    케이스·명세서·페일 교환에서 들어온 기록(메모가 붙은 것)은 그 화면이 같이 맞물려 있어서
@@ -2546,7 +2570,7 @@ function ivLogsHtml(pid,vid){
   const me=currentUser(), today=todayKey();
   const any=logs.some(l=>ivFixable(l)&&logFixCan(l,me,today));
   // 2026-11-09 사용자: "연필 표시가 안 보여" — 고칠 기록이 없을 때도 어디서 숫자를 바로 고치는지 알려 준다.
-  const hint=`<div class="hint" style="margin-top:8px">✏️ 는 <b>＋ 입고 / － 사용</b> 버튼으로 넣은 기록에만 붙어요.${any?'':' 지금은 고칠 기록이 없어요.'}
+  const hint=`<div class="hint admin-only" style="margin-top:8px">✏️ 는 <b>＋ 입고 / － 사용</b> 버튼으로 넣은 기록에만 붙어요.${any?'':' 지금은 고칠 기록이 없어요.'}
     현재고 숫자를 바로 고치려면 위의 <b>규격 / LOT 편집</b> → 현재 수량, 세어 본 개수로 맞추려면 <b>📋 남은 재고 입력</b>을 쓰세요.</div>`;
   if(!logs.length) return hint;
   return `<h2 class="sec" style="margin-top:14px">최근 입고·사용</h2>
@@ -2624,8 +2648,8 @@ function adjustVariant(pid,vid,type){
     <div class="tiny muted" style="margin:-6px 2px 10px">페일(실패)도 <b>사용</b>으로 차감돼요. 보험 사용은 센 개수와 대조하도록 따로 집계됩니다.</div>` : '';
   modal(`<h3>${type==='in'?'📥 입고(매입)':'📤 사용'} · ${esc(p.brand)} ${esc(v.label)}</h3>
     <div class="tiny muted" style="margin-bottom:12px">현재고 <b>${v.qty}개</b></div>
-    <label class="field"><span>수량</span><input id="ivAmt" type="number" inputmode="numeric" value="1" style="font-size:22px;text-align:center;font-weight:800"></label>
-    <div class="row wrap" style="margin-bottom:12px">${[1,2,5,10].map(n=>`<button class="btn xs soft" onclick="ivAmt.value=${n}">${n}</button>`).join('')}</div>
+    <label class="field" style="margin-bottom:0"><span>수량</span></label>
+    ${qtyStepHtml('ivAmt',[5,10])}
     ${catRow}
     <label class="field"><span>LOT / 제조번호 (선택)</span><div class="row" style="gap:6px"><input id="ivLot" value="${esc(v.lot||'')}" style="flex:1"><button type="button" class="btn soft" onclick="lotScan(this)" title="라벨을 찍어 LOT 읽기">📷</button></div></label>
     <button class="btn ${type==='in'?'ok':'warn'} block" onclick="doVariantAdjust('${pid}','${vid}','${type}')">${type==='in'?'입고 처리':'사용 처리'}</button>`);
@@ -6407,6 +6431,7 @@ function hrEduView(){
           ${s.why?`<div class="tiny muted" style="margin-top:3px">${esc(s.why)}</div>`:''}
           <div class="lawcite" style="margin-top:5px">근거 · ${esc(it.cite)}${it.keep?` · 보관 ${esc(it.keep)}`:''}</div>
         </div>
+        <input type="checkbox" class="sw" checked aria-label="${esc(it.name)} 켜기·끄기" onchange="eduSwitch('${it.id}',this)">
       </div>
       <div class="row" style="gap:6px;margin-top:9px;flex-wrap:wrap">
         <button class="btn soft xs" onclick="openEduRec('${it.id}')">＋ 이수 기록</button>
@@ -6416,7 +6441,7 @@ function hrEduView(){
       </div></div>`;
   };
   const sec=(title, sub, list)=> list.length? `<h2 class="sec" style="margin:14px 2px 6px">${title}</h2>${sub?`<div class="hint" style="margin-bottom:8px">${sub}</div>`:''}${list.map(card).join('')}`:'';
-  const maybeOff=off.filter(it=>eduState(it).st==='maybe');
+  const maybeOff=off.filter(it=>eduState(it).st!=='no');   // 해당하는데 꺼 둔 것도 여기 남아 다시 켤 수 있다
   const noOff=off.filter(it=>eduState(it).st==='no');
   const prob=eduProblemCount(), blank=on.filter(it=>eduStatus(it).level==='none').length;
   const tone = prob?'warn' : blank?'brand' : 'ok';
@@ -6441,12 +6466,12 @@ function hrEduView(){
       ${EDU_DUTIES.map(d=>`<div style="margin-bottom:8px"><div style="font-weight:700">${esc(d[0])}</div><div class="tiny muted">${esc(d[1])}</div><div class="lawcite">근거 · ${esc(d[2])}</div></div>`).join('')}
     </div>
     ${maybeOff.length? `<h2 class="sec" style="margin:14px 2px 6px">해당되면 켜세요</h2>
-      <div class="hint" style="margin-bottom:8px">병원 사정에 따라 해당하는 교육이에요. 해당하면 ⚙︎ 를 눌러 켜세요.</div>
+      <div class="hint" style="margin-bottom:8px">병원 사정에 따라 해당하는 교육이에요. 해당하면 오른쪽 스위치를 켜세요.</div>
       ${maybeOff.map(it=>`<div class="card" style="padding:12px 14px;margin-bottom:8px">
         <div class="spread"><div class="grow"><div style="font-weight:800">${esc(it.name)}</div>
           <div class="tiny muted" style="margin-top:3px">${esc(eduState(it).why)}</div>
           <div class="lawcite" style="margin-top:4px">근거 · ${esc(it.cite)}</div></div>
-          <button class="btn soft xs" onclick="eduToggle('${it.id}',true)">켜기</button></div></div>`).join('')}`:''}
+          <input type="checkbox" class="sw" aria-label="${esc(it.name)} 켜기·끄기" onchange="eduSwitch('${it.id}',this)"></div></div>`).join('')}`:''}
     ${noOff.length? `<details style="margin:14px 2px"><summary class="tiny muted" style="cursor:pointer">해당 없는 교육 ${noOff.length}가지 보기</summary>
       ${noOff.map(it=>`<div class="tiny muted" style="margin-top:8px"><b>${esc(it.name)}</b> — ${esc(eduState(it).why)}</div>`).join('')}</details>`:''}
     <div class="tiny muted" style="margin:10px 2px">근거 조문과 확인하지 못한 것은 저장소의 <b>docs/EDUCATION_RULES.md</b> 에 적혀 있어요. 중요한 결정은 노무사나 관할 기관에 확인하세요.</div>`;
@@ -6460,6 +6485,13 @@ function eduTabSync(){
   const s=$$('#tabs button').find(x=>x.dataset.t==='staff'); if(s) s.classList.toggle('on', currentTab==='staff' && !on);
   const n = (typeof isHR==='function' && isHR())? eduProblemCount() : 0;
   const x=b.querySelector('.x'); if(x) x.innerHTML = '교육' + (n? ' <b style="color:var(--warn)">'+n+'</b>' : '');
+}
+// 스위치를 끌 때, 법으로 해당된다고 읽힌 교육이면 한 번 묻는다 — 잘못 꺼서 점검표에서 사라지는 일을 막는다
+function eduSwitch(id, el){
+  const it=eduCatalog().find(x=>x.id===id); if(!it){ return; }
+  if(!isHR()){ el.checked=!el.checked; toast('최고관리자와 인사담당자만 바꿀 수 있어요'); return; }
+  if(!el.checked && eduState(it).st==='yes' && !confirm(`${it.name}\n우리 병원에 해당하는 교육으로 보여요. 그래도 끌까요?`)){ el.checked=true; return; }
+  setTimeout(()=>eduToggle(id, el.checked), 180);   // 스위치가 넘어가는 모습을 보여 준 뒤 다시 그린다
 }
 function eduToggle(id,on){
   if(!isHR()) return; eduInit(); DB.edu.items[id]=Object.assign(DB.edu.items[id]||{},{on:!!on}); saveDB(); renderStaff();
@@ -7351,7 +7383,7 @@ function openMenu(){
     <div class="divider"></div>
     ${sechead('📍 GPS 출근 확인 (선택 · 무료)', '직원이 <b>본인 폰</b>으로 출근할 때만 병원 위치를 확인합니다. 관리자 대리 출근과 공용 키오스크에는 적용되지 않습니다.<br><br>병원 위치는 <b>병원에 계실 때</b> 저장하세요. 카톡 안에서 위치가 막히면 크롬·사파리로 열어주세요. GPS 사용에 <b>돈은 들지 않습니다.</b>')}
     <label class="field" style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
-      <input type="checkbox" id="geoOn" style="width:auto;margin:0" ${DB.geo.on?'checked':''} onchange="setGeoOn(this.checked)">
+      <input type="checkbox" id="geoOn" class="sw" ${DB.geo.on?'checked':''} onchange="setGeoOn(this.checked)">
       <span style="margin:0;font-weight:700">본인 폰 출근 때 위치 확인</span></label>
     <div class="setrow">
       <button class="btn soft sm" onclick="saveClinicLoc()">📍 현재 위치를 병원으로</button>
