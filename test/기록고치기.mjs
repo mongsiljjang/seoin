@@ -72,6 +72,7 @@ const mk=()=>{
   m.logFixApply([l],l,1,p.d,'u');
   t('임플란트 기록 후 칸이 고쳐진다', l.after===9 && l.amount===1);
   t('손으로 넣은 입고·사용만 고친다', m.ivFixable(l) && !m.ivFixable({...l,memo:'케이스 ...'}) && !m.ivFixable({...l,type:'adjust'}));
+  t('규격 처음 만들 때 넣은 "초기 등록" 입고도 고친다', m.ivFixable({...l,type:'in',memo:'초기 등록'}) && !m.ivFixable({...l,type:'in',memo:'거래명세서 · A'}));
 }
 // 권한
 { const l={type:'in',by:'s1',at:'2026-11-09T09:00:00'};

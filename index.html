@@ -2538,11 +2538,16 @@ function openVariant(pid,vid){
 /* 규격 하나의 최근 입고·사용 — 잘못 넣은 것을 여기서 고친다(logFixPlan 과 같은 계산).
    케이스·명세서·페일 교환에서 들어온 기록(메모가 붙은 것)은 그 화면이 같이 맞물려 있어서
    여기서는 고치지 않는다. 손으로 넣은 입고·사용만 고친다. 보정 기록은 화면에 내지 않는다. */
-function ivFixable(l){ return (l.type==='in'||l.type==='out') && !l.memo; }
+// '초기 등록'은 규격을 처음 만들 때 넣은 입고라 다른 화면과 안 맞물린다 — 고쳐도 된다.
+function ivFixable(l){ return (l.type==='in'||l.type==='out') && (!l.memo || l.memo==='초기 등록'); }
 function ivLogsHtml(pid,vid){
   const logs=(DB.implantLogs||[]).filter(l=>l.pid===pid && l.vid===vid && (l.type==='in'||l.type==='out')).slice(0,10);
-  if(!logs.length) return '';
   const me=currentUser(), today=todayKey();
+  const any=logs.some(l=>ivFixable(l)&&logFixCan(l,me,today));
+  // 2026-11-09 사용자: "연필 표시가 안 보여" — 고칠 기록이 없을 때도 어디서 숫자를 바로 고치는지 알려 준다.
+  const hint=`<div class="hint" style="margin-top:8px">✏️ 는 <b>＋ 입고 / － 사용</b> 버튼으로 넣은 기록에만 붙어요.${any?'':' 지금은 고칠 기록이 없어요.'}
+    현재고 숫자를 바로 고치려면 위의 <b>규격 / LOT 편집</b> → 현재 수량, 세어 본 개수로 맞추려면 <b>📋 남은 재고 입력</b>을 쓰세요.</div>`;
+  if(!logs.length) return hint;
   return `<h2 class="sec" style="margin-top:14px">최근 입고·사용</h2>
     ${logs.map(l=>`<div class="item">
       <div class="grow"><div class="t" style="font-size:14px">${l.type==='in'?`입고 ${l.amount}개`:`${esc(catKo(l.cat))} 사용 ${l.amount}개`}</div>
@@ -2550,7 +2555,7 @@ function ivLogsHtml(pid,vid){
       <div class="tiny muted">→ ${l.after}개</div>
       ${ivFixable(l)&&logFixCan(l,me,today)?`<button class="btn soft xs" onclick="openIvFix('${l.id}')" title="잘못 넣은 수량·구분 고치기">✏️</button>`:''}
     </div>`).join('')}
-    <div class="tiny muted" style="margin:6px 2px 0">케이스·거래명세서에서 들어온 기록은 그 화면에서 고쳐요.</div>`;
+    <div class="tiny muted" style="margin:6px 2px 0">케이스·거래명세서에서 들어온 기록은 그 화면에서 고쳐요.</div>${hint}`;
 }
 let ivFixCat='normal';
 function openIvFix(lid){
