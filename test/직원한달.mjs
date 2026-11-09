@@ -68,5 +68,8 @@ t('같은 시각이면 막는다', !f.attEditPlan('2026-11-03','09:00','09:00').
 t('이상한 형식은 막는다', !f.attEditPlan('2026-11-03','9시','18:00').ok);
 t('고친 시각은 그 날짜에 붙는다', new Date(p.inAt).getDate()===3);
 
+const geo=grab('geoCheckIn');
+t('GPS 출근: 직원 좌표는 저장하지 않고 거리만 남긴다', !/a\.(lat|lng)\s*=/.test(geo) && /a\.dist\s*=/.test(geo));
+
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
 if(fail) process.exit(1);

@@ -4236,7 +4236,8 @@ function geoCheckIn(id,date){
   navigator.geolocation.getCurrentPosition(pos=>{
     const dist=haversineM(g.lat,g.lng,pos.coords.latitude,pos.coords.longitude);
     if(dist > (g.radiusM||200)){ toast(`병원에서 약 ${Math.round(dist)}m 떨어져 있어요. 병원에서 출근해 주세요`); return; }
-    const a=getAtt(id,date,true); a.inAt=stampFor(date); a.lat=pos.coords.latitude; a.lng=pos.coords.longitude; a.dist=Math.round(dist);
+    // 2026-11-09: 직원 좌표(위도·경도)는 남기지 않는다 — 출근 확인에는 "병원에서 몇 m"면 충분하다(개인정보 최소 수집)
+    const a=getAtt(id,date,true); a.inAt=stampFor(date); a.dist=Math.round(dist);
     saveDB(); renderAtt(); renderHome();
     toast(`${staffById(id).name} 출근 · 병원 반경 내(${Math.round(dist)}m)`);
   }, ()=>{ toast('위치 권한이 필요해요. 크롬/사파리에서 열고 위치를 허용해 주세요'); }, {enableHighAccuracy:true, timeout:8000, maximumAge:0});
