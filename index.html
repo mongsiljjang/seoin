@@ -2118,7 +2118,7 @@ function renderImplant(){
       return `<button class="chip ${b===currentBrand?'on':''}" onclick="selectBrand(${jarg(b)})">${esc(b)}${n?'':' <span class="tiny" style="opacity:.6">없음</span>'}</button>`; }).join('')}
     <button class="chip admin-only" onclick="openImplantForm('','')">＋ 회사</button></div>`;
   // 직원 화면은 표만 — 요약·점검 상자·추가 안내는 관리자에게만(2026-11-09 "최대한 미니멀하게")
-  box.innerHTML = head+summary+`<div class="admin-only">${gapBox(DB.implants, DB.implantCases, todayKey())}${sechead('임플란트 회사', impAddGuideHtml())}</div>`+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0], true) : ''));
+  box.innerHTML = head+summary+`<div class="admin-only">${gapBox(DB.implants, DB.implantCases, todayKey(), DB.implantLogs)}${sechead('임플란트 회사', impAddGuideHtml())}</div>`+chips+(currentBrand? impTreeHtml(currentBrand, cur&&cur.id)+(cur?cardBox(cur):'') : (list[0]? cardBox(list[0], true) : ''));
   refreshBell();
 }
 // 그 제품이 들어 있는 부품 줄을 펼친다 — 고를 때만 한다(그릴 때마다 열면 접을 수가 없다)
@@ -2642,6 +2642,11 @@ function reconcileVariant(pid,vid){
   v.qty=target; bumpAdj(v,d); implantLog(pid,vid,'adjust',null,d,before,target,'재고 확인 보정');
   saveDB(); closeModal(); renderImplant(); toast(`보정 완료 · 현재고 ${target}개`);
 }
+/* ---- LOT 빠짐 경고 — 2026-11-09 사용자: "LOT 누락됐을 경우 경고창" ----
+   임플란트는 리콜·부작용 때 LOT 로 환자를 찾아야 해서 기록이 중요하다(의료기기 추적관리).
+   막지는 않는다 — 라벨이 없거나 급할 때가 있다. 대신 한 번 묻고, LOT 없이 넣은 기록은 '빠진 입력 확인'에 남긴다. */
+function lotMissing(lot){ return !String(lot==null?'':lot).trim(); }
+const LOT_WARN='LOT 번호가 비어 있어요.\n\n임플란트는 문제가 생겼을 때 LOT 로 환자를 찾아야 해요.\n📷 로 라벨을 찍으면 바로 채워져요.\n\n[취소] LOT 넣으러 가기\n[확인] LOT 없이 저장';
 let ivCat='normal';
 function adjustVariant(pid,vid,type){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid); ivCat='normal';
@@ -2653,27 +2658,36 @@ function adjustVariant(pid,vid,type){
     <label class="field" style="margin-bottom:0"><span>수량</span></label>
     ${qtyStepHtml('ivAmt',[5,10])}
     ${catRow}
-    <label class="field"><span>LOT / 제조번호 (선택)</span><div class="row" style="gap:6px"><input id="ivLot" value="${esc(v.lot||'')}" style="flex:1"><button type="button" class="btn soft" onclick="lotScan(this)" title="라벨을 찍어 LOT 읽기">📷</button></div></label>
+    <label class="field"><span>LOT / 제조번호</span><div class="row" style="gap:6px"><input id="ivLot" value="${type==='in'?'':esc(v.lot||'')}" placeholder="라벨의 LOT 번호" style="flex:1"><button type="button" class="btn soft" onclick="lotScan(this)" title="라벨을 찍어 LOT 읽기">📷</button></div></label>
+    ${type==='in'&&v.lot?`<div class="row" style="margin:-4px 0 12px"><button type="button" class="btn xs soft" onclick="ivLot.value=${jarg(v.lot)}">지난 LOT 그대로 · ${esc(v.lot)}</button></div>`:''}
     <button class="btn ${type==='in'?'ok':'warn'} block" onclick="doVariantAdjust('${pid}','${vid}','${type}')">${type==='in'?'입고 처리':'사용 처리'}</button>`);
 }
 function setIvCat(k){ ivCat=k; $$('#ivCat button').forEach(b=>b.classList.toggle('on',b.dataset.c===k)); }
 function doVariantAdjust(pid,vid,type){
   const p=implantById(pid); const v=p.variants.find(x=>x.id===vid);
   const amt=Math.abs(parseInt($('#ivAmt').value,10)||0); if(!amt){ toast('수량을 입력하세요'); return; }
+  const lot=($('#ivLot').value||'').trim();
+  if(lotMissing(lot) && !confirm(LOT_WARN)){ const el=$('#ivLot'); if(el) el.focus(); return; }
   const before=v.qty;
   if(type==='in'){ v.qty=v.qty+amt; v.inTot=(+v.inTot||0)+amt; implantLog(pid,vid,'in',null,amt,before,v.qty,''); }
   else { v.qty=Math.max(0,v.qty-amt);
     const cat=ivCat||'normal';
     if(cat==='insurance') v.uIns=(+v.uIns||0)+amt; else if(cat==='fail') v.uFail=(+v.uFail||0)+amt; else v.uNor=(+v.uNor||0)+amt;
     implantLog(pid,vid,'out',cat,amt,before,v.qty,''); }
-  const lot=($('#ivLot').value||'').trim(); if(lot) v.lot=lot;
+  DB.implantLogs[0].lot=lot;                 // 이번 입고·사용에 쓴 LOT 를 기록마다 남긴다(빈칸이면 빈칸 그대로)
+  if(lot) v.lot=lot;
   saveDB(); closeModal(); renderImplant();
   toast(`${p.brand} ${v.label} ${type==='in'?'입고':catKo(ivCat)+' 사용'} ${amt}개`);
   if(type==='out' && v.qty<=(+v.minQty||0)) setTimeout(()=>toast(`⚠️ ${v.label} ${v.qty===0?'품절':'재고 부족'} (${v.qty}개)`),1300);
 }
 function openBulkVariants(pid){
   const ax=specAxis(implantById(pid).part);
+  // 2026-11-09 사용자: "규격 일괄 추가는 파일을 올리거나 사진을 찍는 일" — 명세서 올리기(파일·사진)로 바로 가는 문을 맨 위에 둔다
   modal(`<h3>규격 일괄 추가</h3>
+    <div class="hint" style="margin-bottom:10px">거래명세서나 품목표가 있으면 <b>파일이나 사진</b>으로 올리세요. 없던 규격은 자동으로 만들어지고, 적힌 수량만큼 입고도 같이 돼요.</div>
+    <div class="row" style="gap:8px;margin-bottom:14px"><button class="btn grow" onclick="openPurchase()">📂 파일 올리기</button>
+      <button class="btn grow" onclick="openPurchase()">📷 사진 찍기</button></div>
+    <div class="sechead" style="margin:0 2px 6px"><span>✍️ 직접 입력</span></div>
     <div class="tiny muted" style="margin-bottom:12px">${ax.b}와 ${ax.s}를 쉼표로 나눠 적으면 조합이 한 번에 만들어져요. ×는 안 쳐도 돼요. (이미 있는 규격은 건너뜀)</div>
     <label class="field"><span>${ax.b}(mm)</span><input id="blD" inputmode="decimal" placeholder="3.5, 4.0, 4.5, 5.0"></label>
     <label class="field"><span>${ax.s}(mm)</span><input id="blL" inputmode="decimal" placeholder="7, 8.5, 10, 11.5, 13"></label>
@@ -3280,7 +3294,7 @@ function insCheckBox(cases, today){
    홈에는 안 내고, 숫자를 빨갛게 세지 않고, '오차'가 아니라 '할 일' 말투로 쓴다.
    판정이 아니라 알림이다. 순수 함수 — DB 를 읽기만 한다. */
 const GAP_COUNT_DAYS=30;                       // 남은 재고를 센 지 이만큼 지나면 다시 세어 보자고 알린다
-function inputGaps(implants, cases, today){
+function inputGaps(implants, cases, today, logs){
   const T=insDayN(today), out=[];
   const list=implants||[];
   const short=[], stale=[];
@@ -3307,10 +3321,15 @@ function inputGaps(implants, cases, today){
   }));
   if(missing.size) out.push({code:'noSpec', kind:'케이스', text:`케이스에 적었는데 재고 목록에 없는 규격이 ${missing.size}개 있어요 (${[...missing].slice(0,3).join(', ')}${missing.size>3?' 외':''}) — 재고에서 안 빠지고 있어요`});
   if(blank) out.push({code:'blankTooth', kind:'케이스', text:`고정체·힐링·지대주가 모두 빈 치아 줄이 ${blank}개 있어요`});
+  // LOT 빠짐: 고정체는 적었는데 LOT 가 빈 치아 / LOT 없이 넣은 입고·사용 기록(LOT 칸이 생긴 뒤의 기록만 센다)
+  let caseNoLot=0; (cases||[]).forEach(c=>(c.teeth||[]).forEach(t=>{ if(String(t.fx||'').trim() && lotMissing(t.lot)) caseNoLot++; }));
+  if(caseNoLot) out.push({code:'caseNoLot', kind:'LOT', text:`고정체를 적었는데 LOT 가 빈 치아가 ${caseNoLot}개 있어요 — 케이스를 열어 LOT 를 채워 주세요`});
+  const logNoLot=(logs||[]).filter(l=>(l.type==='in'||l.type==='out') && 'lot' in l && lotMissing(l.lot)).length;
+  if(logNoLot) out.push({code:'logNoLot', kind:'LOT', text:`LOT 없이 넣은 입고·사용 기록이 ${logNoLot}건 있어요`});
   return out;
 }
-function gapBox(implants, cases, today){
-  const g=inputGaps(implants,cases,today);
+function gapBox(implants, cases, today, logs){
+  const g=inputGaps(implants,cases,today,logs);
   if(!g.length) return `<div class="tiny" style="margin:0 2px 10px;color:var(--ok);font-weight:800">✓ 빠진 입력이 보이지 않아요</div>`;
   return `<div class="card" style="padding:12px 14px;margin-bottom:10px">
       <div class="spread" style="margin-bottom:6px"><b style="font-size:14.5px">📝 빠진 입력 확인</b><span class="tiny muted">${g.length}가지</span></div>
@@ -4145,6 +4164,8 @@ function saveCase(id){
   if(!chart && !$('#lcName').value.trim()){ toast('차트번호나 이름 중 하나는 적어 주세요'); return; }
   if(!lcSel.length){ toast('심은 치아를 골라주세요'); return; }
   if(!$('#lcD1').value){ toast('1차 수술일을 입력하세요'); return; }
+  const noLot=lcSel.filter(n=>{ const t=lcTeeth[n]||{}; return String(t.fx||'').trim() && lotMissing(t.lot); });
+  if(noLot.length && !confirm(`${noLot.map(n=>'#'+n).join(', ')} 고정체의 `+LOT_WARN)) return;
   const data={ chart, pname:maskName($('#lcName').value),   // 이름 원본은 저장하지 않는다
     birth:$('#lcBirth').value.trim(), insur:$('#lcIns').value, d0:$('#lcD0').value, d1:$('#lcD1').value, d2:$('#lcD2').value, d3:$('#lcD3').value,
     memo:$('#lcMemo').value.trim(),

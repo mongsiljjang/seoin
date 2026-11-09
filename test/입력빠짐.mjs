@@ -15,7 +15,7 @@ function grab(name){
 let pass=0, fail=0;
 const ok=(name,got,want)=>{ const y=JSON.stringify(got)===JSON.stringify(want); y?pass++:fail++;
   console.log(`${y?'✅':'❌'} ${name}${y?'':`  — ${JSON.stringify(want)} 여야 하는데 ${JSON.stringify(got)}`}`); };
-const names=['vUse','vOpen','exIn','insDayN','findVar','inputGaps','gapBox'];
+const names=['vUse','vOpen','exIn','insDayN','findVar','lotMissing','inputGaps','gapBox'];
 const make=(DB)=>new Function('DB','esc', `const GAP_COUNT_DAYS=30;\n${names.map(grab).join('\n')}\nreturn {inputGaps,gapBox};`)(DB, s=>String(s));
 const V=(o)=>({id:'v', label:'4.0×12', qty:5, inTot:0, uNor:0,uIns:0,uFail:0, ...o});
 const run=(variants,cases)=>{ const DB={implants:[{id:'p',brand:'오스템',variants}]}; return make(DB).inputGaps(DB.implants,cases||[], '2026-10-12').map(i=>i.code); };
@@ -28,8 +28,12 @@ ok('센 지 30일 넘으면 재고 확인', run([V({inTot:10,physAt:'2026-09-01'
 ok('29일은 아직', run([V({inTot:10,physAt:'2026-09-13'})]), []);
 ok('한 번도 안 셌으면 따로', run([V({inTot:10})]), ['countNone']);
 ok('재고도 사용도 0이면 세라고 안 함', run([V({qty:0})]), []);
-ok('재고 목록에 없는 규격', run([V({inTot:10,physAt:'2026-10-10'})],[{teeth:[{fx:'9.9×99'}]}]), ['noSpec']);
-ok('있는 규격은 통과', run([V({inTot:10,physAt:'2026-10-10'})],[{teeth:[{fx:'4.0×12'}]}]), []);
+ok('재고 목록에 없는 규격', run([V({inTot:10,physAt:'2026-10-10'})],[{teeth:[{fx:'9.9×99',lot:'L1'}]}]), ['noSpec']);
+ok('있는 규격은 통과', run([V({inTot:10,physAt:'2026-10-10'})],[{teeth:[{fx:'4.0×12',lot:'L1'}]}]), []);
+ok('고정체를 적었는데 LOT 가 비면 LOT 확인', run([V({inTot:10,physAt:'2026-10-10'})],[{teeth:[{fx:'4.0×12'},{fx:'4.0×12',lot:' '}]}]), ['caseNoLot']);
+{ const DB={implants:[{id:'p',brand:'오스템',variants:[V({inTot:10,physAt:'2026-10-10'})]}]};
+  const logs=[{type:'out',lot:''},{type:'in',lot:'A1'},{type:'out'},{type:'adjust',lot:''}];
+  ok('LOT 없이 넣은 입고·사용 기록만 센다(LOT 칸 생기기 전 기록·보정은 빼고)', make(DB).inputGaps(DB.implants,[], '2026-10-12', logs).map(i=>i.code+':'+(i.text.match(/(\d+)건/)||[])[1]), ['logNoLot:1']); }
 ok('빈 치아 줄', run([V({inTot:10,physAt:'2026-10-10'})],[{teeth:[{fdi:'36'}]}]), ['blankTooth']);
 { const DB={implants:[]}; const f=make(DB);
   ok('없으면 안심 문구', f.gapBox([],[], '2026-10-12').includes('빠진 입력이 보이지 않아요'), true);

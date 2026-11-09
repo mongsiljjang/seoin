@@ -54,5 +54,15 @@ t('불편 신고는 공용 문서에 담겨 직원도 쓸 수 있다', /const B_
 t('불편 신고 버튼이 직원 설정·관리자 설정 둘 다에 있다', grab('openStaffMenu').includes('openFeedback()') && grab('openMenu').includes('openFeedbackList()'));
 t('불편 신고 칸에 환자 정보 쓰지 말라는 안내', grab('openFeedback').includes('환자 이름·연락처는 적지 마세요'));
 
+// LOT 빠짐 경고 (2026-11-09 "LOT 누락됐을 경우 경고창")
+const { lotMissing } = new Function(`${grab('lotMissing')}\nreturn {lotMissing};`)();
+t('LOT 빈칸·공백만 있으면 빠진 것', lotMissing('') && lotMissing('  ') && lotMissing(null) && !lotMissing('A123'));
+const dva=grab('doVariantAdjust');
+t('임플란트 입고·사용: LOT 가 비면 경고창, 취소하면 LOT 칸으로', dva.includes('lotMissing(lot) && !confirm(LOT_WARN)') && dva.includes("$('#ivLot')") && dva.indexOf('confirm(LOT_WARN)') < dva.indexOf('const before=v.qty'));
+t('입고·사용 기록마다 쓴 LOT 를 남긴다', dva.includes('DB.implantLogs[0].lot=lot'));
+t('입고 때 LOT 칸은 비어서 열린다(지난 LOT 를 그대로 쓰는 실수 방지) · 지난 LOT 버튼은 따로', grab('adjustVariant').includes("value=\"${type==='in'?'':esc(v.lot||'')}\"") && grab('adjustVariant').includes('지난 LOT 그대로'));
+t('케이스 저장: 고정체 LOT 가 비면 경고창', grab('saveCase').includes('confirm(`${noLot.map(n=>\'#\'+n).join(\', \')} 고정체의 `+LOT_WARN)'));
+t('규격 일괄추가 창에 파일 올리기·사진 찍기 문', (b=>b.includes('📂 파일 올리기') && b.includes('📷 사진 찍기') && b.includes('openPurchase()'))(grab('openBulkVariants')));
+
 console.log(`\n${pass} 통과 / ${fail} 실패\n`);
 if(fail) process.exit(1);
